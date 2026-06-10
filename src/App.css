@@ -1,0 +1,10 @@
+:root {
+  font-family: Inter, system-ui, sans-serif;
+  color: #fcfdff;
+  background-color: #000000;
+}
+
+.app {
+  min-height: 100vh;
+  margin: 0;
+}

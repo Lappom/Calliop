@@ -1,0 +1,51 @@
+---
+description: Audio pipeline architecture and module responsibilities
+globs: src-tauri/src/**/*.rs
+alwaysApply: false
+---
+
+# Audio pipeline architecture
+
+Calliop processes voice dictation through a linear pipeline orchestrated in `pipeline/`.
+
+## Flow
+
+```
+Hotkey (toggle ON)
+  -> AudioCapture (PCM 16 kHz mono)
+  -> VAD (optional, Phase 2+)
+Hotkey (toggle OFF) or end of utterance
+  -> WhisperEngine (stt/)
+  -> LLMEngine (llm/, optional Phase 3+)
+  -> TextInjector (inject/)
+  -> SQLiteStore (store/, history)
+```
+
+## Module responsibilities
+
+| Module | Path | Role |
+|--------|------|------|
+| hotkey | `hotkey/` | Global shortcut (default Alt+Espace toggle) |
+| audio | `audio/` | Micro capture via cpal, buffer management |
+| stt | `stt/` | Local transcription (whisper.cpp / whisper-rs) |
+| llm | `llm/` | Post-processing auto-edits (llama.cpp, Phase 3+) |
+| inject | `inject/` | Paste/type into foreground app (enigo + clipboard fallback) |
+| store | `store/` | SQLite: config, dictionary, snippets, history |
+| pipeline | `pipeline/` | Orchestration, state machine, IPC bridge to frontend |
+
+## IPC (Tauri commands)
+
+- Frontend (React) handles overlay, settings, onboarding — no heavy ML in the webview.
+- Rust core exposes commands for start/stop dictation, settings read/write, history queries.
+- Keep command payloads small; stream status events to the overlay.
+
+## Inference backend
+
+- CPU is the default path (16 GB RAM target, no dedicated GPU required).
+- Optional CUDA/Vulkan on Windows when available — never block on GPU.
+
+## Phase scope
+
+- Phase 1: hotkey -> audio -> stt -> inject (no LLM, no VAD)
+- Phase 2: VAD, streaming, overlay, tray menu
+- Phase 3: LLM, dictionary, snippets, app context

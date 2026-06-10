@@ -1,0 +1,33 @@
+---
+description: 100% offline constraint for core functionality
+globs: "**/*"
+alwaysApply: true
+---
+
+# Offline-first constraint
+
+Calliop core MUST work without any cloud service.
+
+## Forbidden in core paths
+
+- HTTP calls for STT, LLM, or text processing during dictation
+- Telemetry or analytics SDKs phoning home
+- Hard dependency on OAuth / SaaS APIs for basic dictation
+
+## Allowed network usage
+
+- **Model download** on first launch (Phase 1+): GitHub Releases primary, Hugging Face fallback
+- **App updates** (Phase 4, optional, user-disableable)
+- **Documentation links** opened explicitly by the user (e.g. plugin-opener)
+
+## Implementation rules
+
+- Do not add `reqwest` or similar to hot paths without explicit phase approval.
+- Model files live in app data dir, not bundled in the installer (except dev fixtures).
+- Settings sync is local-only (SQLite) — no cloud account in v1.
+- When adding a dependency, verify it does not pull in unwanted network behavior at runtime.
+
+## Testing
+
+- Core module tests must pass with network disabled.
+- CI should not require external API keys for build or unit tests.

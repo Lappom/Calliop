@@ -1,0 +1,33 @@
+---
+description: Rust and TypeScript coding conventions for Calliop
+globs: "{src-tauri/**,src/**}"
+alwaysApply: false
+---
+
+# Rust / TypeScript conventions
+
+## Rust (`src-tauri/`)
+
+- One domain per module: `audio`, `stt`, `llm`, `inject`, `hotkey`, `store`, `pipeline`.
+- Public APIs return `Result<T, E>` — avoid panics in library code.
+- Comments in **English**; explain non-obvious business logic only.
+- Use `cargo fmt` and `cargo clippy -- -D warnings` before committing.
+- Prefer `thiserror` for error types when modules grow (Phase 1+).
+- Binary CLIs for module testing: `cargo run --bin test-audio` (Phase 1+).
+
+## TypeScript (`src/`)
+
+- React function components; hooks in `src/hooks/`, shared utils in `src/lib/`.
+- UI strings in **French** (v1).
+- No STT/LLM logic in the webview — call Tauri commands instead.
+- Keep components presentational; state for settings/history via hooks + IPC.
+
+## Naming
+
+- Rust: `snake_case` modules/functions, `PascalCase` types.
+- TS: `PascalCase` components, `camelCase` functions/variables, `useX` for hooks.
+
+## Files
+
+- Do not create barrel exports unless a folder has 5+ public symbols.
+- Match existing formatting; do not reformat unrelated code in a PR.

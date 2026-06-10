@@ -1,0 +1,48 @@
+---
+description: Testing strategy per module
+globs: "**/*"
+alwaysApply: false
+---
+
+# Testing strategy
+
+## Phase 0 (current)
+
+- Rust: unit smoke tests per module (`module_name()` or minimal logic).
+- Integration test in `lib.rs` wiring all modules.
+- CI: `cargo test`, `cargo fmt --check`, `cargo clippy`.
+- Frontend: `pnpm typecheck`, `pnpm lint` — no E2E yet.
+
+## Phase 1+
+
+Add CLI binaries for isolated manual testing:
+
+```bash
+cargo run --bin test-audio -- record 3s output.wav
+cargo run --bin test-stt -- input.wav
+cargo run --bin test-inject -- "Hello world"
+```
+
+Each module ships tests in `mod.rs` or `tests/` subdirectory.
+
+## What to test where
+
+| Module | Unit | CLI | Integration |
+|--------|------|-----|-------------|
+| audio | buffer format, sample rate | record/play WAV | pipeline start/stop |
+| stt | prompt building | transcribe file | end-to-end FR phrase |
+| inject | clipboard restore logic | paste to Notepad | hotkey -> inject |
+| hotkey | key mapping parse | register/unregister | toggle dictation |
+| store | CRUD, migrations | dump config | history roundtrip |
+| pipeline | state transitions | — | full dictation path |
+
+## CI expectations
+
+- All unit tests pass on Ubuntu (fast feedback).
+- `tauri build` matrix on Windows, macOS, Linux (compile-only).
+- No flaky network-dependent tests in default CI.
+
+## Anti-patterns
+
+- Do not skip tests for "stub" modules — keep smoke tests until real logic lands.
+- Do not add Playwright/Cypress in Phase 0–1; manual Notepad test is the Phase 1 done criteria.
