@@ -369,7 +369,6 @@ pub fn show_overlay(app: &AppHandle) {
     }
 
     let _ = overlay.show();
-    let _ = overlay.set_focus();
 }
 
 pub fn hide_overlay(app: &AppHandle) {

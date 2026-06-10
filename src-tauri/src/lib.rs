@@ -324,9 +324,6 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
         .run(|app, event| match event {
-            RunEvent::ExitRequested { api, .. } => {
-                api.prevent_exit();
-            }
             RunEvent::Ready => {
                 sync_autostart_menu(app);
             }

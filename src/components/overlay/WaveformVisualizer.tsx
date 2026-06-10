@@ -35,7 +35,7 @@ export function WaveformVisualizer({ state, level }: WaveformVisualizerProps) {
               .filter(Boolean)
               .join(" ")}
             style={{
-              height: `${Math.round(wave * 100)}%`,
+              height: `${Math.round(Math.min(1, wave) * 100)}%`,
               animationDelay: isRecording ? `${i * 0.08}s` : undefined,
             }}
           />
