@@ -42,7 +42,10 @@ export function DictationOverlay() {
             </div>
           </div>
           {partialTranscript && (
-            <p className="truncate text-caption text-charcoal">
+            <p
+              className="truncate text-caption text-charcoal"
+              aria-hidden="true"
+            >
               {partialTranscript}
             </p>
           )}

@@ -86,6 +86,10 @@ struct StreamingSidecar {
 
 impl StreamingSidecar {
     fn push_chunk(&self, chunk: &[f32]) {
+        if self.chunk_tx.is_none() && self.level_tx.is_none() {
+            return;
+        }
+
         let mut state = self.resample_state.lock().expect("resample lock");
         state.push_chunk(chunk);
         let delta = state.drain_delta();
@@ -109,6 +113,10 @@ impl StreamingSidecar {
     }
 
     fn flush(&self) {
+        if self.chunk_tx.is_none() {
+            return;
+        }
+
         let mut state = self.resample_state.lock().expect("resample lock");
         let delta = state.drain_remainder();
         drop(state);

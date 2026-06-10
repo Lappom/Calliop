@@ -194,6 +194,8 @@ impl PipelineOrchestrator {
 
         let samples = self.audio.stop()?;
 
+        let stt_start = Instant::now();
+
         if let Some(session) = self.streaming.take() {
             session.stop_flag.store(true, Ordering::SeqCst);
             if let Some(worker) = session.worker {
@@ -206,7 +208,6 @@ impl PipelineOrchestrator {
 
         self.set_state(app, PipelineState::Transcribing, None);
 
-        let stt_start = Instant::now();
         let mut transcripts = self.segment_transcripts.lock().clone();
 
         // Fallback: if VAD produced no segments, transcribe the full buffer.
@@ -285,7 +286,7 @@ fn streaming_worker(
     let orchestrator_state = transcripts;
     let mut segment_index = 0_u32;
 
-    while !stop_flag.load(Ordering::SeqCst) {
+    loop {
         match chunk_rx.recv_timeout(std::time::Duration::from_millis(100)) {
             Ok(chunk) => {
                 let segments = match vad.push(&chunk) {
@@ -300,7 +301,11 @@ fn streaming_worker(
                     segment_index += 1;
                 }
             }
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                if stop_flag.load(Ordering::SeqCst) {
+                    break;
+                }
+            }
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
         }
     }

@@ -1,3 +1,9 @@
+---
+description: Audio pipeline architecture and module responsibilities
+globs: src-tauri/src/**/*.rs
+alwaysApply: false
+---
+
 # Audio pipeline architecture
 
 Calliop processes voice dictation through a linear pipeline orchestrated in `pipeline/`.
