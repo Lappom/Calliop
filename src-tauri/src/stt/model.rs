@@ -49,7 +49,9 @@ pub enum ModelError {
     Download { url: String, message: String },
     #[error("all download sources failed")]
     AllSourcesFailed,
-    #[error("downloaded model is too small ({size} bytes, expected >= {EXPECTED_MODEL_MIN_BYTES})")]
+    #[error(
+        "downloaded model is too small ({size} bytes, expected >= {EXPECTED_MODEL_MIN_BYTES})"
+    )]
     ModelTooSmall { size: u64 },
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
@@ -168,9 +170,7 @@ async fn try_download(
 
     file.flush().await?;
 
-    let size = std::fs::metadata(dest)
-        .map_err(ModelError::Io)?
-        .len();
+    let size = std::fs::metadata(dest).map_err(ModelError::Io)?.len();
     if size < EXPECTED_MODEL_MIN_BYTES {
         return Err(ModelError::ModelTooSmall { size });
     }
