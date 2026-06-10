@@ -21,6 +21,8 @@ Add CLI binaries for isolated manual testing:
 cargo run --bin test-audio -- record 3s output.wav
 cargo run --bin test-stt -- input.wav
 cargo run --bin test-inject -- "Hello world"
+cargo run --bin test-llm -- "euh bonjour donc voilà"
+cargo build --features llm-worker --bin calliop-llm-worker
 ```
 
 Each module ships tests in `mod.rs` or `tests/` subdirectory.
@@ -31,6 +33,7 @@ Each module ships tests in `mod.rs` or `tests/` subdirectory.
 |--------|------|-----|-------------|
 | audio | buffer format, sample rate | record/play WAV | pipeline start/stop |
 | stt | prompt building | transcribe file | end-to-end FR phrase |
+| llm | prompt validation, settings CRUD | test-llm (sidecar) | auto-edit toggle + fallback |
 | inject | clipboard restore logic | paste to Notepad | hotkey -> inject |
 | hotkey | key mapping parse | register/unregister | toggle dictation |
 | store | CRUD, migrations | dump config | history roundtrip |

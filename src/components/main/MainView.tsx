@@ -94,9 +94,12 @@ export function MainView({
                   Latence (debug)
                 </p>
                 <p className="text-body-sm m-0 font-mono text-ink">
-                  STT {latencyMetrics.sttMs} ms · injection{" "}
-                  {latencyMetrics.injectMs} ms · total {latencyMetrics.totalMs}{" "}
-                  ms
+                  STT {latencyMetrics.sttMs} ms
+                  {latencyMetrics.llmMs > 0
+                    ? ` · LLM ${latencyMetrics.llmMs} ms`
+                    : ""}{" "}
+                  · injection {latencyMetrics.injectMs} ms · total{" "}
+                  {latencyMetrics.totalMs} ms
                 </p>
               </div>
             )}

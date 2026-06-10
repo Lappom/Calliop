@@ -55,7 +55,10 @@ jobs:
             libwebkit2gtk-4.1-dev \
             libayatana-appindicator3-dev \
             librsvg2-dev \
-            patchelf
+            patchelf \
+            cmake \
+            clang \
+            libclang-dev
 
       - name: Check formatting
         run: cargo fmt --check
@@ -100,7 +103,20 @@ jobs:
             libwebkit2gtk-4.1-dev \
             libayatana-appindicator3-dev \
             librsvg2-dev \
-            patchelf
+            patchelf \
+            cmake \
+            clang \
+            libclang-dev
+
+      - name: Prepare LLM sidecar (Windows)
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: ./scripts/prepare-llm-sidecar.ps1
+
+      - name: Prepare LLM sidecar (Linux)
+        if: matrix.platform == 'ubuntu-latest'
+        working-directory: src-tauri
+        run: bash ../scripts/prepare-llm-sidecar.sh
 
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile

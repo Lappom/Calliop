@@ -1,8 +1,10 @@
 import { useState } from "react";
+import { useSettings } from "../../hooks/useSettings";
 import { BadgePill } from "../ui/BadgePill";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { Kbd } from "../ui/Kbd";
+import { ProgressBar } from "../ui/ProgressBar";
 import { TextInput } from "../ui/TextInput";
 
 type SettingsTab = "general" | "models" | "shortcuts" | "advanced";
@@ -16,14 +18,21 @@ const tabs: { id: SettingsTab; label: string }[] = [
 
 export function SettingsView() {
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
-  const [autoEdit, setAutoEdit] = useState(false);
+  const {
+    settings,
+    loaded,
+    saving,
+    errorMessage,
+    llmProgress,
+    setAutoEdit,
+  } = useSettings();
 
   return (
     <div className="flex flex-col gap-8">
       <header>
         <h1 className="text-heading-md mb-2 text-ink">Réglages</h1>
         <p className="text-body-sm text-charcoal">
-          Configurez Calliop selon vos préférences (aperçu — non persisté).
+          Les réglages sont enregistrés localement sur cet appareil.
         </p>
       </header>
 
@@ -72,14 +81,31 @@ export function SettingsView() {
             <span className="text-body-md text-ink">Auto-edits IA</span>
             <input
               type="checkbox"
-              checked={autoEdit}
-              onChange={(e) => setAutoEdit(e.target.checked)}
-              className="size-4 rounded-sm border border-hairline-strong bg-surface-card accent-accent-blue"
+              checked={settings.autoEdit}
+              disabled={!loaded || saving}
+              onChange={(e) => {
+                void setAutoEdit(e.target.checked);
+              }}
+              className="size-4 rounded-sm border border-hairline-strong bg-surface-card accent-accent-blue disabled:opacity-50"
             />
           </label>
+
           <p className="text-caption text-ash">
-            Nettoie automatiquement fillers et ponctuation (Phase 3).
+            {settings.autoEdit
+              ? "Nettoie fillers, ponctuation et reformulation légère via un modèle local."
+              : "Mode verbatim : la transcription brute est injectée sans post-traitement LLM."}
           </p>
+
+          {settings.autoEdit && llmProgress !== null && (
+            <ProgressBar
+              value={llmProgress}
+              label="Téléchargement du modèle LLM (Qwen3 1.7B Instruct)"
+            />
+          )}
+
+          {errorMessage && (
+            <p className="text-body-sm text-accent-red">{errorMessage}</p>
+          )}
         </Card>
       )}
 
@@ -120,15 +146,17 @@ export function SettingsView() {
         <Card variant="bordered" className="space-y-4 p-6">
           <p className="text-body-md text-ink">Options avancées</p>
           <p className="text-caption text-ash">
-            Latence debug, démarrage automatique, verbatim mode — Phase 4.
+            Latence debug, démarrage automatique — Phase 4.
           </p>
         </Card>
       )}
 
       <footer className="flex flex-wrap items-center justify-between gap-4 border-t border-divider-soft pt-6">
-        <Button variant="ghost">Réinitialiser</Button>
+        <Button variant="ghost" disabled>
+          Réinitialiser
+        </Button>
         <Button variant="primary" disabled>
-          Enregistrer
+          {saving ? "Enregistrement…" : "Enregistrement automatique"}
         </Button>
       </footer>
     </div>

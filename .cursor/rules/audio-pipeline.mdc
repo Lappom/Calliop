@@ -18,8 +18,9 @@ Hotkey (toggle ON / push-to-talk hold)
   -> partial-transcript events -> Overlay
 Hotkey OFF / release (toggle or PTT)
   -> flush VAD tail + concat segments
+  -> optional LlamaEngine cleanup (sidecar process, 4s timeout, fallback raw)
   -> TextInjector (inject/)
-  -> latency-metrics event
+  -> latency-metrics event (sttMs, llmMs, injectMs, totalMs)
 ```
 
 ## Module responsibilities
@@ -29,16 +30,25 @@ Hotkey OFF / release (toggle or PTT)
 | hotkey | `hotkey/` | Global shortcut (Alt+Espace hybrid toggle/PTT) |
 | audio | `audio/` | Micro capture via cpal, VAD segmentation |
 | stt | `stt/` | Local transcription (whisper.cpp / whisper-rs) |
-| llm | `llm/` | Post-processing auto-edits (llama.cpp, Phase 3+) |
+| llm | `llm/` | Post-processing auto-edits via `calliop-llm-worker` sidecar (llama.cpp) |
 | inject | `inject/` | Paste/type into foreground app (enigo + clipboard fallback) |
-| store | `store/` | SQLite: config, dictionary, snippets, history |
+| store | `store/` | SQLite: config (`auto_edit`), dictionary, snippets, history |
 | pipeline | `pipeline/` | Orchestration, state machine, IPC bridge to frontend |
+
+## LLM sidecar (Phase 3a)
+
+- Main binary links **whisper-rs only** — no `llama-cpp-2` in-process (ggml symbol conflict).
+- Sidecar binary: `calliop-llm-worker` (feature `llm-worker`), spawned on `ensure_llm_model`.
+- Model: Qwen3 1.7B Instruct Q4_K_M GGUF, lazy download when `auto_edit` is enabled.
+- Verbatim mode: `auto_edit = false` in SQLite — inject raw Whisper transcript.
+- Dev: `pnpm tauri:dev` builds the sidecar via `scripts/dev.ps1`.
 
 ## IPC (Tauri commands)
 
 - Frontend (React) handles overlay, settings, onboarding — no heavy ML in the webview.
 - Rust core exposes commands for start/stop dictation, settings read/write, history queries.
-- Events: `pipeline-state`, `partial-transcript`, `audio-level`, `latency-metrics`.
+- Commands: `get_settings`, `set_settings`, `ensure_llm_model`
+- Events: `pipeline-state`, `partial-transcript`, `audio-level`, `latency-metrics`, `llm-model-download-progress`, `llm-ready`
 
 ## Inference backend
 
@@ -51,4 +61,4 @@ Hotkey OFF / release (toggle or PTT)
 - Phase 2: Silero VAD, streaming by segments, overlay, tray menu, autostart, latency debug
 - STT: **whisper-rs 0.16**, persistent `WhisperEngine`, modèle `ggml-small.bin`, langue `fr`
 - Audio capture runs on a dedicated thread (`cpal` streams are !Send)
-- Phase 3: LLM, dictionary, snippets, app context
+- Phase 3a: LLM auto-edits via sidecar, SQLite `auto_edit` toggle

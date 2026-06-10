@@ -14,6 +14,8 @@ use parking_lot::Mutex;
 use pipeline::{
     spawn_start, spawn_stop, spawn_toggle, PipelineOrchestrator, PipelineState, PipelineStateEvent,
 };
+use serde::{Deserialize, Serialize};
+use store::{AppSettings, Store};
 use tauri::{
     menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -49,8 +51,16 @@ struct TrayHandles {
 struct AppState {
     pipeline: Arc<Mutex<PipelineOrchestrator>>,
     whisper_engine: Arc<Mutex<Option<stt::WhisperEngine>>>,
+    llm_engine: Arc<Mutex<Option<llm::LlamaEngine>>>,
+    store: Arc<Store>,
     model_ready: AtomicBool,
+    llm_ready: AtomicBool,
     hotkey_press: Mutex<HotkeyPressState>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SettingsPayload {
+    auto_edit: bool,
 }
 
 const MENU_OPEN: &str = "open";
@@ -66,6 +76,67 @@ fn get_pipeline_state(state: State<'_, AppState>) -> String {
 #[tauri::command]
 fn toggle_dictation(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     spawn_toggle(app.clone(), state.pipeline.clone());
+    Ok(())
+}
+
+#[tauri::command]
+fn get_settings(state: State<'_, AppState>) -> Result<SettingsPayload, String> {
+    let settings = state.store.load_settings().map_err(|e| e.to_string())?;
+    Ok(SettingsPayload {
+        auto_edit: settings.auto_edit,
+    })
+}
+
+#[tauri::command]
+async fn set_settings(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    settings: SettingsPayload,
+) -> Result<(), String> {
+    state
+        .store
+        .save_settings(&AppSettings {
+            auto_edit: settings.auto_edit,
+        })
+        .map_err(|e| e.to_string())?;
+
+    state.pipeline.lock().set_auto_edit(settings.auto_edit);
+
+    if settings.auto_edit {
+        ensure_llm_model(app, state).await?;
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn ensure_llm_model(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    if state.llm_ready.load(Ordering::SeqCst) {
+        return Ok(());
+    }
+
+    let app_for_download = app.clone();
+    let _model_path = tauri::async_runtime::spawn_blocking(move || {
+        llm::ensure_llm_model_blocking(Some(&app_for_download))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
+
+    let engine = tauri::async_runtime::spawn_blocking(llm::LlamaEngine::start)
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
+
+    {
+        let mut llm = state.llm_engine.lock();
+        *llm = Some(engine);
+        let mut pipeline = state.pipeline.lock();
+        pipeline.set_llm_engine(Arc::clone(&state.llm_engine));
+    }
+
+    state.llm_ready.store(true, Ordering::SeqCst);
+    let _ = app.emit("llm-ready", ());
     Ok(())
 }
 
@@ -268,6 +339,14 @@ pub fn run() {
     let pipeline = Arc::new(Mutex::new(
         PipelineOrchestrator::new().expect("failed to initialize pipeline orchestrator"),
     ));
+    let store = Arc::new(Store::open().expect("failed to open settings store"));
+    let initial_settings = store
+        .load_settings()
+        .expect("failed to load initial settings");
+    pipeline.lock().set_auto_edit(initial_settings.auto_edit);
+
+    let whisper_engine = Arc::new(Mutex::new(None));
+    let llm_engine = Arc::new(Mutex::new(None));
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -284,8 +363,11 @@ pub fn run() {
         )
         .manage(AppState {
             pipeline: pipeline.clone(),
-            whisper_engine: Arc::new(Mutex::new(None)),
+            whisper_engine: whisper_engine.clone(),
+            llm_engine: llm_engine.clone(),
+            store,
             model_ready: AtomicBool::new(false),
+            llm_ready: AtomicBool::new(false),
             hotkey_press: Mutex::new(HotkeyPressState {
                 press_start: None,
                 was_idle_on_press: false,
@@ -326,22 +408,34 @@ pub fn run() {
                 }
             });
 
+            if initial_settings.auto_edit {
+                let app_handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let state = app_handle.state::<AppState>();
+                    if let Err(err) = ensure_llm_model(app_handle.clone(), state).await {
+                        eprintln!("llm model initialization failed: {err}");
+                    }
+                });
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             get_pipeline_state,
             toggle_dictation,
             ensure_model,
+            ensure_llm_model,
+            get_settings,
+            set_settings,
             is_autostart_enabled,
             set_autostart_enabled
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
-        .run(|app, event| match event {
-            RunEvent::Ready => {
+        .run(|app, event| {
+            if let RunEvent::Ready = event {
                 sync_autostart_menu(app);
             }
-            _ => {}
         });
 }
 
