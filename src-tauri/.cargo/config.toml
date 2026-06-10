@@ -1,0 +1,4 @@
+[env]
+# whisper-rs-sys invokes cmake during build. CMake 4.x is required for VS 18 toolchains.
+# From repo root, use: pnpm tauri:dev  (runs scripts/dev.ps1 which adds CMake to PATH)
+# Manual install: winget install Kitware.CMake  — then restart the terminal

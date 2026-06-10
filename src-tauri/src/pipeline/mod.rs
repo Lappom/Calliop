@@ -1,5 +1,11 @@
 //! Pipeline orchestration across capture, STT, LLM, and injection (Phase 1+).
 
+mod orchestrator;
+
+pub use orchestrator::{
+    spawn_toggle, PipelineError, PipelineOrchestrator, PipelineState, PipelineStateEvent,
+};
+
 pub fn module_name() -> &'static str {
     "pipeline"
 }

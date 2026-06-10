@@ -47,5 +47,7 @@ Hotkey (toggle OFF) or end of utterance
 ## Phase scope
 
 - Phase 1: hotkey -> audio -> stt -> inject (no LLM, no VAD)
+- STT: **whisper-rs 0.16** (whisper.cpp bindings), CPU-only, modèle `ggml-small.bin`, langue `fr`
+- Audio capture runs on a dedicated thread (`cpal` streams are !Send)
 - Phase 2: VAD, streaming, overlay, tray menu
 - Phase 3: LLM, dictionary, snippets, app context

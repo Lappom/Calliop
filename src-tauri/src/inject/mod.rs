@@ -1,5 +1,9 @@
 //! Text injection into the active application (Phase 1+).
 
+mod injector;
+
+pub use injector::{InjectError, SavedClipboard, TextInjector};
+
 pub fn module_name() -> &'static str {
     "inject"
 }
