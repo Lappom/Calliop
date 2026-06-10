@@ -6,7 +6,8 @@ Merci de votre intérêt pour Calliop. Ce projet vise une dictée vocale **100 %
 
 1. Créer une branche depuis `main` : `feature/nom-court`
 2. Une feature = une branche = une session de dev
-3. Ouvrir une pull request avec une description claire et un plan de test
+3. Surligner une section dans [PLAN.md](PLAN.md) (ex. `### Phase 1 — …`) puis lancer **`/implement`** dans Cursor
+4. Ouvrir une pull request avec une description claire et un plan de test
 
 ## Environnement de dev
 

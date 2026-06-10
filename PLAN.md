@@ -100,15 +100,15 @@ Application desktop qui permet de **dicter dans n'importe quelle application** a
 
 **Objectif :** repo prêt pour le vibe coding.
 
-- [ ] Scaffold Tauri 2 + React + TypeScript
-- [ ] Init Git, choix licence, README, CONTRIBUTING
-- [ ] CI GitHub Actions (build Win/macOS/Linux, lint, tests)
-- [ ] Règles Cursor (`.cursor/rules/`) :
+- [x] Scaffold Tauri 2 + React + TypeScript
+- [x] Init Git, choix licence, README, CONTRIBUTING
+- [x] CI GitHub Actions (build Win/macOS/Linux, lint, tests)
+- [x] Règles Cursor (`.cursor/rules/`) :
   - architecture pipeline audio
   - contrainte 100 % offline
   - conventions Rust / TS
   - stratégie de test par module
-- [ ] Structure dossiers :
+- [x] Structure dossiers :
   ```
   src-tauri/src/
     audio/       # capture, VAD
@@ -232,7 +232,7 @@ Application desktop qui permet de **dicter dans n'importe quelle application** a
 ### Par session
 
 1. **Une feature = une branche = une session**
-2. Demander d'abord un **plan** → valider → implémenter
+2. Surligner une section de ce plan → **`/implement`** dans Cursor (ou demander un plan manuel → valider → implémenter)
 3. Boucle : code → test → coller logs/erreurs → itérer
 4. Commit après chaque étape verte
 5. Mettre à jour `.cursor/rules/` après chaque décision d'architecture
@@ -306,7 +306,7 @@ Phase 3 — Ajoute le post-processing LLM.
 ## Prochaines actions immédiates
 
 1. ~~Répondre aux questions de cadrage~~ ✅ **Complet**
-2. **Lancer Phase 0** — scaffold Tauri 2 + règles Cursor + CI
+2. ~~Lancer Phase 0~~ — scaffold Tauri 2 + règles Cursor + CI ✅ **Complet**
 3. **Premier milestone** — MVP Notepad (Phase 1) : Alt+Espace → Whisper → injection
 
 ---

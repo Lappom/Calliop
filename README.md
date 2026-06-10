@@ -21,6 +21,14 @@ pnpm tauri dev
 
 Une fenêtre vide **Calliop** s'ouvre avec une icône dans la barre des tâches (system tray).
 
+## Workflow Cursor
+
+1. Ouvrir [PLAN.md](PLAN.md) et surligner la section à implémenter (ex. une phase)
+2. Dans le chat Agent, taper **`/implement`**
+3. L'agent exécute la section de manière optimisée (une phase à la fois)
+
+Voir [CONTRIBUTING.md](CONTRIBUTING.md) pour le détail.
+
 ## Structure du projet
 
 ```
