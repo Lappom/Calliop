@@ -10,7 +10,10 @@ use llama_cpp_2::context::params::LlamaContextParams;
 use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::model::params::LlamaModelParams;
-use llama_cpp_2::model::{AddBos, LlamaChatMessage, LlamaModel};
+use calliop_lib::llm::{
+    build_cleanup_user_message, validate_cleanup_output, QWEN3_CHAT_TEMPLATE, SYSTEM_PROMPT,
+};
+use llama_cpp_2::model::{AddBos, LlamaChatMessage, LlamaChatTemplate, LlamaModel};
 use llama_cpp_2::sampling::LlamaSampler;
 use serde::{Deserialize, Serialize};
 
@@ -18,14 +21,15 @@ const CLEANUP_CONTEXT_TOKENS: u32 = 2048;
 const CLEANUP_MAX_OUTPUT_TOKENS: i32 = 256;
 const DEFAULT_SEED: u32 = 42;
 
-const SYSTEM_PROMPT: &str =
-    "Tu es un assistant de post-traitement pour une dictée vocale en français. \
-Ta tâche : nettoyer la transcription fournie par l'utilisateur. \
-Supprime les fillers oraux (euh, bah, heu, du coup, voilà, enfin, etc.). \
-Corrige la ponctuation et les majuscules. \
-Reformule légèrement si nécessaire pour améliorer la fluidité, sans changer le sens. \
-Ne commente pas, ne pose pas de questions, ne reformate pas en liste. \
-Réponds uniquement avec le texte nettoyé final, sans guillemets ni préambule.";
+fn resolve_chat_template(model: &LlamaModel) -> Result<LlamaChatTemplate, String> {
+    match model.chat_template(None) {
+        Ok(template) => Ok(template),
+        Err(err) => {
+            eprintln!("model chat template missing ({err}), using Qwen3 fallback");
+            LlamaChatTemplate::new(QWEN3_CHAT_TEMPLATE).map_err(|e| e.to_string())
+        }
+    }
+}
 
 #[derive(Debug, Deserialize)]
 struct WorkerRequest {
@@ -69,17 +73,14 @@ impl InferenceEngine {
             return Err("empty input text".into());
         }
 
-        let user_message = format!("Transcription brute à nettoyer :\n{raw}");
+        let user_message = build_cleanup_user_message(raw).map_err(|err| err.to_string())?;
         let messages = vec![
             LlamaChatMessage::new("system".into(), SYSTEM_PROMPT.into())
                 .map_err(|err| err.to_string())?,
             LlamaChatMessage::new("user".into(), user_message).map_err(|err| err.to_string())?,
         ];
 
-        let template = self
-            .model
-            .chat_template(None)
-            .map_err(|err| err.to_string())?;
+        let template = resolve_chat_template(&self.model)?;
         let prompt = self
             .model
             .apply_chat_template(&template, &messages, true)
@@ -142,28 +143,8 @@ impl InferenceEngine {
             generated += 1;
         }
 
-        validate_cleanup_output(raw, &output)
+        validate_cleanup_output(raw, &output).map_err(|err| err.to_string())
     }
-}
-
-fn validate_cleanup_output(raw: &str, cleaned: &str) -> Result<String, String> {
-    let mut cleaned = cleaned.trim().to_string();
-    if cleaned.is_empty() {
-        return Err("empty model output".into());
-    }
-
-    if (cleaned.starts_with('"') && cleaned.ends_with('"'))
-        || (cleaned.starts_with('«') && cleaned.ends_with('»'))
-    {
-        cleaned = cleaned[1..cleaned.len() - 1].trim().to_string();
-    }
-
-    let max_len = raw.len().saturating_mul(3).max(512);
-    if cleaned.len() > max_len {
-        return Err("model output too long".into());
-    }
-
-    Ok(cleaned)
 }
 
 fn write_response(response: &WorkerResponse) {

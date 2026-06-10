@@ -10,7 +10,9 @@ pub use model::{
     ensure_llm_model_blocking, is_valid_model_file, model_download_urls, model_exists, model_path,
     LlmModelDownloadProgress, LlmModelError, DEFAULT_MODEL_FILE, EXPECTED_MODEL_MIN_BYTES,
 };
-pub use prompt::{build_cleanup_user_message, validate_cleanup_output, SYSTEM_PROMPT};
+pub use prompt::{
+    build_cleanup_user_message, validate_cleanup_output, QWEN3_CHAT_TEMPLATE, SYSTEM_PROMPT,
+};
 
 use thiserror::Error;
 

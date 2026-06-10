@@ -103,12 +103,6 @@ async fn set_settings(
     state: State<'_, AppState>,
     settings: SettingsPayload,
 ) -> Result<(), String> {
-    if settings.auto_edit {
-        ensure_llm_model(app, state.clone()).await?;
-    } else {
-        shutdown_llm_engine(&state);
-    }
-
     state
         .store
         .save_settings(&AppSettings {
@@ -117,6 +111,12 @@ async fn set_settings(
         .map_err(|e| e.to_string())?;
 
     state.pipeline.lock().set_auto_edit(settings.auto_edit);
+
+    if settings.auto_edit {
+        ensure_llm_model(app, state.clone()).await?;
+    } else {
+        shutdown_llm_engine(&state);
+    }
 
     Ok(())
 }

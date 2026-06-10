@@ -118,6 +118,11 @@ jobs:
         working-directory: src-tauri
         run: bash ../scripts/prepare-llm-sidecar.sh
 
+      - name: Prepare LLM sidecar (macOS)
+        if: matrix.platform == 'macos-latest'
+        working-directory: src-tauri
+        run: bash ../scripts/prepare-llm-sidecar.sh
+
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 

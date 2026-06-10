@@ -16,6 +16,10 @@ impl LlamaEngine {
     pub fn cleanup(&mut self, raw: &str) -> Result<String, LlmError> {
         self.client.cleanup(raw)
     }
+
+    pub fn pid(&self) -> u32 {
+        self.client.pid()
+    }
 }
 
 impl Drop for LlamaEngine {

@@ -83,6 +83,10 @@ impl WorkerClient {
         })
     }
 
+    pub fn pid(&self) -> u32 {
+        self.child.id()
+    }
+
     pub fn cleanup(&mut self, raw: &str) -> Result<String, LlmError> {
         let payload = serde_json::to_string(&WorkerRequest {
             shutdown: None,

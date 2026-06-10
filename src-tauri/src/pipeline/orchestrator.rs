@@ -388,6 +388,21 @@ fn invalidate_llm_engine(llm: &Arc<Mutex<Option<LlamaEngine>>>, llm_ready: &Arc<
     llm_ready.store(false, Ordering::SeqCst);
 }
 
+fn force_kill_sidecar(pid: u32) {
+    #[cfg(windows)]
+    {
+        let _ = std::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/F", "/T"])
+            .output();
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = std::process::Command::new("kill")
+            .args(["-9", &pid.to_string()])
+            .output();
+    }
+}
+
 fn run_llm_cleanup(
     llm: Arc<Mutex<Option<LlamaEngine>>>,
     llm_ready: Arc<AtomicBool>,
@@ -399,15 +414,19 @@ fn run_llm_cleanup(
     let (tx, rx) = std::sync::mpsc::channel();
     let raw_for_worker = raw.clone();
     let llm_for_worker = Arc::clone(&llm);
+    let worker_pid = llm.lock().as_ref().map(LlamaEngine::pid);
 
-    thread::spawn(move || {
-        let result = {
-            let mut guard = llm_for_worker.lock();
-            match guard.as_mut() {
-                Some(engine) => engine.cleanup(&raw_for_worker),
-                None => Err(crate::llm::LlmError::Worker("llm engine not loaded".into())),
-            }
+    let worker = thread::spawn(move || {
+        let mut engine = llm_for_worker.lock().take();
+        let result = match engine.as_mut() {
+            Some(engine) => engine.cleanup(&raw_for_worker),
+            None => Err(crate::llm::LlmError::Worker("llm engine not loaded".into())),
         };
+        if result.is_ok() {
+            if let Some(engine) = engine {
+                *llm_for_worker.lock() = Some(engine);
+            }
+        }
         let _ = tx.send(result);
     });
 
@@ -423,7 +442,12 @@ fn run_llm_cleanup(
                 "llm cleanup timed out after {:?}, using raw transcript",
                 timeout
             );
-            (raw, start.elapsed().as_millis() as u64, false)
+            if let Some(pid) = worker_pid {
+                force_kill_sidecar(pid);
+            }
+            let _ = worker.join();
+            invalidate_llm_engine(&llm, &llm_ready);
+            (raw, start.elapsed().as_millis() as u64, true)
         }
         Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
             eprintln!("llm cleanup worker disconnected, using raw transcript");
