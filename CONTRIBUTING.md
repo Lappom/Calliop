@@ -13,8 +13,10 @@ Merci de votre intérêt pour Calliop. Ce projet vise une dictée vocale **100 %
 
 ```powershell
 pnpm install
-pnpm tauri dev
+pnpm tauri:dev
 ```
+
+Sur Windows, `tauri:dev` garantit que CMake 4.x est disponible (requis pour `whisper-rs`).
 
 ## Vérifications avant PR
 
@@ -25,8 +27,16 @@ pnpm lint
 
 # Rust (depuis src-tauri/)
 cargo fmt --check
-cargo clippy -- -D warnings
+cargo clippy --all-targets --all-features -- -D warnings
 cargo test
+```
+
+Tests manuels par module (depuis `src-tauri/`) :
+
+```powershell
+cargo run --bin test-audio -- record 3s output.wav
+cargo run --bin test-stt -- output.wav
+cargo run --bin test-inject -- "Hello world"
 ```
 
 ## Conventions

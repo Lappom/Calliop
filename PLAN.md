@@ -132,12 +132,12 @@ Application desktop qui permet de **dicter dans n'importe quelle application** a
 
 **Objectif :** dicter une phrase dans Notepad via hotkey.
 
-- [ ] Hotkey global **Alt + Espace** (toggle)
-- [ ] Capture micro → buffer PCM
-- [ ] Transcription Whisper à la fin de la dictée (toggle OFF)
-- [ ] Injection texte (clipboard + Ctrl+V avec restauration)
-- [ ] Téléchargement modèle Whisper au 1er lancement
-- [ ] CLI de test par module (`cargo run --bin test-audio`, etc.)
+- [x] Hotkey global **Alt + Espace** (toggle)
+- [x] Capture micro → buffer PCM
+- [x] Transcription Whisper à la fin de la dictée (toggle OFF)
+- [x] Injection texte (clipboard + Ctrl+V avec restauration)
+- [x] Téléchargement modèle Whisper au 1er lancement
+- [x] CLI de test par module (`cargo run --bin test-audio`, etc.)
 
 **Critère de done :** dicter « Bonjour, ceci est un test » dans Notepad, Word, navigateur.
 

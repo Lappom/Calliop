@@ -11,15 +11,28 @@ Calliop permet de dicter dans n'importe quelle application via un raccourci glob
 - [pnpm](https://pnpm.io/installation)
 - [WebView2](https://developer.microsoft.com/microsoft-edge/webview2/) (Runtime Evergreen)
 - [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) avec workload « Desktop development with C++ »
+- [CMake](https://cmake.org/download/) 4.x (requis pour compiler `whisper-rs` ; `winget install Kitware.CMake`)
 
 ## Démarrage rapide
 
 ```powershell
 pnpm install
-pnpm tauri dev
+pnpm tauri:dev
 ```
 
-Une fenêtre vide **Calliop** s'ouvre avec une icône dans la barre des tâches (system tray).
+> **Note :** utilisez `pnpm tauri:dev` (et non `pnpm tauri dev`) sur Windows — ce script installe CMake 4.x si nécessaire pour compiler `whisper-rs`.
+
+L'app **Calliop** s'ouvre avec une icône dans la barre des tâches. Au premier lancement, le modèle Whisper `small` est téléchargé (~466 Mo). Utilisez **Alt + Espace** pour démarrer / arrêter une dictée.
+
+## Tests CLI (modules isolés)
+
+Depuis `src-tauri/` :
+
+```powershell
+cargo run --bin test-audio -- record 3s output.wav
+cargo run --bin test-stt -- output.wav
+cargo run --bin test-inject -- "Bonjour, ceci est un test"
+```
 
 ## Workflow Cursor
 
