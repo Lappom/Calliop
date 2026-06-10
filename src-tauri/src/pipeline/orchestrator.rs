@@ -91,6 +91,7 @@ pub struct PipelineOrchestrator {
     whisper: Arc<Mutex<Option<WhisperEngine>>>,
     streaming: Option<StreamingSession>,
     segment_transcripts: Arc<Mutex<Vec<String>>>,
+    failed_segments: Arc<Mutex<Vec<Vec<f32>>>>,
     streaming_stt_ms: Arc<AtomicU64>,
 }
 
@@ -103,6 +104,7 @@ impl PipelineOrchestrator {
             whisper: Arc::new(Mutex::new(None)),
             streaming: None,
             segment_transcripts: Arc::new(Mutex::new(Vec::new())),
+            failed_segments: Arc::new(Mutex::new(Vec::new())),
             streaming_stt_ms: Arc::new(AtomicU64::new(0)),
         })
     }
@@ -149,6 +151,7 @@ impl PipelineOrchestrator {
         }
 
         self.segment_transcripts.lock().clear();
+        self.failed_segments.lock().clear();
         self.streaming_stt_ms.store(0, Ordering::SeqCst);
         let _ = app.emit("partial-transcript-reset", ());
 
@@ -166,6 +169,7 @@ impl PipelineOrchestrator {
         let app_worker = app.clone();
 
         let transcripts = Arc::clone(&self.segment_transcripts);
+        let failed_segments = Arc::clone(&self.failed_segments);
         let stt_time_ms = Arc::clone(&self.streaming_stt_ms);
         let worker = thread::spawn(move || {
             streaming_worker(
@@ -174,6 +178,7 @@ impl PipelineOrchestrator {
                 worker_stop,
                 whisper,
                 transcripts,
+                failed_segments,
                 stt_time_ms,
             );
         });
@@ -208,8 +213,6 @@ impl PipelineOrchestrator {
 
         let samples = self.audio.stop()?;
 
-        let streaming_stt_ms = self.streaming_stt_ms.load(Ordering::SeqCst);
-
         if let Some(session) = self.streaming.take() {
             session.stop_flag.store(true, Ordering::SeqCst);
             if let Some(worker) = session.worker {
@@ -220,21 +223,37 @@ impl PipelineOrchestrator {
             }
         }
 
+        let streaming_stt_ms = self.streaming_stt_ms.load(Ordering::SeqCst);
+
         self.set_state(app, PipelineState::Transcribing, None);
 
         let mut transcripts = self.segment_transcripts.lock().clone();
+        let failed_segments = self.failed_segments.lock().drain(..).collect::<Vec<_>>();
 
-        // Fallback: if VAD produced no segments, transcribe the full buffer.
         let mut fallback_stt_ms = 0_u64;
-        if transcripts.is_empty() {
+        {
             let engine_guard = self.whisper.lock();
             let Some(engine) = engine_guard.as_ref() else {
                 return Err(PipelineError::ModelNotLoaded);
             };
-            if !samples.is_empty() {
+
+            for segment in failed_segments {
+                let retry_start = Instant::now();
+                match engine.transcribe(&segment) {
+                    Ok(text) if !text.is_empty() => {
+                        fallback_stt_ms += retry_start.elapsed().as_millis() as u64;
+                        transcripts.push(text);
+                    }
+                    Ok(_) => {}
+                    Err(err) => eprintln!("failed segment retry transcription failed: {err}"),
+                }
+            }
+
+            // Fallback: if VAD produced no segments, transcribe the full buffer.
+            if transcripts.is_empty() && !samples.is_empty() {
                 let fallback_start = Instant::now();
                 let text = engine.transcribe(&samples)?;
-                fallback_stt_ms = fallback_start.elapsed().as_millis() as u64;
+                fallback_stt_ms += fallback_start.elapsed().as_millis() as u64;
                 if !text.is_empty() {
                     transcripts.push(text);
                 }
@@ -288,6 +307,11 @@ impl PipelineOrchestrator {
     }
 
     fn abort_session(&mut self, app: &AppHandle) {
+        match self.audio.stop() {
+            Ok(_) | Err(crate::audio::AudioError::NotRecording) => {}
+            Err(err) => eprintln!("abort_session audio stop failed: {err}"),
+        }
+
         if let Some(session) = self.streaming.take() {
             session.stop_flag.store(true, Ordering::SeqCst);
             if let Some(worker) = session.worker {
@@ -298,12 +322,8 @@ impl PipelineOrchestrator {
             }
         }
 
-        match self.audio.stop() {
-            Ok(_) | Err(crate::audio::AudioError::NotRecording) => {}
-            Err(err) => eprintln!("abort_session audio stop failed: {err}"),
-        }
-
         self.segment_transcripts.lock().clear();
+        self.failed_segments.lock().clear();
         self.streaming_stt_ms.store(0, Ordering::SeqCst);
         let _ = app.emit("partial-transcript-reset", ());
         hide_overlay(app);
@@ -316,6 +336,7 @@ fn streaming_worker(
     stop_flag: Arc<AtomicBool>,
     whisper: Arc<Mutex<Option<WhisperEngine>>>,
     transcripts: Arc<Mutex<Vec<String>>>,
+    failed_segments: Arc<Mutex<Vec<Vec<f32>>>>,
     stt_time_ms: Arc<AtomicU64>,
 ) {
     let Ok(mut vad) = VadSegmenter::new() else {
@@ -341,6 +362,7 @@ fn streaming_worker(
                         &app,
                         &whisper,
                         &orchestrator_state,
+                        &failed_segments,
                         &stt_time_ms,
                         segment,
                         segment_index,
@@ -363,6 +385,7 @@ fn streaming_worker(
                 &app,
                 &whisper,
                 &orchestrator_state,
+                &failed_segments,
                 &stt_time_ms,
                 segment,
                 segment_index,
@@ -376,6 +399,7 @@ fn transcribe_segment(
     app: &AppHandle,
     whisper: &Arc<Mutex<Option<WhisperEngine>>>,
     transcripts: &Arc<Mutex<Vec<String>>>,
+    failed_segments: &Arc<Mutex<Vec<Vec<f32>>>>,
     stt_time_ms: &Arc<AtomicU64>,
     segment: Vec<f32>,
     segment_index: u32,
@@ -384,12 +408,14 @@ fn transcribe_segment(
     let text = {
         let engine_guard = whisper.lock();
         let Some(engine) = engine_guard.as_ref() else {
+            failed_segments.lock().push(segment);
             return;
         };
         match engine.transcribe(&segment) {
             Ok(text) => text,
             Err(err) => {
                 eprintln!("segment transcription failed: {err}");
+                failed_segments.lock().push(segment);
                 return;
             }
         }
@@ -483,6 +509,11 @@ fn emit_error(
     orchestrator: &Arc<Mutex<PipelineOrchestrator>>,
     err: PipelineError,
 ) {
+    // Benign race: duplicate start/stop while state already transitioned.
+    if matches!(err, PipelineError::Busy(_)) {
+        return;
+    }
+
     let _ = app.emit(
         "pipeline-state",
         PipelineStateEvent {
