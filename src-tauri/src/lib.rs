@@ -54,8 +54,18 @@ struct AppState {
     llm_engine: Arc<Mutex<Option<llm::LlamaEngine>>>,
     store: Arc<Store>,
     model_ready: AtomicBool,
-    llm_ready: AtomicBool,
+    llm_ready: Arc<AtomicBool>,
+    llm_init: Arc<tokio::sync::Mutex<()>>,
     hotkey_press: Mutex<HotkeyPressState>,
+}
+
+fn llm_engine_is_live(state: &AppState) -> bool {
+    state.llm_ready.load(Ordering::SeqCst) && state.llm_engine.lock().is_some()
+}
+
+fn shutdown_llm_engine(state: &AppState) {
+    state.llm_ready.store(false, Ordering::SeqCst);
+    *state.llm_engine.lock() = None;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -93,6 +103,12 @@ async fn set_settings(
     state: State<'_, AppState>,
     settings: SettingsPayload,
 ) -> Result<(), String> {
+    if settings.auto_edit {
+        ensure_llm_model(app, state.clone()).await?;
+    } else {
+        shutdown_llm_engine(&state);
+    }
+
     state
         .store
         .save_settings(&AppSettings {
@@ -102,18 +118,26 @@ async fn set_settings(
 
     state.pipeline.lock().set_auto_edit(settings.auto_edit);
 
-    if settings.auto_edit {
-        ensure_llm_model(app, state).await?;
-    }
-
     Ok(())
 }
 
 #[tauri::command]
 async fn ensure_llm_model(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    if state.llm_ready.load(Ordering::SeqCst) {
+    if llm_engine_is_live(&state) {
         return Ok(());
     }
+
+    if state.llm_ready.load(Ordering::SeqCst) {
+        state.llm_ready.store(false, Ordering::SeqCst);
+    }
+
+    let _init_guard = state.llm_init.lock().await;
+
+    if llm_engine_is_live(&state) {
+        return Ok(());
+    }
+
+    shutdown_llm_engine(&state);
 
     let app_for_download = app.clone();
     let _model_path = tauri::async_runtime::spawn_blocking(move || {
@@ -133,6 +157,7 @@ async fn ensure_llm_model(app: AppHandle, state: State<'_, AppState>) -> Result<
         *llm = Some(engine);
         let mut pipeline = state.pipeline.lock();
         pipeline.set_llm_engine(Arc::clone(&state.llm_engine));
+        pipeline.set_llm_ready(Arc::clone(&state.llm_ready));
     }
 
     state.llm_ready.store(true, Ordering::SeqCst);
@@ -347,6 +372,7 @@ pub fn run() {
 
     let whisper_engine = Arc::new(Mutex::new(None));
     let llm_engine = Arc::new(Mutex::new(None));
+    let llm_ready = Arc::new(AtomicBool::new(false));
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -367,7 +393,8 @@ pub fn run() {
             llm_engine: llm_engine.clone(),
             store,
             model_ready: AtomicBool::new(false),
-            llm_ready: AtomicBool::new(false),
+            llm_ready: llm_ready.clone(),
+            llm_init: Arc::new(tokio::sync::Mutex::new(())),
             hotkey_press: Mutex::new(HotkeyPressState {
                 press_start: None,
                 was_idle_on_press: false,

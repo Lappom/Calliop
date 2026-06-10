@@ -126,6 +126,18 @@ impl Drop for WorkerClient {
     }
 }
 
+fn worker_exe_basename() -> String {
+    format!(
+        "calliop-llm-worker-{}{}",
+        env!("CALLIOP_TARGET_TRIPLE"),
+        std::env::consts::EXE_SUFFIX
+    )
+}
+
+fn worker_exe_legacy_basename() -> String {
+    format!("calliop-llm-worker{}", std::env::consts::EXE_SUFFIX)
+}
+
 fn resolve_worker_exe() -> Result<PathBuf, LlmError> {
     if let Ok(path) = std::env::var("CARGO_BIN_EXE_calliop_llm_worker") {
         let path = PathBuf::from(path);
@@ -134,49 +146,47 @@ fn resolve_worker_exe() -> Result<PathBuf, LlmError> {
         }
     }
 
-    if let Ok(current) = std::env::current_exe() {
-        if let Some(dir) = current.parent() {
-            let sidecar = dir.join(format!(
-                "calliop-llm-worker{}",
-                std::env::consts::EXE_SUFFIX
-            ));
-            if sidecar.exists() {
-                return Ok(sidecar);
+    for basename in [worker_exe_basename(), worker_exe_legacy_basename()] {
+        if let Ok(current) = std::env::current_exe() {
+            if let Some(dir) = current.parent() {
+                let sidecar = dir.join(&basename);
+                if sidecar.exists() {
+                    return Ok(sidecar);
+                }
             }
         }
     }
 
-    let dev_candidate = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    for basename in [worker_exe_basename(), worker_exe_legacy_basename()] {
+        let bundled = manifest_dir.join("bin").join(&basename);
+        if bundled.exists() {
+            return Ok(bundled);
+        }
+    }
+
+    let dev_candidate = manifest_dir
         .join("target")
         .join("debug")
-        .join(format!(
-            "calliop-llm-worker{}",
-            std::env::consts::EXE_SUFFIX
-        ));
+        .join(worker_exe_legacy_basename());
     if dev_candidate.exists() {
         return Ok(dev_candidate);
     }
 
-    Err(LlmError::Worker(
-        "calliop-llm-worker executable not found; build with \
-         `cargo build --features llm-worker --bin calliop-llm-worker`"
-            .into(),
-    ))
+    Err(LlmError::Worker(format!(
+        "calliop-llm-worker executable not found (looked for {}); \
+         run scripts/prepare-llm-sidecar or \
+         `cargo build --features llm-worker --bin calliop-llm-worker`",
+        worker_exe_basename()
+    )))
 }
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
-
     #[test]
-    fn dev_worker_path_points_to_target_debug() {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("target")
-            .join("debug")
-            .join(format!(
-                "calliop-llm-worker{}",
-                std::env::consts::EXE_SUFFIX
-            ));
-        assert!(path.to_string_lossy().contains("calliop-llm-worker"));
+    fn worker_basename_includes_target_triple() {
+        let basename = super::worker_exe_basename();
+        assert!(basename.contains("calliop-llm-worker-"));
+        assert!(basename.ends_with(std::env::consts::EXE_SUFFIX));
     }
 }

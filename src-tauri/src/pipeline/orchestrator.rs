@@ -98,6 +98,7 @@ pub struct PipelineOrchestrator {
     injector: TextInjector,
     whisper: Arc<Mutex<Option<WhisperEngine>>>,
     llm: Arc<Mutex<Option<LlamaEngine>>>,
+    llm_ready: Arc<AtomicBool>,
     auto_edit: Arc<AtomicBool>,
     streaming: Option<StreamingSession>,
     segment_transcripts: Arc<Mutex<Vec<String>>>,
@@ -113,6 +114,7 @@ impl PipelineOrchestrator {
             injector: TextInjector::new()?,
             whisper: Arc::new(Mutex::new(None)),
             llm: Arc::new(Mutex::new(None)),
+            llm_ready: Arc::new(AtomicBool::new(false)),
             auto_edit: Arc::new(AtomicBool::new(false)),
             streaming: None,
             segment_transcripts: Arc::new(Mutex::new(Vec::new())),
@@ -131,6 +133,10 @@ impl PipelineOrchestrator {
 
     pub fn set_llm_engine(&mut self, engine: Arc<Mutex<Option<LlamaEngine>>>) {
         self.llm = engine;
+    }
+
+    pub fn set_llm_ready(&mut self, ready: Arc<AtomicBool>) {
+        self.llm_ready = ready;
     }
 
     pub fn set_auto_edit(&mut self, enabled: bool) {
@@ -291,14 +297,23 @@ impl PipelineOrchestrator {
         let stt_ms = streaming_stt_ms + fallback_stt_ms;
         let full_text = transcripts.join(" ").trim().to_string();
 
-        let (text_to_inject, llm_ms) = if !full_text.is_empty()
+        let (text_to_inject, llm_ms, llm_invalidated) = if !full_text.is_empty()
             && self.auto_edit.load(Ordering::SeqCst)
             && self.llm.lock().is_some()
         {
-            run_llm_cleanup(Arc::clone(&self.llm), &full_text, LLM_CLEANUP_TIMEOUT)
+            run_llm_cleanup(
+                Arc::clone(&self.llm),
+                Arc::clone(&self.llm_ready),
+                &full_text,
+                LLM_CLEANUP_TIMEOUT,
+            )
         } else {
-            (full_text.clone(), 0)
+            (full_text.clone(), 0, false)
         };
+
+        if llm_invalidated {
+            let _ = app.emit("llm-unready", ());
+        }
 
         self.set_state(app, PipelineState::Injecting, None);
         let inject_start = Instant::now();
@@ -368,19 +383,26 @@ impl PipelineOrchestrator {
     }
 }
 
+fn invalidate_llm_engine(llm: &Arc<Mutex<Option<LlamaEngine>>>, llm_ready: &Arc<AtomicBool>) {
+    *llm.lock() = None;
+    llm_ready.store(false, Ordering::SeqCst);
+}
+
 fn run_llm_cleanup(
     llm: Arc<Mutex<Option<LlamaEngine>>>,
+    llm_ready: Arc<AtomicBool>,
     raw: &str,
     timeout: std::time::Duration,
-) -> (String, u64) {
+) -> (String, u64, bool) {
     let raw = raw.to_string();
     let start = Instant::now();
     let (tx, rx) = std::sync::mpsc::channel();
     let raw_for_worker = raw.clone();
+    let llm_for_worker = Arc::clone(&llm);
 
     thread::spawn(move || {
         let result = {
-            let mut guard = llm.lock();
+            let mut guard = llm_for_worker.lock();
             match guard.as_mut() {
                 Some(engine) => engine.cleanup(&raw_for_worker),
                 None => Err(crate::llm::LlmError::Worker("llm engine not loaded".into())),
@@ -390,21 +412,23 @@ fn run_llm_cleanup(
     });
 
     match rx.recv_timeout(timeout) {
-        Ok(Ok(cleaned)) => (cleaned, start.elapsed().as_millis() as u64),
+        Ok(Ok(cleaned)) => (cleaned, start.elapsed().as_millis() as u64, false),
         Ok(Err(err)) => {
             eprintln!("llm cleanup failed, using raw transcript: {err}");
-            (raw, start.elapsed().as_millis() as u64)
+            invalidate_llm_engine(&llm, &llm_ready);
+            (raw, start.elapsed().as_millis() as u64, true)
         }
         Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
             eprintln!(
                 "llm cleanup timed out after {:?}, using raw transcript",
                 timeout
             );
-            (raw, start.elapsed().as_millis() as u64)
+            (raw, start.elapsed().as_millis() as u64, false)
         }
         Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
             eprintln!("llm cleanup worker disconnected, using raw transcript");
-            (raw, start.elapsed().as_millis() as u64)
+            invalidate_llm_engine(&llm, &llm_ready);
+            (raw, start.elapsed().as_millis() as u64, true)
         }
     }
 }

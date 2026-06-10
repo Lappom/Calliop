@@ -57,6 +57,10 @@ export function useSettings() {
         setLlmReady(true);
         setLlmProgress(null);
       }),
+      listen("llm-unready", () => {
+        setLlmReady(false);
+        setLlmProgress(null);
+      }),
       listen<LlmModelDownloadProgress>("llm-model-download-progress", (event) => {
         setLlmProgress(event.payload.percent);
       }),
@@ -71,27 +75,33 @@ export function useSettings() {
   const saveSettings = useCallback(async (next: AppSettings) => {
     setSaving(true);
     setErrorMessage(null);
+    const previousSettings = settings;
+    const previousLlmReady = llmReady;
+    const previousLlmProgress = llmProgress;
     setSettings(next);
 
     try {
       if (next.autoEdit) {
         setLlmProgress(0);
-      }
-      await invoke("set_settings", { settings: toPayload(next) });
-      if (next.autoEdit) {
-        setLlmReady(true);
-        setLlmProgress(null);
+        setLlmReady(false);
       } else {
         setLlmReady(false);
         setLlmProgress(null);
       }
+      await invoke("set_settings", { settings: toPayload(next) });
+      if (!next.autoEdit) {
+        setLlmProgress(null);
+      }
     } catch (err) {
+      setSettings(previousSettings);
+      setLlmReady(previousLlmReady);
+      setLlmProgress(previousLlmProgress);
       setErrorMessage(String(err));
       throw err;
     } finally {
       setSaving(false);
     }
-  }, []);
+  }, [settings, llmReady, llmProgress]);
 
   const setAutoEdit = useCallback(
     async (enabled: boolean) => {
