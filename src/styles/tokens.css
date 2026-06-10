@@ -1,0 +1,103 @@
+:root {
+  /* Brand & accent */
+  --color-primary: #fcfdff;
+  --color-primary-on: #000000;
+  --color-ink: #fcfdff;
+  --color-body: rgba(252, 253, 255, 0.86);
+  --color-charcoal: rgba(252, 253, 255, 0.7);
+  --color-mute: #a1a4a5;
+  --color-ash: #888e90;
+  --color-stone: #464a4d;
+  --color-on-light: #000000;
+  --color-on-light-mute: rgba(0, 0, 51, 0.7);
+
+  /* Surfaces */
+  --color-canvas: #000000;
+  --color-surface-card: #0a0a0c;
+  --color-surface-elevated: #101012;
+  --color-surface-deep: #06060a;
+  --color-surface-light: #f1f7fe;
+  --color-hairline: rgba(255, 255, 255, 0.06);
+  --color-hairline-strong: rgba(255, 255, 255, 0.14);
+  --color-divider-soft: rgba(255, 255, 255, 0.04);
+
+  /* Semantic accents */
+  --color-accent-orange: #ff801f;
+  --color-accent-orange-glow: rgba(255, 89, 0, 0.22);
+  --color-accent-yellow: #ffc53d;
+  --color-accent-blue: #3b9eff;
+  --color-accent-blue-glow: rgba(0, 117, 255, 0.34);
+  --color-accent-green: #11ff99;
+  --color-accent-green-glow: rgba(34, 255, 153, 0.18);
+  --color-accent-red: #ff2047;
+  --color-accent-red-glow: rgba(255, 32, 71, 0.34);
+  --color-link: #3b9eff;
+
+  /* Typography families */
+  --font-display: "Source Serif 4", "Times New Roman", serif;
+  --font-body: "Geist", system-ui, sans-serif;
+  --font-ui: "Inter", system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, monospace;
+
+  /* Spacing */
+  --spacing-xxs: 2px;
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 12px;
+  --spacing-lg: 16px;
+  --spacing-xl: 24px;
+  --spacing-xxl: 32px;
+  --spacing-xxxl: 48px;
+  --spacing-section: 96px;
+  --spacing-band: 128px;
+
+  /* Border radius */
+  --rounded-none: 0px;
+  --rounded-xs: 4px;
+  --rounded-sm: 6px;
+  --rounded-md: 8px;
+  --rounded-lg: 12px;
+  --rounded-xl: 16px;
+  --rounded-full: 9999px;
+}
+
+@theme inline {
+  --color-primary: var(--color-primary);
+  --color-primary-on: var(--color-primary-on);
+  --color-ink: var(--color-ink);
+  --color-body: var(--color-body);
+  --color-charcoal: var(--color-charcoal);
+  --color-mute: var(--color-mute);
+  --color-ash: var(--color-ash);
+  --color-stone: var(--color-stone);
+  --color-canvas: var(--color-canvas);
+  --color-surface-card: var(--color-surface-card);
+  --color-surface-elevated: var(--color-surface-elevated);
+  --color-surface-deep: var(--color-surface-deep);
+  --color-surface-light: var(--color-surface-light);
+  --color-hairline: var(--color-hairline);
+  --color-hairline-strong: var(--color-hairline-strong);
+  --color-divider-soft: var(--color-divider-soft);
+  --color-accent-orange: var(--color-accent-orange);
+  --color-accent-orange-glow: var(--color-accent-orange-glow);
+  --color-accent-yellow: var(--color-accent-yellow);
+  --color-accent-blue: var(--color-accent-blue);
+  --color-accent-blue-glow: var(--color-accent-blue-glow);
+  --color-accent-green: var(--color-accent-green);
+  --color-accent-green-glow: var(--color-accent-green-glow);
+  --color-accent-red: var(--color-accent-red);
+  --color-accent-red-glow: var(--color-accent-red-glow);
+  --color-link: var(--color-link);
+
+  --font-display: var(--font-display);
+  --font-body: var(--font-body);
+  --font-ui: var(--font-ui);
+  --font-mono: var(--font-mono);
+
+  --radius-xs: var(--rounded-xs);
+  --radius-sm: var(--rounded-sm);
+  --radius-md: var(--rounded-md);
+  --radius-lg: var(--rounded-lg);
+  --radius-xl: var(--rounded-xl);
+  --radius-full: var(--rounded-full);
+}

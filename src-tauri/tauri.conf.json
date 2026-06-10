@@ -12,9 +12,24 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "Calliop",
         "width": 800,
-        "height": 600
+        "height": 600,
+        "backgroundColor": "#000000"
+      },
+      {
+        "label": "overlay",
+        "title": "Calliop Overlay",
+        "url": "overlay.html",
+        "width": 300,
+        "height": 88,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "visible": false,
+        "skipTaskbar": true,
+        "backgroundColor": "#00000000"
       }
     ],
     "security": {
