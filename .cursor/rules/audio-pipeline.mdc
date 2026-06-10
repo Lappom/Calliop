@@ -11,22 +11,23 @@ Calliop processes voice dictation through a linear pipeline orchestrated in `pip
 ## Flow
 
 ```
-Hotkey (toggle ON)
-  -> AudioCapture (PCM 16 kHz mono)
-  -> VAD (optional, Phase 2+)
-Hotkey (toggle OFF) or end of utterance
-  -> WhisperEngine (stt/)
-  -> LLMEngine (llm/, optional Phase 3+)
+Hotkey (toggle ON / push-to-talk hold)
+  -> AudioCapture (PCM 16 kHz mono, streaming chunks)
+  -> VadSegmenter (Silero VAD, filters silence)
+  -> WhisperEngine (persistent context, segment transcription)
+  -> partial-transcript events -> Overlay
+Hotkey OFF / release (toggle or PTT)
+  -> flush VAD tail + concat segments
   -> TextInjector (inject/)
-  -> SQLiteStore (store/, history)
+  -> latency-metrics event
 ```
 
 ## Module responsibilities
 
 | Module | Path | Role |
-|--------|------|------|
-| hotkey | `hotkey/` | Global shortcut (default Alt+Espace toggle) |
-| audio | `audio/` | Micro capture via cpal, buffer management |
+|-----|---|---|
+| hotkey | `hotkey/` | Global shortcut (Alt+Espace hybrid toggle/PTT) |
+| audio | `audio/` | Micro capture via cpal, VAD segmentation |
 | stt | `stt/` | Local transcription (whisper.cpp / whisper-rs) |
 | llm | `llm/` | Post-processing auto-edits (llama.cpp, Phase 3+) |
 | inject | `inject/` | Paste/type into foreground app (enigo + clipboard fallback) |
@@ -37,7 +38,7 @@ Hotkey (toggle OFF) or end of utterance
 
 - Frontend (React) handles overlay, settings, onboarding — no heavy ML in the webview.
 - Rust core exposes commands for start/stop dictation, settings read/write, history queries.
-- Keep command payloads small; stream status events to the overlay.
+- Events: `pipeline-state`, `partial-transcript`, `audio-level`, `latency-metrics`.
 
 ## Inference backend
 
@@ -47,7 +48,7 @@ Hotkey (toggle OFF) or end of utterance
 ## Phase scope
 
 - Phase 1: hotkey -> audio -> stt -> inject (no LLM, no VAD)
-- STT: **whisper-rs 0.16** (whisper.cpp bindings), CPU-only, modèle `ggml-small.bin`, langue `fr`
+- Phase 2: Silero VAD, streaming by segments, overlay, tray menu, autostart, latency debug
+- STT: **whisper-rs 0.16**, persistent `WhisperEngine`, modèle `ggml-small.bin`, langue `fr`
 - Audio capture runs on a dedicated thread (`cpal` streams are !Send)
-- Phase 2: VAD, streaming, overlay, tray menu
 - Phase 3: LLM, dictionary, snippets, app context

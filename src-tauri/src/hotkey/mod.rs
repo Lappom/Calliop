@@ -2,7 +2,10 @@
 
 mod shortcut;
 
-pub use shortcut::{default_shortcut, shortcut_label, DEFAULT_HOTKEY_ID};
+pub use shortcut::{
+    default_shortcut, should_stop_ptt_on_release, shortcut_label, DEFAULT_HOTKEY_ID,
+    PTT_RELEASE_THRESHOLD,
+};
 
 pub fn module_name() -> &'static str {
     "hotkey"
