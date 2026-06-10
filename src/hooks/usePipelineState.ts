@@ -84,6 +84,7 @@ export function usePipelineState() {
         setPipelineState(event.payload.state);
         if (event.payload.state === "error") {
           setErrorMessage(event.payload.message ?? "Erreur inconnue");
+          setPartialTranscript("");
         } else {
           setErrorMessage(null);
         }

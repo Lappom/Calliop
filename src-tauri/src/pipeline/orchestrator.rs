@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Instant;
@@ -91,6 +91,7 @@ pub struct PipelineOrchestrator {
     whisper: Arc<Mutex<Option<WhisperEngine>>>,
     streaming: Option<StreamingSession>,
     segment_transcripts: Arc<Mutex<Vec<String>>>,
+    streaming_stt_ms: Arc<AtomicU64>,
 }
 
 impl PipelineOrchestrator {
@@ -102,6 +103,7 @@ impl PipelineOrchestrator {
             whisper: Arc::new(Mutex::new(None)),
             streaming: None,
             segment_transcripts: Arc::new(Mutex::new(Vec::new())),
+            streaming_stt_ms: Arc::new(AtomicU64::new(0)),
         })
     }
 
@@ -147,7 +149,11 @@ impl PipelineOrchestrator {
         }
 
         self.segment_transcripts.lock().clear();
+        self.streaming_stt_ms.store(0, Ordering::SeqCst);
         let _ = app.emit("partial-transcript-reset", ());
+
+        // Fail fast before opening the mic if VAD cannot initialize.
+        VadSegmenter::new()?;
 
         let (chunk_tx, chunk_rx) = std::sync::mpsc::channel();
         let (level_tx, level_rx) = std::sync::mpsc::channel();
@@ -160,8 +166,16 @@ impl PipelineOrchestrator {
         let app_worker = app.clone();
 
         let transcripts = Arc::clone(&self.segment_transcripts);
+        let stt_time_ms = Arc::clone(&self.streaming_stt_ms);
         let worker = thread::spawn(move || {
-            streaming_worker(app_worker, chunk_rx, worker_stop, whisper, transcripts);
+            streaming_worker(
+                app_worker,
+                chunk_rx,
+                worker_stop,
+                whisper,
+                transcripts,
+                stt_time_ms,
+            );
         });
 
         let app_level = app.clone();
@@ -194,7 +208,7 @@ impl PipelineOrchestrator {
 
         let samples = self.audio.stop()?;
 
-        let stt_start = Instant::now();
+        let streaming_stt_ms = self.streaming_stt_ms.load(Ordering::SeqCst);
 
         if let Some(session) = self.streaming.take() {
             session.stop_flag.store(true, Ordering::SeqCst);
@@ -211,21 +225,23 @@ impl PipelineOrchestrator {
         let mut transcripts = self.segment_transcripts.lock().clone();
 
         // Fallback: if VAD produced no segments, transcribe the full buffer.
+        let mut fallback_stt_ms = 0_u64;
         if transcripts.is_empty() {
             let engine_guard = self.whisper.lock();
             let Some(engine) = engine_guard.as_ref() else {
                 return Err(PipelineError::ModelNotLoaded);
             };
             if !samples.is_empty() {
-                if let Ok(text) = engine.transcribe(&samples) {
-                    if !text.is_empty() {
-                        transcripts.push(text);
-                    }
+                let fallback_start = Instant::now();
+                let text = engine.transcribe(&samples)?;
+                fallback_stt_ms = fallback_start.elapsed().as_millis() as u64;
+                if !text.is_empty() {
+                    transcripts.push(text);
                 }
             }
         }
 
-        let stt_ms = stt_start.elapsed().as_millis() as u64;
+        let stt_ms = streaming_stt_ms + fallback_stt_ms;
         let full_text = transcripts.join(" ").trim().to_string();
 
         self.set_state(app, PipelineState::Injecting, None);
@@ -270,6 +286,28 @@ impl PipelineOrchestrator {
             },
         );
     }
+
+    fn abort_session(&mut self, app: &AppHandle) {
+        if let Some(session) = self.streaming.take() {
+            session.stop_flag.store(true, Ordering::SeqCst);
+            if let Some(worker) = session.worker {
+                let _ = worker.join();
+            }
+            if let Some(listener) = session.level_listener {
+                let _ = listener.join();
+            }
+        }
+
+        match self.audio.stop() {
+            Ok(_) | Err(crate::audio::AudioError::NotRecording) => {}
+            Err(err) => eprintln!("abort_session audio stop failed: {err}"),
+        }
+
+        self.segment_transcripts.lock().clear();
+        self.streaming_stt_ms.store(0, Ordering::SeqCst);
+        let _ = app.emit("partial-transcript-reset", ());
+        hide_overlay(app);
+    }
 }
 
 fn streaming_worker(
@@ -278,8 +316,10 @@ fn streaming_worker(
     stop_flag: Arc<AtomicBool>,
     whisper: Arc<Mutex<Option<WhisperEngine>>>,
     transcripts: Arc<Mutex<Vec<String>>>,
+    stt_time_ms: Arc<AtomicU64>,
 ) {
     let Ok(mut vad) = VadSegmenter::new() else {
+        eprintln!("streaming_worker: VAD init failed after preflight check");
         return;
     };
 
@@ -297,7 +337,14 @@ fn streaming_worker(
                     }
                 };
                 for segment in segments {
-                    transcribe_segment(&app, &whisper, &orchestrator_state, segment, segment_index);
+                    transcribe_segment(
+                        &app,
+                        &whisper,
+                        &orchestrator_state,
+                        &stt_time_ms,
+                        segment,
+                        segment_index,
+                    );
                     segment_index += 1;
                 }
             }
@@ -312,7 +359,14 @@ fn streaming_worker(
 
     if let Ok(segments) = vad.flush() {
         for segment in segments {
-            transcribe_segment(&app, &whisper, &orchestrator_state, segment, segment_index);
+            transcribe_segment(
+                &app,
+                &whisper,
+                &orchestrator_state,
+                &stt_time_ms,
+                segment,
+                segment_index,
+            );
             segment_index += 1;
         }
     }
@@ -322,9 +376,11 @@ fn transcribe_segment(
     app: &AppHandle,
     whisper: &Arc<Mutex<Option<WhisperEngine>>>,
     transcripts: &Arc<Mutex<Vec<String>>>,
+    stt_time_ms: &Arc<AtomicU64>,
     segment: Vec<f32>,
     segment_index: u32,
 ) {
+    let stt_start = Instant::now();
     let text = {
         let engine_guard = whisper.lock();
         let Some(engine) = engine_guard.as_ref() else {
@@ -338,6 +394,7 @@ fn transcribe_segment(
             }
         }
     };
+    stt_time_ms.fetch_add(stt_start.elapsed().as_millis() as u64, Ordering::SeqCst);
 
     if text.is_empty() {
         return;
@@ -435,7 +492,7 @@ fn emit_error(
     );
     let mut guard = orchestrator.lock();
     if guard.state() != PipelineState::Idle {
-        hide_overlay(app);
+        guard.abort_session(app);
         guard.set_state(app, PipelineState::Idle, None);
     }
 }

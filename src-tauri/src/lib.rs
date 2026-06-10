@@ -171,6 +171,16 @@ fn handle_hotkey(app: &AppHandle, shortcut_state: ShortcutState) {
     }
 }
 
+fn should_start_minimized() -> bool {
+    std::env::args().any(|arg| arg == "--minimized")
+}
+
+fn hide_main_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.hide();
+    }
+}
+
 fn show_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
@@ -302,6 +312,10 @@ pub fn run() {
                         }
                     }
                 });
+            }
+
+            if should_start_minimized() {
+                hide_main_window(app.handle());
             }
 
             let app_handle = app.handle().clone();
