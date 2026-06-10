@@ -8,23 +8,28 @@ import {
   pipelineGlow,
   pipelineStatusColor,
   STATE_LABELS,
+  type LatencyMetricsPayload,
   type PipelineState,
 } from "../../hooks/usePipelineState";
 
 interface MainViewProps {
   pipelineState: PipelineState;
   lastTranscript: string | null;
+  partialTranscript: string;
   errorMessage: string | null;
   modelReady: boolean;
   modelProgress: number | null;
+  latencyMetrics: LatencyMetricsPayload | null;
 }
 
 export function MainView({
   pipelineState,
   lastTranscript,
+  partialTranscript,
   errorMessage,
   modelReady,
   modelProgress,
+  latencyMetrics,
 }: MainViewProps) {
   const glow = pipelineGlow(pipelineState, Boolean(errorMessage));
   const statusColor = pipelineStatusColor(
@@ -65,6 +70,11 @@ export function MainView({
                 </p>
               </div>
             )}
+            {partialTranscript && pipelineState === "recording" && (
+              <p className="text-body-sm mt-4 text-charcoal">
+                {partialTranscript}
+              </p>
+            )}
             {errorMessage && (
               <p className="text-body-sm mt-4 text-accent-red">{errorMessage}</p>
             )}
@@ -78,17 +88,31 @@ export function MainView({
                 </CodeWindow>
               </div>
             )}
+            {latencyMetrics && (
+              <div className="mt-6 rounded-md border border-hairline bg-surface-muted/40 px-3 py-2">
+                <p className="text-caption mb-1 text-charcoal">
+                  Latence (debug)
+                </p>
+                <p className="text-body-sm m-0 font-mono text-ink">
+                  STT {latencyMetrics.sttMs} ms · injection{" "}
+                  {latencyMetrics.injectMs} ms · total {latencyMetrics.totalMs}{" "}
+                  ms
+                </p>
+              </div>
+            )}
           </div>
         </Card>
       </SectionGlow>
 
       <section className="space-y-3">
         <p className="text-body-sm text-body">
-          Appuyez sur <Kbd>Alt</Kbd> + <Kbd>Espace</Kbd> pour démarrer ou
-          arrêter la dictée.
+          <Kbd>Alt</Kbd> + <Kbd>Espace</Kbd> : appui pour démarrer, réappui pour
+          arrêter (toggle) ; maintien puis relâcher pour le push-to-talk.
         </p>
         <p className="text-caption text-ash">
           Placez le curseur dans Notepad, Word ou un navigateur avant de dicter.
+          L&apos;application reste accessible via l&apos;icône dans la barre des
+          tâches.
         </p>
       </section>
     </>

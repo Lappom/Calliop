@@ -1,11 +1,15 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use thiserror::Error;
 
 pub const TARGET_SAMPLE_RATE: u32 = 16_000;
+
+pub type AudioChunkSender = std::sync::mpsc::Sender<Vec<f32>>;
+pub type AudioLevelSender = std::sync::mpsc::Sender<f32>;
 
 #[derive(Debug, Error)]
 pub enum AudioError {
@@ -28,15 +32,96 @@ pub enum AudioError {
 }
 
 enum AudioCommand {
-    Start(std::sync::mpsc::Sender<Result<(), AudioError>>),
+    Start {
+        reply: std::sync::mpsc::Sender<Result<(), AudioError>>,
+        chunk_tx: Option<AudioChunkSender>,
+        level_tx: Option<AudioLevelSender>,
+    },
     Stop(std::sync::mpsc::Sender<Result<Vec<f32>, AudioError>>),
     Shutdown,
+}
+
+struct ResampleStreamState {
+    raw_buffer: Vec<f32>,
+    emitted_samples: usize,
+    source_rate: u32,
+    channels: u16,
+}
+
+impl ResampleStreamState {
+    fn new(source_rate: u32, channels: u16) -> Self {
+        Self {
+            raw_buffer: Vec::new(),
+            emitted_samples: 0,
+            source_rate,
+            channels,
+        }
+    }
+
+    fn sync_raw(&mut self, raw: &[f32]) {
+        self.raw_buffer.clear();
+        self.raw_buffer.extend_from_slice(raw);
+    }
+
+    fn drain_delta(&mut self) -> Vec<f32> {
+        let resampled = resample_to_16k_mono(&self.raw_buffer, self.source_rate, self.channels);
+        if self.emitted_samples >= resampled.len() {
+            return Vec::new();
+        }
+        let delta = resampled[self.emitted_samples..].to_vec();
+        self.emitted_samples = resampled.len();
+        delta
+    }
+}
+
+struct StreamingSidecar {
+    resample_state: Mutex<ResampleStreamState>,
+    chunk_tx: Option<AudioChunkSender>,
+    level_tx: Option<AudioLevelSender>,
+    last_level_emit: Mutex<Instant>,
+}
+
+impl StreamingSidecar {
+    fn push_raw(&self, raw: &[f32]) {
+        let mut state = self.resample_state.lock().expect("resample lock");
+        state.sync_raw(raw);
+        let delta = state.drain_delta();
+        drop(state);
+
+        if delta.is_empty() {
+            return;
+        }
+
+        if let Some(tx) = &self.chunk_tx {
+            let _ = tx.send(delta.clone());
+        }
+
+        if let Some(level_tx) = &self.level_tx {
+            let mut last = self.last_level_emit.lock().expect("level lock");
+            if last.elapsed() >= Duration::from_millis(50) {
+                let _ = level_tx.send(compute_rms(&delta));
+                *last = Instant::now();
+            }
+        }
+    }
+
+    fn flush(&self) {
+        let mut state = self.resample_state.lock().expect("resample lock");
+        let delta = state.drain_delta();
+        drop(state);
+        if let Some(tx) = &self.chunk_tx {
+            if !delta.is_empty() {
+                let _ = tx.send(delta);
+            }
+        }
+    }
 }
 
 struct AudioSession {
     _stream: cpal::Stream,
     source_sample_rate: u32,
     source_channels: u16,
+    sidecar: Arc<StreamingSidecar>,
 }
 
 /// Thread-safe handle to a dedicated audio capture thread (cpal streams are !Send).
@@ -66,13 +151,25 @@ impl AudioCapture {
     }
 
     pub fn start(&mut self) -> Result<(), AudioError> {
+        self.start_with_streaming(None, None)
+    }
+
+    pub fn start_with_streaming(
+        &mut self,
+        chunk_tx: Option<AudioChunkSender>,
+        level_tx: Option<AudioLevelSender>,
+    ) -> Result<(), AudioError> {
         if self.is_recording() {
             return Err(AudioError::AlreadyRecording);
         }
 
         let (reply_tx, reply_rx) = std::sync::mpsc::channel();
         self.command_tx
-            .send(AudioCommand::Start(reply_tx))
+            .send(AudioCommand::Start {
+                reply: reply_tx,
+                chunk_tx,
+                level_tx,
+            })
             .map_err(|_| AudioError::ThreadUnavailable)?;
         reply_rx
             .recv()
@@ -115,9 +212,13 @@ fn audio_thread_main(
 
     for command in command_rx {
         match command {
-            AudioCommand::Start(reply_tx) => {
-                let result = start_session(&mut session, &buffer);
-                let _ = reply_tx.send(result);
+            AudioCommand::Start {
+                reply,
+                chunk_tx,
+                level_tx,
+            } => {
+                let result = start_session(&mut session, &buffer, chunk_tx, level_tx);
+                let _ = reply.send(result);
             }
             AudioCommand::Stop(reply_tx) => {
                 let result = stop_session(&mut session, &buffer);
@@ -131,6 +232,8 @@ fn audio_thread_main(
 fn start_session(
     session: &mut Option<AudioSession>,
     buffer: &Arc<Mutex<Vec<f32>>>,
+    chunk_tx: Option<AudioChunkSender>,
+    level_tx: Option<AudioLevelSender>,
 ) -> Result<(), AudioError> {
     if session.is_some() {
         return Err(AudioError::AlreadyRecording);
@@ -153,7 +256,18 @@ fn start_session(
         guard.clear();
     }
 
+    let sidecar = Arc::new(StreamingSidecar {
+        resample_state: Mutex::new(ResampleStreamState::new(
+            source_sample_rate,
+            source_channels,
+        )),
+        chunk_tx,
+        level_tx,
+        last_level_emit: Mutex::new(Instant::now() - Duration::from_millis(100)),
+    });
+
     let stream_buffer = Arc::clone(buffer);
+    let stream_sidecar = Arc::clone(&sidecar);
     let err_fn = |err| eprintln!("audio stream error: {err}");
 
     let stream = match config.sample_format() {
@@ -162,7 +276,11 @@ fn start_session(
             device
                 .build_input_stream(
                     &stream_config,
-                    move |data: &[f32], _| append_samples(&stream_buffer, data),
+                    move |data: &[f32], _| {
+                        append_samples(&stream_buffer, data);
+                        let raw = stream_buffer.lock().expect("buffer lock").clone();
+                        stream_sidecar.push_raw(&raw);
+                    },
                     err_fn,
                     None,
                 )
@@ -177,6 +295,8 @@ fn start_session(
                         let samples: Vec<f32> =
                             data.iter().map(|&s| s as f32 / i16::MAX as f32).collect();
                         append_samples(&stream_buffer, &samples);
+                        let raw = stream_buffer.lock().expect("buffer lock").clone();
+                        stream_sidecar.push_raw(&raw);
                     },
                     err_fn,
                     None,
@@ -194,6 +314,8 @@ fn start_session(
                             .map(|&s| (s as f32 / u16::MAX as f32) * 2.0 - 1.0)
                             .collect();
                         append_samples(&stream_buffer, &samples);
+                        let raw = stream_buffer.lock().expect("buffer lock").clone();
+                        stream_sidecar.push_raw(&raw);
                     },
                     err_fn,
                     None,
@@ -215,6 +337,7 @@ fn start_session(
         _stream: stream,
         source_sample_rate,
         source_channels,
+        sidecar,
     });
     Ok(())
 }
@@ -224,6 +347,8 @@ fn stop_session(
     buffer: &Arc<Mutex<Vec<f32>>>,
 ) -> Result<Vec<f32>, AudioError> {
     let active = session.take().ok_or(AudioError::NotRecording)?;
+    active.sidecar.flush();
+
     let raw = buffer.lock().expect("audio buffer lock poisoned").clone();
     Ok(resample_to_16k_mono(
         &raw,
@@ -235,6 +360,14 @@ fn stop_session(
 fn append_samples(buffer: &Arc<Mutex<Vec<f32>>>, data: &[f32]) {
     let mut guard = buffer.lock().expect("audio buffer lock poisoned");
     guard.extend_from_slice(data);
+}
+
+pub fn compute_rms(samples: &[f32]) -> f32 {
+    if samples.is_empty() {
+        return 0.0;
+    }
+    let sum: f32 = samples.iter().map(|s| s * s).sum();
+    (sum / samples.len() as f32).sqrt()
 }
 
 /// Downmixes to mono and resamples to 16 kHz using linear interpolation.
@@ -303,5 +436,16 @@ mod tests {
         assert_eq!(output.len(), 4);
         assert!((output[0] - 0.0).abs() < f32::EPSILON);
         assert!((output[1] - 2.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn compute_rms_of_silence_is_zero() {
+        assert!(compute_rms(&[0.0, 0.0, 0.0]) < f32::EPSILON);
+    }
+
+    #[test]
+    fn compute_rms_of_unit_signal() {
+        let rms = compute_rms(&[1.0, -1.0, 1.0, -1.0]);
+        assert!((rms - 1.0).abs() < f32::EPSILON);
     }
 }

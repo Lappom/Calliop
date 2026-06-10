@@ -149,13 +149,13 @@ Application desktop qui permet de **dicter dans n'importe quelle application** a
 
 **Objectif :** usage fluide au quotidien.
 
-- [ ] Silero VAD (ignore silences)
-- [ ] Mode toggle (en plus du push-to-talk)
-- [ ] Transcription streaming par chunks
-- [ ] Overlay flottant (waveform, états écoute/transcription)
-- [ ] Icône system tray + menu contextuel
-- [ ] Démarrage automatique avec l'OS
-- [ ] Indicateur latence (debug)
+- [x] Silero VAD (ignore silences)
+- [x] Mode toggle (en plus du push-to-talk)
+- [x] Transcription streaming par chunks
+- [x] Overlay flottant (waveform, états écoute/transcription)
+- [x] Icône system tray + menu contextuel
+- [x] Démarrage automatique avec l'OS
+- [x] Indicateur latence (debug)
 
 **Critère de done :** dictée fluide sans latence perçue > 500 ms (streaming).
 

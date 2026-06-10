@@ -3,7 +3,9 @@
 mod orchestrator;
 
 pub use orchestrator::{
-    spawn_toggle, PipelineError, PipelineOrchestrator, PipelineState, PipelineStateEvent,
+    hide_overlay, show_overlay, spawn_start, spawn_stop, spawn_toggle, AudioLevelEvent,
+    LatencyMetricsEvent, PartialTranscriptEvent, PipelineError, PipelineOrchestrator,
+    PipelineState, PipelineStateEvent,
 };
 
 pub fn module_name() -> &'static str {

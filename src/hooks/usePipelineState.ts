@@ -21,6 +21,17 @@ interface ModelDownloadProgress {
   source: string;
 }
 
+export interface PartialTranscriptPayload {
+  text: string;
+  segmentIndex: number;
+}
+
+export interface LatencyMetricsPayload {
+  sttMs: number;
+  injectMs: number;
+  totalMs: number;
+}
+
 export const STATE_LABELS: Record<PipelineState, string> = {
   idle: "En attente",
   recording: "Écoute en cours…",
@@ -32,9 +43,13 @@ export const STATE_LABELS: Record<PipelineState, string> = {
 export function usePipelineState() {
   const [pipelineState, setPipelineState] = useState<PipelineState>("idle");
   const [lastTranscript, setLastTranscript] = useState<string | null>(null);
+  const [partialTranscript, setPartialTranscript] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [modelReady, setModelReady] = useState(false);
   const [modelProgress, setModelProgress] = useState<number | null>(null);
+  const [audioLevel, setAudioLevel] = useState(0);
+  const [latencyMetrics, setLatencyMetrics] =
+    useState<LatencyMetricsPayload | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -74,6 +89,7 @@ export function usePipelineState() {
         }
         if (event.payload.message && event.payload.state === "idle") {
           setLastTranscript(event.payload.message);
+          setPartialTranscript("");
         }
       }),
       listen("model-ready", () => {
@@ -82,6 +98,23 @@ export function usePipelineState() {
       }),
       listen<ModelDownloadProgress>("model-download-progress", (event) => {
         setModelProgress(event.payload.percent);
+      }),
+      listen<PartialTranscriptPayload>("partial-transcript", (event) => {
+        setPartialTranscript((current) => {
+          const next = current
+            ? `${current} ${event.payload.text}`
+            : event.payload.text;
+          return next.trim();
+        });
+      }),
+      listen("partial-transcript-reset", () => {
+        setPartialTranscript("");
+      }),
+      listen<{ level: number }>("audio-level", (event) => {
+        setAudioLevel(event.payload.level);
+      }),
+      listen<LatencyMetricsPayload>("latency-metrics", (event) => {
+        setLatencyMetrics(event.payload);
       }),
     ]);
 
@@ -94,9 +127,12 @@ export function usePipelineState() {
   return {
     pipelineState,
     lastTranscript,
+    partialTranscript,
     errorMessage,
     modelReady,
     modelProgress,
+    audioLevel,
+    latencyMetrics,
   };
 }
 
