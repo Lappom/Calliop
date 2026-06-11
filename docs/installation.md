@@ -1,51 +1,51 @@
 # Installation
 
-Calliop v1 cible **Windows 10/11**. Les builds macOS et Linux sont publiés en **expérimental** (non signés, non testés pour la v1).
+Calliop v1 targets **Windows 10/11**. macOS and Linux builds are published as **experimental** (unsigned, not tested for v1).
 
-## Télécharger
+## Download
 
-1. Ouvrez la page [Releases GitHub](https://github.com/Lappom/Calliop/releases).
-2. Téléchargez l’artefact pour votre plateforme :
-   - **Windows (recommandé)** : `Calliop_*_x64-setup.exe` (installateur NSIS) ou `.msi`
-   - **macOS (expérimental)** : `.dmg`
-   - **Linux (expérimental)** : `.AppImage` ou `.deb`
+1. Open the [GitHub Releases](https://github.com/Lappom/Calliop/releases) page.
+2. Download the artifact for your platform:
+   - **Windows (recommended)**: `Calliop_*_x64-setup.exe` (NSIS installer) or `.msi`
+   - **macOS (experimental)**: `.dmg`
+   - **Linux (experimental)**: `.AppImage` or `.deb`
 
-## Prérequis Windows
+## Windows prerequisites
 
-- [WebView2 Runtime Evergreen](https://developer.microsoft.com/microsoft-edge/webview2/) (souvent déjà installé avec Windows 11 ou Edge)
+- [WebView2 Runtime Evergreen](https://developer.microsoft.com/microsoft-edge/webview2/) (often already installed with Windows 11 or Edge)
 - Microphone
-- Connexion internet **uniquement au premier lancement** pour télécharger les modèles Whisper/LLM (~500 Mo à ~2 Go selon les réglages)
+- Internet connection **only on first launch** to download Whisper/LLM models (~500 MB to ~2 GB depending on settings)
 
-## Installer (Windows)
+## Install (Windows)
 
-### Installateur NSIS (`.exe`)
+### NSIS installer (`.exe`)
 
-1. Lancez `Calliop_*_x64-setup.exe`.
-2. Si **SmartScreen** affiche « Windows a protégé votre PC » : cliquez sur **Informations complémentaires**, puis **Exécuter quand même**.  
-   Les binaires v1 ne sont **pas signés** (comportement attendu).
-3. Suivez l’assistant ; l’installation se fait pour l’utilisateur courant.
-4. Lancez Calliop depuis le menu Démarrer ou le raccourci bureau.
+1. Run `Calliop_*_x64-setup.exe`.
+2. If **SmartScreen** shows "Windows protected your PC": click **More info**, then **Run anyway**.  
+   v1 binaries are **unsigned** (expected behavior).
+3. Follow the wizard; installation is per-user.
+4. Launch Calliop from the Start menu or desktop shortcut.
 
-### Installateur MSI
+### MSI installer
 
-Même procédure ; utile pour un déploiement silencieux en entreprise (`msiexec /i Calliop_*.msi`).
+Same procedure; useful for silent enterprise deployment (`msiexec /i Calliop_*.msi`).
 
-## Premier lancement (< 5 min)
+## First launch (< 5 min)
 
-1. **Onboarding** : autorisez le micro, testez une courte dictée.
-2. **Téléchargement modèle** : Whisper `small` par défaut (~466 Mo). La barre de progression s’affiche dans l’app.
-3. **Dictée** : raccourci par défaut **Alt + Espace** (toggle).
-4. Optionnel : activez les auto-edits IA dans Paramètres → le modèle LLM se télécharge à la demande.
+1. **Onboarding**: grant microphone access, test a short dictation.
+2. **Model download**: Whisper `small` by default (~466 MB). Progress is shown in the app.
+3. **Dictation**: default shortcut **Alt + Space** (toggle).
+4. Optional: enable AI auto-edits in Settings → the LLM model downloads on demand.
 
-Les modèles sont stockés dans `%APPDATA%\com.calliop.app\models\` — pas dans l’installateur.
+Models are stored in `%APPDATA%\com.calliop.app\models\` — not bundled in the installer.
 
-## Mises à jour
+## Updates
 
-Dans **Paramètres → Avancé**, vous pouvez activer **Mises à jour automatiques** (désactivé par défaut). L’app vérifie alors les releases GitHub signées au démarrage.
+In **Settings → Advanced**, you can enable **Automatic updates** (disabled by default). The app then checks for signed GitHub releases on startup.
 
-Sinon, téléchargez manuellement la dernière release.
+Otherwise, download the latest release manually.
 
-## Désinstallation
+## Uninstall
 
-- **Paramètres Windows** → Applications → Calliop → Désinstaller  
-- Les modèles et la configuration SQLite dans `%APPDATA%\com.calliop.app\` peuvent être supprimés manuellement si vous souhaitez libérer de l’espace.
+- **Windows Settings** → Apps → Calliop → Uninstall  
+- Models and SQLite configuration in `%APPDATA%\com.calliop.app\` can be removed manually to free disk space.
