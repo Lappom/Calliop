@@ -1,3 +1,4 @@
+import { AnimatePresence, motion } from "motion/react";
 import {
   useCallback,
   useEffect,
@@ -6,6 +7,12 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
+import {
+  modalBackdropVariants,
+  modalPanelVariants,
+  pickVariants,
+} from "../../lib/motion/variants";
+import { useReducedMotion } from "../../lib/motion/useReducedMotion";
 
 type ModalSize = "sm" | "md" | "lg";
 
@@ -35,6 +42,9 @@ export function Modal({
   const titleId = useId();
   const descriptionId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
+  const reducedMotion = useReducedMotion();
+  const backdropVariants = pickVariants(modalBackdropVariants, reducedMotion);
+  const panelVariants = pickVariants(modalPanelVariants, reducedMotion);
 
   const handleBackdropClick = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
@@ -72,42 +82,49 @@ export function Modal({
     };
   }, [open, onClose]);
 
-  if (!open) {
-    return null;
-  }
-
   return createPortal(
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 animate-[modal-backdrop-in_150ms_ease-out]"
-      onClick={handleBackdropClick}
-      role="presentation"
-    >
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        aria-describedby={description ? descriptionId : undefined}
-        className={[
-          "w-[calc(100%-2rem)] rounded-lg border border-hairline-strong bg-surface-elevated p-6",
-          "animate-[modal-panel-in_150ms_ease-out]",
-          sizeClasses[size],
-        ].join(" ")}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <header className="mb-6">
-          <h2 id={titleId} className="text-heading-sm m-0 text-ink">
-            {title}
-          </h2>
-          {description && (
-            <p id={descriptionId} className="text-body-sm mt-2 text-charcoal">
-              {description}
-            </p>
-          )}
-        </header>
-        {children}
-      </div>
-    </div>,
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          variants={backdropVariants}
+          initial="initial"
+          animate="animate"
+          exit="exit"
+          onClick={handleBackdropClick}
+          role="presentation"
+        >
+          <motion.div
+            ref={panelRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={titleId}
+            aria-describedby={description ? descriptionId : undefined}
+            variants={panelVariants}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+            className={[
+              "w-[calc(100%-2rem)] rounded-lg border border-hairline-strong bg-surface-elevated p-6",
+              sizeClasses[size],
+            ].join(" ")}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <header className="mb-6">
+              <h2 id={titleId} className="text-heading-sm m-0 text-ink">
+                {title}
+              </h2>
+              {description && (
+                <p id={descriptionId} className="text-body-sm mt-2 text-charcoal">
+                  {description}
+                </p>
+              )}
+            </header>
+            {children}
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>,
     document.body,
   );
 }

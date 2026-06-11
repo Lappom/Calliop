@@ -31,7 +31,10 @@ export function SnippetListToolbarButton<T extends string = string>({
       disabled={disabled}
       onClick={onClick}
       className={[
-        "inline-flex size-9 items-center justify-center rounded-md border transition-colors duration-150",
+        "inline-flex size-9 items-center justify-center rounded-md border",
+        "transition-[transform,background-color,border-color,color] duration-150",
+        "ease-[cubic-bezier(0.22,1,0.36,1)]",
+        "active:scale-[0.97] disabled:active:scale-100",
         "disabled:cursor-not-allowed disabled:opacity-40",
         active
           ? "border-hairline-strong bg-surface-elevated text-ink"

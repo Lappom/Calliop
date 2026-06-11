@@ -69,3 +69,44 @@ export const staggerFadeVariants: Variants = {
     },
   },
 };
+
+const overlayTransition = {
+  duration: MOTION_DURATION.base,
+  ease: MOTION_EASE.enter,
+} as const;
+
+const overlayExitTransition = {
+  duration: MOTION_DURATION.fast,
+  ease: MOTION_EASE.enter,
+} as const;
+
+export const modalBackdropVariants: Variants = {
+  initial: { opacity: 0 },
+  animate: { opacity: 1, transition: overlayTransition },
+  exit: { opacity: 0, transition: overlayExitTransition },
+};
+
+export const modalPanelVariants: Variants = {
+  initial: { opacity: 0, scale: 0.96 },
+  animate: { opacity: 1, scale: 1, transition: overlayTransition },
+  exit: { opacity: 0, scale: 0.98, transition: overlayExitTransition },
+};
+
+export const dropdownPanelVariants: Variants = {
+  initial: { opacity: 0, y: -4 },
+  animate: { opacity: 1, y: 0, transition: overlayTransition },
+  exit: { opacity: 0, y: -2, transition: overlayExitTransition },
+};
+
+export const toastVariants: Variants = {
+  initial: { opacity: 0, y: 12 },
+  animate: { opacity: 1, y: 0, transition: overlayTransition },
+  exit: { opacity: 0, y: 8, transition: overlayExitTransition },
+};
+
+export function pickVariants(
+  variants: Variants,
+  reducedMotion: boolean,
+): Variants {
+  return reducedMotion ? reducedMotionVariants : variants;
+}

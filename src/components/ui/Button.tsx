@@ -29,7 +29,9 @@ export function Button({
       className={[
         "inline-flex h-9 items-center justify-center rounded-md px-4",
         "font-[family-name:var(--font-ui)] text-sm font-medium leading-[1.43]",
-        "transition-colors duration-150",
+        "transition-[transform,background-color,border-color,color] duration-150",
+        "ease-[cubic-bezier(0.22,1,0.36,1)]",
+        "active:scale-[0.97] disabled:active:scale-100",
         "disabled:cursor-not-allowed disabled:opacity-40",
         variantClasses[variant],
         className,

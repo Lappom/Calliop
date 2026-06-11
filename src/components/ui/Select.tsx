@@ -1,4 +1,5 @@
 import { Check, ChevronDown, CircleCheck, CloudOff, HardDrive } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
 import {
   useCallback,
   useEffect,
@@ -8,6 +9,8 @@ import {
   type KeyboardEvent,
 } from "react";
 import { createPortal } from "react-dom";
+import { dropdownPanelVariants, pickVariants } from "../../lib/motion/variants";
+import { useReducedMotion } from "../../lib/motion/useReducedMotion";
 
 export interface SelectOption<T extends string = string> {
   value: T;
@@ -91,6 +94,8 @@ export function Select<T extends string>({
 
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const reducedMotion = useReducedMotion();
+  const panelVariants = pickVariants(dropdownPanelVariants, reducedMotion);
 
   const selectedIndex = options.findIndex((option) => option.value === value);
   const selectedOption =
@@ -294,95 +299,100 @@ export function Select<T extends string>({
         />
       </button>
 
-      {open &&
-        createPortal(
-          <div
-            ref={panelRef}
-            id={listboxId}
-            role="listbox"
-            tabIndex={-1}
-            aria-labelledby={selectId}
-            onKeyDown={handlePanelKeyDown}
-            style={{
-              position: "fixed",
-              top: panelStyle.top,
-              left: panelStyle.left,
-              width: panelStyle.width,
-              zIndex: 50,
-            }}
-            className={[
-              "overflow-hidden rounded-lg border border-hairline-strong bg-surface-elevated p-1 shadow-none",
-              "animate-[select-panel-in_120ms_ease-out]",
-            ].join(" ")}
-          >
-            <ul className="calliop-scroll relative m-0 max-h-60 list-none overflow-y-auto p-0">
-              {options.map((option, index) => {
-                const isSelected = option.value === value;
-                const isHighlighted = index === highlightedIndex;
+      {createPortal(
+        <AnimatePresence>
+          {open && (
+            <motion.div
+              ref={panelRef}
+              id={listboxId}
+              role="listbox"
+              tabIndex={-1}
+              aria-labelledby={selectId}
+              onKeyDown={handlePanelKeyDown}
+              variants={panelVariants}
+              initial="initial"
+              animate="animate"
+              exit="exit"
+              style={{
+                position: "fixed",
+                top: panelStyle.top,
+                left: panelStyle.left,
+                width: panelStyle.width,
+                zIndex: 50,
+                transformOrigin: "top center",
+              }}
+              className="overflow-hidden rounded-lg border border-hairline-strong bg-surface-elevated p-1 shadow-none"
+            >
+              <ul className="calliop-scroll relative m-0 max-h-60 list-none overflow-y-auto p-0">
+                {options.map((option, index) => {
+                  const isSelected = option.value === value;
+                  const isHighlighted = index === highlightedIndex;
 
-                return (
-                  <li key={option.value} role="presentation">
-                    <button
-                      type="button"
-                      role="option"
-                      aria-selected={isSelected}
-                      aria-label={
-                        option.statusLabel
-                          ? `${option.label}, ${option.statusLabel}`
-                          : option.label
-                      }
-                      onMouseEnter={() => setHighlightedIndex(index)}
-                      onClick={() => selectOption(index)}
-                      className={[
-                        "flex w-full items-center gap-2.5 rounded-md px-3 py-2.5 text-left",
-                        "font-[family-name:var(--font-ui)] text-sm leading-[1.43]",
-                        "transition-colors duration-100",
-                        isSelected
-                          ? "bg-surface-card text-ink"
-                          : "text-body",
-                        isHighlighted && !isSelected
-                          ? "bg-surface-card/70 text-ink"
-                          : "",
-                        !isSelected && !isHighlighted
-                          ? "hover:bg-surface-card/70 hover:text-ink"
-                          : "",
-                      ].join(" ")}
-                    >
-                      <OptionStatusIcon
-                        status={option.status}
-                        statusLabel={option.statusLabel}
-                      />
-                      <span className="min-w-0 flex-1 truncate">
-                        {option.label}
-                      </span>
-                      <span className="flex shrink-0 items-center gap-2">
-                        {option.statusLabel && (
-                          <span
-                            className={[
-                              "text-caption",
-                              statusToneClass(option.status),
-                            ].join(" ")}
-                          >
-                            {option.statusLabel}
-                          </span>
-                        )}
-                        {isSelected && (
-                          <Check
-                            size={14}
-                            strokeWidth={2.5}
-                            className="text-accent-blue"
-                            aria-hidden
-                          />
-                        )}
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>,
-          document.body,
-        )}
+                  return (
+                    <li key={option.value} role="presentation">
+                      <button
+                        type="button"
+                        role="option"
+                        aria-selected={isSelected}
+                        aria-label={
+                          option.statusLabel
+                            ? `${option.label}, ${option.statusLabel}`
+                            : option.label
+                        }
+                        onMouseEnter={() => setHighlightedIndex(index)}
+                        onClick={() => selectOption(index)}
+                        className={[
+                          "flex w-full items-center gap-2.5 rounded-md px-3 py-2.5 text-left",
+                          "font-[family-name:var(--font-ui)] text-sm leading-[1.43]",
+                          "transition-colors duration-100",
+                          isSelected
+                            ? "bg-surface-card text-ink"
+                            : "text-body",
+                          isHighlighted && !isSelected
+                            ? "bg-surface-card/70 text-ink"
+                            : "",
+                          !isSelected && !isHighlighted
+                            ? "hover:bg-surface-card/70 hover:text-ink"
+                            : "",
+                        ].join(" ")}
+                      >
+                        <OptionStatusIcon
+                          status={option.status}
+                          statusLabel={option.statusLabel}
+                        />
+                        <span className="min-w-0 flex-1 truncate">
+                          {option.label}
+                        </span>
+                        <span className="flex shrink-0 items-center gap-2">
+                          {option.statusLabel && (
+                            <span
+                              className={[
+                                "text-caption",
+                                statusToneClass(option.status),
+                              ].join(" ")}
+                            >
+                              {option.statusLabel}
+                            </span>
+                          )}
+                          {isSelected && (
+                            <Check
+                              size={14}
+                              strokeWidth={2.5}
+                              className="text-accent-blue"
+                              aria-hidden
+                            />
+                          )}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </motion.div>
+          )}
+        </AnimatePresence>,
+        document.body,
+      )}
     </div>
   );
 }
