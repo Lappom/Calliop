@@ -1041,7 +1041,7 @@ pub fn show_overlay(app: &AppHandle) {
     if let Ok(Some(monitor)) = overlay.current_monitor() {
         let monitor_size = monitor.size();
         let overlay_size = overlay.outer_size().unwrap_or(PhysicalSize {
-            width: 300,
+            width: 184,
             height: 88,
         });
         let x = (monitor_size.width.saturating_sub(overlay_size.width)) / 2;

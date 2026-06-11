@@ -2060,6 +2060,10 @@ pub fn run() {
             });
             register_hotkey(app.handle(), shortcut)?;
 
+            if let Some(overlay) = app.get_webview_window("overlay") {
+                let _ = overlay.set_background_color(Some(tauri::window::Color(0, 0, 0, 0)));
+            }
+
             if let Some(main) = app.get_webview_window("main") {
                 let _ = main.set_theme(Some(Theme::Dark));
                 let app_handle = app.handle().clone();
