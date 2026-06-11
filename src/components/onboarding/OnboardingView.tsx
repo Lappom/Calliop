@@ -66,7 +66,7 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
   };
 
   return (
-    <div className="flex min-h-screen flex-col gap-8 bg-canvas p-8">
+    <div className="mx-auto flex min-h-screen w-full max-w-[880px] flex-col gap-8 bg-canvas p-4 sm:p-8">
       <div className="flex flex-wrap gap-2">
         {STEPS.map((s) => (
           <BadgePill key={s.id} active={s.id === step}>
@@ -76,7 +76,7 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
       </div>
 
       <SectionGlow glow={isLast ? "green" : "blue"}>
-        <Card variant="bordered" className="p-6 sm:p-8">
+        <Card variant="bordered" className="p-4 sm:p-6 lg:p-8">
           {step === 1 && (
             <>
               <h1 className="text-display-serif mb-4 text-4xl text-ink">

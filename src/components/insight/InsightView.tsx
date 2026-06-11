@@ -73,7 +73,7 @@ function ChartPanel({
     <Card
       variant="bordered"
       className={[
-        "flex h-full min-h-[360px] flex-col gap-4 p-6",
+        "flex h-full min-h-[280px] flex-col gap-4 p-4 sm:min-h-[360px] sm:p-6",
         className,
       ]
         .filter(Boolean)
@@ -197,7 +197,7 @@ export function InsightView({ latencyMetrics }: InsightViewProps) {
             description="Répartition des mots dictés selon la fenêtre active."
             empty={!loaded || appUsage.length === 0}
             emptyMessage="Aucune donnée de contexte pour le moment."
-            className="min-h-[320px]"
+            className="min-h-[280px] sm:min-h-[320px]"
           >
             <AppUsageDonut data={appUsage} />
           </ChartPanel>
@@ -205,7 +205,7 @@ export function InsightView({ latencyMetrics }: InsightViewProps) {
 
         <Card
           variant="bordered"
-          className="flex h-full min-h-[320px] flex-col justify-between p-6"
+          className="flex h-full min-h-[280px] flex-col justify-between p-4 sm:min-h-[320px] sm:p-6"
         >
           <h2 className="text-heading-sm m-0 text-ink">Vitesse vs frappe</h2>
           <div className="flex flex-1 flex-col items-center justify-center overflow-visible py-4">

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { AppShell } from "./components/layout/AppShell";
+import { ModelDownloadToasts } from "./components/layout/ModelDownloadToasts";
 import { ContexteView } from "./components/context/ContexteView";
 import { DictionaryView } from "./components/dictionary/DictionaryView";
 import { HistoryView } from "./components/history/HistoryView";
@@ -39,35 +40,44 @@ function App() {
 
   if (!onboardingChecked) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-canvas text-body">
-        Chargement…
-      </div>
+      <>
+        <div className="flex min-h-screen items-center justify-center bg-canvas text-body">
+          Chargement…
+        </div>
+        <ModelDownloadToasts />
+      </>
     );
   }
 
   if (showOnboarding) {
     return (
-      <OnboardingView
-        onComplete={() => {
-          setShowOnboarding(false);
-          setCurrentView("main");
-        }}
-      />
+      <>
+        <OnboardingView
+          onComplete={() => {
+            setShowOnboarding(false);
+            setCurrentView("main");
+          }}
+        />
+        <ModelDownloadToasts />
+      </>
     );
   }
 
   return (
-    <AppShell currentView={currentView} onNavigate={setCurrentView}>
-      {currentView === "main" && <MainView {...pipeline} />}
-      {currentView === "dictionary" && <DictionaryView />}
-      {currentView === "snippets" && <SnippetsView />}
-      {currentView === "context" && <ContexteView />}
-      {currentView === "history" && <HistoryView />}
-      {currentView === "insight" && (
-        <InsightView latencyMetrics={pipeline.latencyMetrics} />
-      )}
-      {currentView === "settings" && <SettingsView />}
-    </AppShell>
+    <>
+      <AppShell currentView={currentView} onNavigate={setCurrentView}>
+        {currentView === "main" && <MainView {...pipeline} />}
+        {currentView === "dictionary" && <DictionaryView />}
+        {currentView === "snippets" && <SnippetsView />}
+        {currentView === "context" && <ContexteView />}
+        {currentView === "history" && <HistoryView />}
+        {currentView === "insight" && (
+          <InsightView latencyMetrics={pipeline.latencyMetrics} />
+        )}
+        {currentView === "settings" && <SettingsView />}
+      </AppShell>
+      <ModelDownloadToasts />
+    </>
   );
 }
 

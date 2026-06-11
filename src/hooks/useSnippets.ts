@@ -97,6 +97,38 @@ export function useSnippets() {
     [loadSnippets],
   );
 
+  const updateSnippet = useCallback(
+    async (id: number, trigger: string, content: string) => {
+      const trimmedTrigger = trigger.trim();
+      const trimmedContent = content.trim();
+      if (!trimmedTrigger || !trimmedContent) {
+        return false;
+      }
+
+      setBusy(true);
+      setErrorMessage(null);
+      try {
+        const updated = await invoke<boolean>("update_snippet", {
+          id,
+          trigger: trimmedTrigger,
+          content: trimmedContent,
+        });
+        if (updated) {
+          await loadSnippets();
+        } else {
+          setErrorMessage("Ce déclencheur existe déjà.");
+        }
+        return updated;
+      } catch (err) {
+        setErrorMessage(String(err));
+        throw err;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [loadSnippets],
+  );
+
   const importSnippets = useCallback(
     async (json: string) => {
       setBusy(true);
@@ -164,6 +196,7 @@ export function useSnippets() {
     errorMessage,
     fileInputRef,
     addSnippet,
+    updateSnippet,
     removeSnippet,
     importSnippets,
     exportSnippets,

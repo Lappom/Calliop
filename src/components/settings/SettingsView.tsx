@@ -165,30 +165,35 @@ export function SettingsView() {
         </p>
       </header>
 
-      <nav
-        className="flex flex-wrap gap-2"
-        aria-label="Sections des réglages"
-      >
-        {tabs.map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            onClick={() => setActiveTab(tab.id)}
-            className={[
-              "rounded-full px-3.5 py-1.5",
-              "font-[family-name:var(--font-body)] text-sm font-medium tracking-wide",
-              "transition-colors duration-150",
-              activeTab === tab.id
-                ? "bg-surface-elevated text-ink border border-hairline-strong"
-                : "bg-surface-elevated text-body hover:text-ink",
-            ].join(" ")}
-            aria-current={activeTab === tab.id ? "true" : undefined}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </nav>
+      <div className="flex flex-col gap-6 lg:flex-row lg:gap-8">
+        <nav
+          className={[
+            "flex shrink-0 gap-2 overflow-x-auto pb-1 lg:w-[180px] lg:max-w-[180px] lg:flex-col lg:overflow-visible lg:pb-0",
+          ].join(" ")}
+          aria-label="Sections des réglages"
+        >
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveTab(tab.id)}
+              className={[
+                "shrink-0 rounded-md px-3 py-2 text-left",
+                "font-[family-name:var(--font-body)] text-sm font-medium tracking-wide",
+                "transition-colors duration-150",
+                "lg:w-full",
+                activeTab === tab.id
+                  ? "border border-hairline-strong bg-surface-elevated text-ink"
+                  : "border border-transparent text-body hover:text-ink lg:hover:bg-surface-elevated/50",
+              ].join(" ")}
+              aria-current={activeTab === tab.id ? "true" : undefined}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </nav>
 
+        <div className="min-w-0 flex-1">
       {activeTab === "general" && (
         <Card variant="bordered" className="space-y-6 p-6">
           <div className="flex flex-col gap-2">
@@ -522,7 +527,7 @@ export function SettingsView() {
         </Card>
       )}
 
-      <footer className="flex flex-wrap items-center justify-between gap-4 border-t border-divider-soft pt-6">
+      <footer className="mt-6 flex flex-wrap items-center justify-between gap-4 border-t border-divider-soft pt-6">
         <Button
           variant="ghost"
           disabled={!loaded || saving}
@@ -536,6 +541,8 @@ export function SettingsView() {
           {saving ? "Enregistrement…" : "Enregistrement automatique"}
         </Button>
       </footer>
+        </div>
+      </div>
     </div>
   );
 }

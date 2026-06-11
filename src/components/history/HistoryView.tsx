@@ -120,7 +120,7 @@ export function HistoryView() {
                   onClick={() => handleEntryClick(entry.id)}
                   onDoubleClick={() => handleEntryDoubleClick(entry.id)}
                   className={[
-                    "w-full rounded-lg border border-hairline-strong bg-surface-card p-5",
+                    "w-full rounded-lg border border-hairline-strong bg-surface-card p-4 sm:p-5",
                     "text-left transition-colors duration-150",
                     "hover:border-hairline-strong hover:bg-surface-elevated",
                     "focus-visible:border-ink focus-visible:outline-none",

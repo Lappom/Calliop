@@ -1,4 +1,5 @@
 use rusqlite::params;
+use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 
 use super::db::{Store, StoreError};
@@ -81,6 +82,33 @@ impl Store {
     pub fn remove_snippet(&self, id: i64) -> Result<bool, StoreError> {
         let conn = self.connection().lock().expect("store mutex poisoned");
         let changed = conn.execute("DELETE FROM snippets WHERE id = ?1", params![id])?;
+        Ok(changed > 0)
+    }
+
+    pub fn update_snippet(&self, id: i64, trigger: &str, content: &str) -> Result<bool, StoreError> {
+        let normalized_trigger = normalize_trigger(trigger);
+        let trimmed_content = content.trim();
+        if !is_valid_trigger(&normalized_trigger) || !is_valid_snippet_content(trimmed_content) {
+            return Ok(false);
+        }
+
+        let conn = self.connection().lock().expect("store mutex poisoned");
+        let conflict: Option<i64> = conn
+            .query_row(
+                "SELECT id FROM snippets WHERE trigger = ?1 COLLATE NOCASE AND id != ?2",
+                params![normalized_trigger, id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if conflict.is_some() {
+            return Ok(false);
+        }
+
+        let changed = conn.execute(
+            "UPDATE snippets SET trigger = ?1, content = ?2 WHERE id = ?3",
+            params![normalized_trigger, trimmed_content, id],
+        )?;
+
         Ok(changed > 0)
     }
 
@@ -202,6 +230,36 @@ mod tests {
         )
         .unwrap();
         Store::from_connection(conn)
+    }
+
+    #[test]
+    fn update_snippet_changes_trigger_and_content() {
+        let store = test_store();
+        store.add_snippet("old trigger", "old content").unwrap();
+        let id = store.list_snippets().unwrap()[0].id;
+
+        assert!(store
+            .update_snippet(id, "New Trigger", "new content")
+            .unwrap());
+        let snippets = store.list_snippets().unwrap();
+        assert_eq!(snippets[0].trigger, "new trigger");
+        assert_eq!(snippets[0].content, "new content");
+    }
+
+    #[test]
+    fn update_snippet_rejects_duplicate_trigger() {
+        let store = test_store();
+        store.add_snippet("alpha", "a").unwrap();
+        store.add_snippet("beta", "b").unwrap();
+        let beta_id = store
+            .list_snippets()
+            .unwrap()
+            .into_iter()
+            .find(|s| s.trigger == "beta")
+            .unwrap()
+            .id;
+
+        assert!(!store.update_snippet(beta_id, "Alpha", "b2").unwrap());
     }
 
     #[test]

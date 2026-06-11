@@ -28,7 +28,7 @@ export function DictionaryView() {
 
       <Card variant="bordered" className="space-y-6 p-6">
         <form
-          className="flex flex-wrap items-end gap-3"
+          className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end"
           onSubmit={(event) => {
             event.preventDefault();
             void addWord(newWord).then((inserted) => {
@@ -71,7 +71,7 @@ export function DictionaryView() {
             {words.map((entry) => (
               <li
                 key={entry.id}
-                className="flex items-center justify-between gap-4 px-4 py-3"
+                className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
               >
                 <div className="flex min-w-0 items-center gap-3">
                   <span className="truncate text-body-md text-ink">

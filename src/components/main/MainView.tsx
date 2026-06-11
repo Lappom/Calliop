@@ -61,7 +61,7 @@ export function MainView({
       </header>
 
       <SectionGlow glow={glow} className="mb-8">
-        <Card variant="bordered" className="relative p-6 sm:p-8">
+        <Card variant="bordered" className="relative p-4 sm:p-6 lg:p-8">
           <div aria-live="polite">
             {!modelReady && modelProgress !== null && (
               <ProgressBar

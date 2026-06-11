@@ -963,6 +963,49 @@ fn add_snippet(
 }
 
 #[tauri::command]
+fn update_snippet(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: i64,
+    trigger: String,
+    content: String,
+) -> Result<bool, String> {
+    let normalized_trigger = normalize_trigger(&trigger);
+    if normalized_trigger.is_empty() {
+        return Err("Le déclencheur ne peut pas être vide.".into());
+    }
+    if !is_valid_trigger(&normalized_trigger) {
+        return Err("Le déclencheur doit contenir au moins 2 caractères.".into());
+    }
+    if !is_valid_snippet_content(&content) {
+        return Err("Le texte du snippet ne peut pas être vide.".into());
+    }
+
+    let previous = state
+        .store
+        .get_snippet_by_id(id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Snippet introuvable.".to_string())?;
+
+    let updated = state
+        .store
+        .update_snippet(id, &normalized_trigger, &content)
+        .map_err(|e| e.to_string())?;
+
+    if updated {
+        if let Err(err) = refresh_whisper_prompt_state(&state) {
+            let _ = state
+                .store
+                .update_snippet(id, &previous.trigger, &previous.content);
+            return Err(err);
+        }
+        emit_snippets_updated(&app);
+    }
+
+    Ok(updated)
+}
+
+#[tauri::command]
 fn remove_snippet(app: AppHandle, state: State<'_, AppState>, id: i64) -> Result<(), String> {
     let entry = state
         .store
@@ -1771,6 +1814,7 @@ pub fn run() {
             learn_from_correction,
             list_snippets,
             add_snippet,
+            update_snippet,
             remove_snippet,
             import_snippets,
             export_snippets,

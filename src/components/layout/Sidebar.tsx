@@ -13,6 +13,8 @@ import type { AppView } from "../../lib/views";
 interface SidebarProps {
   currentView: AppView;
   onNavigate: (view: AppView) => void;
+  open: boolean;
+  onClose: () => void;
 }
 
 interface NavItem {
@@ -44,17 +46,22 @@ function NavButton({
   item,
   active,
   onNavigate,
+  onClose,
 }: {
   item: NavItem;
   active: boolean;
   onNavigate: (view: AppView) => void;
+  onClose: () => void;
 }) {
   const Icon = item.icon;
 
   return (
     <button
       type="button"
-      onClick={() => onNavigate(item.id)}
+      onClick={() => {
+        onNavigate(item.id);
+        onClose();
+      }}
       className={[
         "group relative flex w-full items-center gap-3 rounded-md px-3 py-2",
         "font-[family-name:var(--font-body)] text-sm font-medium tracking-wide",
@@ -84,53 +91,74 @@ function NavButton({
   );
 }
 
-export function Sidebar({ currentView, onNavigate }: SidebarProps) {
+export function Sidebar({ currentView, onNavigate, open, onClose }: SidebarProps) {
   return (
-    <aside className="relative flex w-[220px] shrink-0 flex-col border-r border-hairline bg-canvas">
-      <div
-        className="pointer-events-none absolute inset-x-0 top-0 h-32"
-        style={{
-          background:
-            "radial-gradient(ellipse 80% 100% at 50% 0%, var(--color-accent-blue-glow) 0%, transparent 70%)",
-          opacity: 0.08,
-        }}
-        aria-hidden
-      />
-
-      <div className="relative px-5 pb-4 pt-6">
+    <>
+      {open && (
         <button
           type="button"
-          onClick={() => onNavigate("main")}
-          className="text-display-serif text-2xl text-ink transition-opacity hover:opacity-80"
-        >
-          Calliop
-        </button>
-      </div>
+          className="fixed inset-0 z-30 bg-black/60 lg:hidden"
+          aria-label="Fermer le menu"
+          onClick={onClose}
+        />
+      )}
 
-      <nav
-        className="relative flex flex-1 flex-col gap-1 px-3"
-        aria-label="Navigation principale"
+      <aside
+        className={[
+          "fixed inset-y-0 left-0 z-40 flex h-screen w-[220px] min-w-[220px] max-w-[220px] shrink-0 flex-col",
+          "border-r border-hairline bg-canvas transition-transform duration-200 ease-out",
+          "lg:static lg:sticky lg:top-0 lg:translate-x-0",
+          open ? "translate-x-0" : "-translate-x-full lg:translate-x-0",
+        ].join(" ")}
+        aria-label="Navigation"
       >
-        {primaryItems.map((item) => (
-          <NavButton
-            key={item.id}
-            item={item}
-            active={currentView === item.id}
-            onNavigate={onNavigate}
-          />
-        ))}
-      </nav>
+        <div
+          className="pointer-events-none absolute inset-x-0 top-0 h-32"
+          style={{
+            background:
+              "radial-gradient(ellipse 80% 100% at 50% 0%, var(--color-accent-blue-glow) 0%, transparent 70%)",
+            opacity: 0.08,
+          }}
+          aria-hidden
+        />
 
-      <div className="relative mt-auto flex flex-col gap-1 border-t border-hairline px-3 py-4">
-        {bottomItems.map((item) => (
-          <NavButton
-            key={item.id}
-            item={item}
-            active={currentView === item.id}
-            onNavigate={onNavigate}
-          />
-        ))}
-      </div>
-    </aside>
+        <div className="relative hidden px-5 pb-4 pt-6 lg:block">
+          <button
+            type="button"
+            onClick={() => onNavigate("main")}
+            className="text-display-serif text-2xl text-ink transition-opacity hover:opacity-80"
+          >
+            Calliop
+          </button>
+        </div>
+
+        <nav
+          className="relative flex flex-1 flex-col gap-1 overflow-y-auto px-3 pt-6 lg:pt-0"
+          aria-label="Navigation principale"
+        >
+          {primaryItems.map((item) => (
+            <NavButton
+              key={item.id}
+              item={item}
+              active={currentView === item.id}
+              onNavigate={onNavigate}
+              onClose={onClose}
+            />
+          ))}
+        </nav>
+
+        <div className="relative mt-auto flex flex-col gap-1 border-t border-hairline px-3 py-4">
+          {bottomItems.map((item) => (
+            <NavButton
+              key={item.id}
+              item={item}
+              active={currentView === item.id}
+              onNavigate={onNavigate}
+              onClose={onClose}
+            />
+          ))}
+        </div>
+      </aside>
+    </>
   );
 }
