@@ -1,15 +1,18 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { SttLanguageCode } from "./useSttLanguage";
 
 export interface AppSettings {
   autoEdit: boolean;
   autoLearn: boolean;
+  sttLanguage: SttLanguageCode;
 }
 
 interface SettingsPayload {
   auto_edit: boolean;
   auto_learn: boolean;
+  stt_language: string;
 }
 
 interface LlmModelDownloadProgress {
@@ -23,13 +26,19 @@ function toPayload(settings: AppSettings): SettingsPayload {
   return {
     auto_edit: settings.autoEdit,
     auto_learn: settings.autoLearn,
+    stt_language: settings.sttLanguage,
   };
 }
 
 function fromPayload(payload: SettingsPayload): AppSettings {
+  const sttLanguage =
+    payload.stt_language === "en" || payload.stt_language === "auto"
+      ? payload.stt_language
+      : "fr";
   return {
     autoEdit: payload.auto_edit,
     autoLearn: payload.auto_learn,
+    sttLanguage,
   };
 }
 
@@ -37,6 +46,7 @@ export function useSettings() {
   const [settings, setSettings] = useState<AppSettings>({
     autoEdit: false,
     autoLearn: true,
+    sttLanguage: "fr",
   });
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -147,6 +157,13 @@ export function useSettings() {
     [saveSettings],
   );
 
+  const setSttLanguage = useCallback(
+    async (sttLanguage: AppSettings["sttLanguage"]) => {
+      await saveSettings({ ...settingsRef.current, sttLanguage });
+    },
+    [saveSettings],
+  );
+
   return {
     settings,
     loaded,
@@ -156,6 +173,7 @@ export function useSettings() {
     llmProgress,
     setAutoEdit,
     setAutoLearn,
+    setSttLanguage,
     saveSettings,
   };
 }

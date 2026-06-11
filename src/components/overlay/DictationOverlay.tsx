@@ -1,3 +1,4 @@
+import { useSttLanguage } from "../../hooks/useSttLanguage";
 import {
   pipelineGlow,
   pipelineStatusColor,
@@ -15,6 +16,7 @@ export function DictationOverlay() {
     errorMessage,
     audioLevel,
   } = usePipelineState();
+  const { languageLabel, cycling, cycleLanguage } = useSttLanguage();
   const glow = pipelineGlow(pipelineState, Boolean(errorMessage));
   const statusColor = pipelineStatusColor(
     pipelineState,
@@ -40,6 +42,24 @@ export function DictationOverlay() {
               </p>
               <WaveformVisualizer state={pipelineState} level={audioLevel} />
             </div>
+            {pipelineState === "recording" && (
+              <button
+                type="button"
+                disabled={cycling}
+                onClick={() => {
+                  void cycleLanguage();
+                }}
+                className={[
+                  "shrink-0 rounded border border-hairline-strong px-2 py-0.5",
+                  "font-[family-name:var(--font-body)] text-[10px] font-semibold tracking-wider text-charcoal",
+                  "cursor-pointer transition-colors hover:bg-surface-elevated hover:text-ink",
+                  "disabled:cursor-not-allowed disabled:opacity-50",
+                ].join(" ")}
+                aria-label={`Langue de dictée : ${languageLabel}. Cliquer pour changer.`}
+              >
+                {languageLabel}
+              </button>
+            )}
           </div>
           {partialTranscript && (
             <p

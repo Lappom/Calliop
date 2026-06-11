@@ -15,7 +15,7 @@ pub use dictionary::{
     extract_correction_words, is_valid_dictionary_word, normalize_word, DictionarySource,
     DictionaryWord,
 };
-pub use settings::{AppSettings, KEY_AUTO_EDIT, KEY_AUTO_LEARN};
+pub use settings::{AppSettings, KEY_AUTO_EDIT, KEY_AUTO_LEARN, KEY_STT_LANGUAGE};
 pub use snippets::{
     is_valid_snippet_content, is_valid_trigger, normalize_trigger, Snippet, SnippetImport,
 };

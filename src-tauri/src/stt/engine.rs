@@ -2,8 +2,11 @@ use std::path::Path;
 
 use thiserror::Error;
 use whisper_rs::{
-    FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, WhisperState,
+    get_lang_str, FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters,
+    WhisperState,
 };
+
+use super::language::SttLanguage;
 
 pub const DEFAULT_LANGUAGE: &str = "fr";
 pub const MAX_INITIAL_PROMPT_WORDS: usize = 200;
@@ -22,9 +25,15 @@ pub enum SttError {
     EmptyAudio,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TranscriptResult {
+    pub text: String,
+    pub detected_language: Option<String>,
+}
+
 pub struct WhisperEngine {
     context: WhisperContext,
-    language: String,
+    language: SttLanguage,
     n_threads: i32,
 }
 
@@ -44,7 +53,7 @@ impl WhisperEngine {
 
         Ok(Self {
             context,
-            language: DEFAULT_LANGUAGE.into(),
+            language: SttLanguage::default_fixed(),
             n_threads: std::thread::available_parallelism()
                 .map(|n| n.get() as i32)
                 .unwrap_or(4)
@@ -52,8 +61,12 @@ impl WhisperEngine {
         })
     }
 
-    pub fn language(&self) -> &str {
+    pub fn language(&self) -> &SttLanguage {
         &self.language
+    }
+
+    pub fn set_language(&mut self, language: SttLanguage) {
+        self.language = language;
     }
 
     pub fn n_threads(&self) -> i32 {
@@ -64,7 +77,16 @@ impl WhisperEngine {
         &self,
         audio: &[f32],
         initial_prompt: Option<&str>,
-    ) -> Result<String, SttError> {
+    ) -> Result<TranscriptResult, SttError> {
+        self.transcribe_with_language(audio, initial_prompt, self.language)
+    }
+
+    pub fn transcribe_with_language(
+        &self,
+        audio: &[f32],
+        initial_prompt: Option<&str>,
+        language: SttLanguage,
+    ) -> Result<TranscriptResult, SttError> {
         if audio.is_empty() {
             return Err(SttError::EmptyAudio);
         }
@@ -75,17 +97,23 @@ impl WhisperEngine {
             .map_err(|e| SttError::CreateState(e.to_string()))?;
 
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-        configure_full_params(
-            &mut params,
-            self.language(),
-            self.n_threads(),
-            initial_prompt,
-        );
+        configure_full_params(&mut params, language, self.n_threads(), initial_prompt);
         state
             .full(params, audio)
             .map_err(|e| SttError::Transcribe(e.to_string()))?;
 
-        collect_transcript(&state)
+        let text = collect_transcript(&state)?;
+        let detected_language = if matches!(language, SttLanguage::Auto) {
+            let lang_id = state.full_lang_id_from_state();
+            get_lang_str(lang_id).map(str::to_string)
+        } else {
+            None
+        };
+
+        Ok(TranscriptResult {
+            text,
+            detected_language,
+        })
     }
 }
 
@@ -125,13 +153,20 @@ pub fn build_initial_prompt(words: &[String]) -> Option<String> {
     }
 }
 
-pub fn configure_full_params<'a>(
-    params: &mut FullParams<'a, 'a>,
-    language: &'a str,
+pub fn configure_full_params(
+    params: &mut FullParams<'_, '_>,
+    language: SttLanguage,
     n_threads: i32,
     initial_prompt: Option<&str>,
 ) {
-    params.set_language(Some(language));
+    match language {
+        SttLanguage::Auto => {
+            params.set_detect_language(true);
+        }
+        SttLanguage::Fixed(code) => {
+            params.set_language(Some(code));
+        }
+    }
     params.set_translate(false);
     params.set_n_threads(n_threads);
     params.set_print_special(false);

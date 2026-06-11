@@ -16,7 +16,7 @@ use crate::inject::{InjectError, TextInjector};
 use crate::llm::LlamaEngine;
 use crate::observe::CorrectionHandler;
 use crate::store::{AppContextRule, Snippet};
-use crate::stt::{SttError, WhisperEngine};
+use crate::stt::{SttError, SttLanguage, WhisperEngine};
 
 use super::snippets::{apply_snippets, finalize_llm_with_snippets, shield_snippet_triggers};
 
@@ -75,6 +75,12 @@ pub struct AudioLevelEvent {
     pub level: f32,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct SttLanguageChangedEvent {
+    pub language: String,
+    pub detected: bool,
+}
+
 #[derive(Debug, Error)]
 pub enum PipelineError {
     #[error(transparent)]
@@ -101,6 +107,11 @@ struct StreamingSession {
     level_listener: Option<JoinHandle<()>>,
 }
 
+struct FailedSegment {
+    samples: Vec<f32>,
+    language: SttLanguage,
+}
+
 pub struct PipelineOrchestrator {
     state: PipelineState,
     audio: AudioCapture,
@@ -111,7 +122,7 @@ pub struct PipelineOrchestrator {
     auto_edit: Arc<AtomicBool>,
     streaming: Option<StreamingSession>,
     segment_transcripts: Arc<Mutex<Vec<String>>>,
-    failed_segments: Arc<Mutex<Vec<Vec<f32>>>>,
+    failed_segments: Arc<Mutex<Vec<FailedSegment>>>,
     streaming_stt_ms: Arc<AtomicU64>,
     dictionary_prompt: Arc<RwLock<Option<String>>>,
     snippets: Arc<RwLock<Vec<Snippet>>>,
@@ -119,6 +130,10 @@ pub struct PipelineOrchestrator {
     auto_learn: Arc<AtomicBool>,
     observer_generation: Arc<AtomicU64>,
     correction_handler: Option<CorrectionHandler>,
+    default_stt_language: Arc<RwLock<SttLanguage>>,
+    session_stt_language: Arc<RwLock<SttLanguage>>,
+    session_detected_language: Arc<RwLock<Option<SttLanguage>>>,
+    pending_detection: Arc<Mutex<Option<SttLanguage>>>,
 }
 
 impl PipelineOrchestrator {
@@ -141,6 +156,10 @@ impl PipelineOrchestrator {
             auto_learn: Arc::new(AtomicBool::new(true)),
             observer_generation: Arc::new(AtomicU64::new(0)),
             correction_handler: None,
+            default_stt_language: Arc::new(RwLock::new(SttLanguage::default_fixed())),
+            session_stt_language: Arc::new(RwLock::new(SttLanguage::default_fixed())),
+            session_detected_language: Arc::new(RwLock::new(None)),
+            pending_detection: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -212,6 +231,53 @@ impl PipelineOrchestrator {
         self.whisper.lock().is_some()
     }
 
+    pub fn set_default_stt_language(&mut self, language: SttLanguage) {
+        *self.default_stt_language.write() = language;
+        if self.state == PipelineState::Idle {
+            *self.session_stt_language.write() = language;
+            *self.session_detected_language.write() = None;
+            *self.pending_detection.lock() = None;
+            self.sync_whisper_language();
+        }
+    }
+
+    pub fn notify_stt_language_changed(&self, app: &AppHandle) {
+        emit_stt_language_changed(app, &self.effective_stt_language(), false);
+    }
+
+    /// Language shown in the UI and used as the base for mid-dictation cycling.
+    pub fn effective_stt_language(&self) -> SttLanguage {
+        let session = *self.session_stt_language.read();
+        match session {
+            SttLanguage::Auto => self.session_detected_language.read().unwrap_or(session),
+            fixed => fixed,
+        }
+    }
+
+    pub fn cycle_session_language(
+        &mut self,
+        app: &AppHandle,
+    ) -> Result<SttLanguage, PipelineError> {
+        if self.state != PipelineState::Recording {
+            return Err(PipelineError::Busy(self.state));
+        }
+
+        let next = self.effective_stt_language().cycle();
+        *self.session_stt_language.write() = next;
+        *self.session_detected_language.write() = None;
+        *self.pending_detection.lock() = None;
+        self.sync_whisper_language();
+        emit_stt_language_changed(app, &next, false);
+        Ok(next)
+    }
+
+    fn sync_whisper_language(&self) {
+        let language = *self.session_stt_language.read();
+        if let Some(engine) = self.whisper.lock().as_mut() {
+            engine.set_language(language);
+        }
+    }
+
     pub fn start(&mut self, app: &AppHandle) -> Result<(), PipelineError> {
         if self.state != PipelineState::Idle {
             return Err(PipelineError::Busy(self.state));
@@ -246,6 +312,12 @@ impl PipelineOrchestrator {
         self.streaming_stt_ms.store(0, Ordering::SeqCst);
         let _ = app.emit("partial-transcript-reset", ());
 
+        *self.session_stt_language.write() = *self.default_stt_language.read();
+        *self.session_detected_language.write() = None;
+        *self.pending_detection.lock() = None;
+        self.sync_whisper_language();
+        emit_stt_language_changed(app, &self.effective_stt_language(), false);
+
         // Fail fast before opening the mic if VAD cannot initialize.
         VadSegmenter::new()?;
 
@@ -263,6 +335,9 @@ impl PipelineOrchestrator {
         let failed_segments = Arc::clone(&self.failed_segments);
         let stt_time_ms = Arc::clone(&self.streaming_stt_ms);
         let dictionary_prompt = Arc::clone(&self.dictionary_prompt);
+        let session_stt_language = Arc::clone(&self.session_stt_language);
+        let session_detected_language = Arc::clone(&self.session_detected_language);
+        let pending_detection = Arc::clone(&self.pending_detection);
         let worker = thread::spawn(move || {
             streaming_worker(
                 app_worker,
@@ -274,6 +349,9 @@ impl PipelineOrchestrator {
                     failed_segments,
                     stt_time_ms,
                     dictionary_prompt,
+                    session_stt_language,
+                    session_detected_language,
+                    pending_detection,
                 },
             );
         });
@@ -333,12 +411,12 @@ impl PipelineOrchestrator {
             };
 
             let prompt = self.dictionary_prompt.read().clone();
-            for segment in failed_segments {
+            for FailedSegment { samples, language } in failed_segments {
                 let retry_start = Instant::now();
-                match engine.transcribe(&segment, prompt.as_deref()) {
-                    Ok(text) if !text.is_empty() => {
+                match engine.transcribe_with_language(&samples, prompt.as_deref(), language) {
+                    Ok(result) if !result.text.is_empty() => {
                         fallback_stt_ms += retry_start.elapsed().as_millis() as u64;
-                        transcripts.push(text);
+                        transcripts.push(result.text);
                     }
                     Ok(_) => {}
                     Err(err) => eprintln!("failed segment retry transcription failed: {err}"),
@@ -348,10 +426,12 @@ impl PipelineOrchestrator {
             // Fallback: if VAD produced no segments, transcribe the full buffer.
             if transcripts.is_empty() && !samples.is_empty() {
                 let fallback_start = Instant::now();
-                let text = engine.transcribe(&samples, prompt.as_deref())?;
+                let fallback_language = *self.session_stt_language.read();
+                let result =
+                    engine.transcribe_with_language(&samples, prompt.as_deref(), fallback_language)?;
                 fallback_stt_ms += fallback_start.elapsed().as_millis() as u64;
-                if !text.is_empty() {
-                    transcripts.push(text);
+                if !result.text.is_empty() {
+                    transcripts.push(result.text);
                 }
             }
         }
@@ -724,9 +804,12 @@ fn force_kill_sidecar(pid: u32) {
 struct StreamingSttContext {
     whisper: Arc<Mutex<Option<WhisperEngine>>>,
     transcripts: Arc<Mutex<Vec<String>>>,
-    failed_segments: Arc<Mutex<Vec<Vec<f32>>>>,
+    failed_segments: Arc<Mutex<Vec<FailedSegment>>>,
     stt_time_ms: Arc<AtomicU64>,
     dictionary_prompt: Arc<RwLock<Option<String>>>,
+    session_stt_language: Arc<RwLock<SttLanguage>>,
+    session_detected_language: Arc<RwLock<Option<SttLanguage>>>,
+    pending_detection: Arc<Mutex<Option<SttLanguage>>>,
 }
 
 fn streaming_worker(
@@ -782,17 +865,24 @@ fn transcribe_segment(
 ) {
     let stt_start = Instant::now();
     let prompt = stt.dictionary_prompt.read().clone();
+    let segment_language = *stt.session_stt_language.read();
     let text = {
         let engine_guard = stt.whisper.lock();
         let Some(engine) = engine_guard.as_ref() else {
-            stt.failed_segments.lock().push(segment);
+            stt.failed_segments.lock().push(FailedSegment {
+                samples: segment,
+                language: segment_language,
+            });
             return;
         };
-        match engine.transcribe(&segment, prompt.as_deref()) {
-            Ok(text) => text,
+        match engine.transcribe_with_language(&segment, prompt.as_deref(), segment_language) {
+            Ok(result) => result,
             Err(err) => {
                 eprintln!("segment transcription failed: {err}");
-                stt.failed_segments.lock().push(segment);
+                stt.failed_segments.lock().push(FailedSegment {
+                    samples: segment,
+                    language: segment_language,
+                });
                 return;
             }
         }
@@ -800,17 +890,58 @@ fn transcribe_segment(
     stt.stt_time_ms
         .fetch_add(stt_start.elapsed().as_millis() as u64, Ordering::SeqCst);
 
-    if text.is_empty() {
+    if let Some(detected) = text.detected_language.as_deref() {
+        maybe_commit_auto_detection(app, stt, detected);
+    }
+
+    if text.text.is_empty() {
         return;
     }
 
-    stt.transcripts.lock().push(text.clone());
+    stt.transcripts.lock().push(text.text.clone());
 
     let _ = app.emit(
         "partial-transcript",
         PartialTranscriptEvent {
-            text,
+            text: text.text,
             segment_index,
+        },
+    );
+}
+
+fn maybe_commit_auto_detection(app: &AppHandle, stt: &StreamingSttContext, detected_code: &str) {
+    if !matches!(*stt.session_stt_language.read(), SttLanguage::Auto) {
+        return;
+    }
+
+    let Some(detected) = SttLanguage::parse(detected_code) else {
+        return;
+    };
+    if matches!(detected, SttLanguage::Auto) {
+        return;
+    }
+
+    if *stt.session_detected_language.read() == Some(detected) {
+        return;
+    }
+
+    let mut pending = stt.pending_detection.lock();
+    if *pending == Some(detected) {
+        *pending = None;
+        drop(pending);
+        *stt.session_detected_language.write() = Some(detected);
+        emit_stt_language_changed(app, &detected, true);
+    } else {
+        *pending = Some(detected);
+    }
+}
+
+fn emit_stt_language_changed(app: &AppHandle, language: &SttLanguage, detected: bool) {
+    let _ = app.emit(
+        "stt-language-changed",
+        SttLanguageChangedEvent {
+            language: language.as_setting_value(),
+            detected,
         },
     );
 }

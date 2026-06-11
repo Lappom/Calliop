@@ -21,8 +21,7 @@ pub fn get_active_window() -> Option<ActiveWindow> {
 
     let title = read_window_title(hwnd)?;
     let process_id = window_process_id(hwnd);
-    let (exe_name, exe_path) =
-        read_process_info(hwnd).unwrap_or((String::new(), None));
+    let (exe_name, exe_path) = read_process_info(hwnd).unwrap_or((String::new(), None));
     if is_own_process(&exe_path, process_id) {
         return None;
     }
@@ -116,10 +115,7 @@ mod tests {
 
     #[test]
     fn is_own_process_matches_current_pid() {
-        assert!(super::is_own_process(
-            &None,
-            Some(std::process::id())
-        ));
+        assert!(super::is_own_process(&None, Some(std::process::id())));
     }
 
     #[test]
