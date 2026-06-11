@@ -6,10 +6,6 @@ import {
 
   Plus,
 
-  RefreshCw,
-
-  Search,
-
 } from "lucide-react";
 
 import { useMemo, useState } from "react";
@@ -20,11 +16,15 @@ import type { Snippet } from "../../hooks/useSnippets";
 
 import { useSnippets } from "../../hooks/useSnippets";
 
+import { useRefreshSpin } from "../../hooks/useRefreshSpin";
+
 import { SectionGlow } from "../layout/SectionGlow";
 
 import { Button } from "../ui/Button";
 
-import { TextInput } from "../ui/TextInput";
+import { ExpandableSearchField } from "../ui/ExpandableSearchField";
+
+import { RefreshIcon } from "../ui/RefreshIcon";
 
 import { toolbarMenuOptions } from "../ui/toolbarMenu";
 
@@ -100,19 +100,11 @@ export function SnippetsView() {
 
     errorMessage,
 
-    fileInputRef,
-
     addSnippet,
 
     updateSnippet,
 
     removeSnippet,
-
-    exportSnippets,
-
-    openImportDialog,
-
-    handleImportFile,
 
     saveUserName,
 
@@ -121,6 +113,8 @@ export function SnippetsView() {
     reload,
 
   } = useSnippets();
+
+  const { spinning: refreshSpinning, runRefresh } = useRefreshSpin(busy);
 
 
 
@@ -272,60 +266,6 @@ export function SnippetsView() {
 
           </Button>
 
-          <input
-
-            ref={fileInputRef}
-
-            type="file"
-
-            accept=".json,application/json"
-
-            className="hidden"
-
-            onChange={(event) => {
-
-              void handleImportFile(event);
-
-            }}
-
-          />
-
-          <Button
-
-            type="button"
-
-            variant="ghost"
-
-            disabled={!loaded || busy}
-
-            onClick={openImportDialog}
-
-          >
-
-            {t("snippets.importJson")}
-
-          </Button>
-
-          <Button
-
-            type="button"
-
-            variant="ghost"
-
-            disabled={!loaded || busy || snippets.length === 0}
-
-            onClick={() => {
-
-              void exportSnippets();
-
-            }}
-
-          >
-
-            {t("snippets.exportJson")}
-
-          </Button>
-
         </div>
 
 
@@ -334,35 +274,33 @@ export function SnippetsView() {
 
           <div className="flex items-center gap-1">
 
-            <SnippetListToolbarButton
+            <ExpandableSearchField
 
-              label={t("common.search")}
-
-              active={searchOpen}
+              open={searchOpen}
 
               disabled={busy}
 
-              onClick={() => {
+              label={t("snippets.searchLabel")}
 
-                setSearchOpen((current) => {
+              placeholder={t("snippets.searchPlaceholder")}
 
-                  if (current) {
+              value={searchQuery}
 
-                    setSearchQuery("");
+              onChange={setSearchQuery}
 
-                  }
+              onOpenChange={(next) => {
 
-                  return !current;
+                if (!next) {
 
-                });
+                  setSearchQuery("");
+
+                }
+
+                setSearchOpen(next);
 
               }}
 
-            >
-
-              <Search size={16} strokeWidth={1.75} />
-
-            </SnippetListToolbarButton>
+            />
 
             <SnippetListToolbarButton
 
@@ -390,25 +328,17 @@ export function SnippetsView() {
 
               label={t("common.refreshList")}
 
-              disabled={busy}
+              disabled={busy || refreshSpinning}
 
               onClick={() => {
 
-                void reload();
+                void runRefresh(() => reload());
 
               }}
 
             >
 
-              <RefreshCw
-
-                size={16}
-
-                strokeWidth={1.75}
-
-                className={busy ? "animate-spin" : undefined}
-
-              />
+              <RefreshIcon spinning={refreshSpinning} />
 
             </SnippetListToolbarButton>
 
@@ -417,28 +347,6 @@ export function SnippetsView() {
         )}
 
       </div>
-
-
-
-      {loaded && snippets.length > 0 && searchOpen && (
-
-        <TextInput
-
-          label={t("snippets.searchLabel")}
-
-          value={searchQuery}
-
-          onChange={(event) => setSearchQuery(event.target.value)}
-
-          placeholder={t("snippets.searchPlaceholder")}
-
-          disabled={busy}
-
-          autoFocus
-
-        />
-
-      )}
 
 
 

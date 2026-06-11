@@ -136,6 +136,24 @@ body {
   outline-offset: 2px;
 }
 
+@keyframes pipeline-glow-breathe {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.glow-surface-pulse::before {
+  animation: pipeline-glow-breathe 2.4s ease-in-out infinite;
+}
+
+.glow-surface-pulse-slow::before {
+  animation: pipeline-glow-breathe 3.2s ease-in-out infinite;
+}
+
 @keyframes overlay-pill-in {
   0% {
     opacity: 0;
@@ -263,5 +281,16 @@ body {
 @media (max-width: 1023px) {
   .text-heading-md {
     font-size: 20px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

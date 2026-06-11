@@ -1,6 +1,6 @@
 import type { TFunction } from "i18next";
 import type { LatencyMetricsPayload, PipelineState } from "../../hooks/usePipelineState";
-import type { GlowColor } from "../layout/glowSurface";
+import type { GlowColor, GlowPulse } from "../layout/glowSurface";
 
 export function getStateHints(t: TFunction): Record<PipelineState, string> {
   return {
@@ -32,6 +32,18 @@ export function pipelineCardGlow(
   if (state === "recording") return "green";
   if (state === "transcribing" || state === "injecting") return "blue";
   return null;
+}
+
+export function pipelineCardGlowPulse(
+  state: PipelineState,
+  hasError: boolean,
+  isDownloading: boolean,
+): GlowPulse | undefined {
+  if (isDownloading) return "normal";
+  if (hasError || state === "error") return "slow";
+  if (state === "recording") return "normal";
+  if (state === "transcribing" || state === "injecting") return "slow";
+  return undefined;
 }
 
 export function isPipelineBusy(state: PipelineState): boolean {

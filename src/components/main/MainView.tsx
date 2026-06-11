@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { Stagger } from "../motion/Stagger";
 import type {
   LatencyMetricsPayload,
   PipelineState,
@@ -44,7 +45,7 @@ export function MainView({
   } = useTranscriptCorrection(lastTranscript, transcriptRevision);
 
   return (
-    <div className="flex flex-col gap-8">
+    <Stagger className="flex flex-col gap-8" itemMotion="fade">
       <header>
         <h1 className="text-display-serif mb-2 text-4xl text-ink sm:text-5xl">
           {t("main.title")}
@@ -96,6 +97,6 @@ export function MainView({
         </p>
         <MainHotkeyGuide />
       </section>
-    </div>
+    </Stagger>
   );
 }

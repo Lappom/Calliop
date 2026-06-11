@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { AppFrame } from "./components/layout/AppFrame";
 import { AppShell } from "./components/layout/AppShell";
 import { ModelDownloadToasts } from "./components/layout/ModelDownloadToasts";
+import { PageTransition } from "./components/motion/PageTransition";
 import { StyleView } from "./components/style/StyleView";
 import { DictionaryView } from "./components/dictionary/DictionaryView";
 import { HistoryView } from "./components/history/HistoryView";
@@ -88,15 +89,17 @@ function App() {
     <>
       <AppFrame>
         <AppShell currentView={currentView} onNavigate={setCurrentView}>
-        {currentView === "main" && <MainView {...pipeline} />}
-        {currentView === "dictionary" && <DictionaryView />}
-        {currentView === "snippets" && <SnippetsView />}
-        {currentView === "style" && <StyleView />}
-        {currentView === "history" && <HistoryView />}
-        {currentView === "insight" && (
-          <InsightView latencyMetrics={pipeline.latencyMetrics} />
-        )}
-        {currentView === "settings" && <SettingsView />}
+          <PageTransition viewKey={currentView}>
+            {currentView === "main" && <MainView {...pipeline} />}
+            {currentView === "dictionary" && <DictionaryView />}
+            {currentView === "snippets" && <SnippetsView />}
+            {currentView === "style" && <StyleView />}
+            {currentView === "history" && <HistoryView />}
+            {currentView === "insight" && (
+              <InsightView latencyMetrics={pipeline.latencyMetrics} />
+            )}
+            {currentView === "settings" && <SettingsView />}
+          </PageTransition>
         </AppShell>
       </AppFrame>
       <ModelDownloadToasts />

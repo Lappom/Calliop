@@ -577,6 +577,31 @@ The system has **no traditional drop shadow language**. Every surface either get
 5. Default body type to `{typography.body-md}`; reach for `{typography.subtitle}` only on hero subtitles.
 6. Keep `{colors.primary}` (white) scarce — if more than one solid white surface appears per viewport, ask whether one should drop to `{component.button-ghost}` instead.
 
+## Motion
+
+Editorial restraint — motion confirms state and preserves spatial context; it never decorates.
+
+### Philosophy
+- **Purpose:** feedback (button press), orientation (panel from trigger), continuity (view transitions), rare delight (onboarding stagger).
+- **Forbidden:** animated drop shadows, solid accent surfaces, motion on keyboard/hotkey actions.
+- **Properties:** animate `transform` and `opacity` only; use `border-color` for hover feedback. Never animate `width`, `height`, or `box-shadow`.
+
+### Tokens
+| Token | Value | Use |
+|---|---|---|
+| `{motion.instant}` | 0ms | Reduced-motion fallback |
+| `{motion.fast}` | 150ms | Hover, exit, ephemeral UI |
+| `{motion.base}` | 250ms | Enter, panel open, view transition |
+| `{motion.slow}` | 400ms | Editorial stagger sequences |
+| `{ease.editorial}` | `cubic-bezier(0.16, 1, 0.3, 1)` | Page and section entrances |
+| `{ease.enter}` | `cubic-bezier(0.22, 1, 0.36, 1)` | Standard deceleration |
+| `{ease.spring-soft}` | `cubic-bezier(0.34, 1.2, 0.64, 1)` | Overlay pill only |
+
+### Implementation
+- CSS tokens live in `src/styles/tokens.css`; JS presets in `src/lib/motion/`.
+- View transitions: `PageTransition` with `AnimatePresence mode="wait"`.
+- `prefers-reduced-motion: reduce` disables Motion variants and collapses CSS animations via `globals.css`.
+
 ## Known Gaps
 
 - Pressed/active visual states are documented only for `button-primary-pressed`; other components rely on the default focus-ring (browser default) for interactive feedback.

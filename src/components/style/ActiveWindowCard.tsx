@@ -1,9 +1,11 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { AppWindow, RefreshCw, Sparkles } from "lucide-react";
+import { AppWindow, Sparkles } from "lucide-react";
 import type { ActiveWindow, AppContextRule } from "../../hooks/useAppContext";
+import { useRefreshSpin } from "../../hooks/useRefreshSpin";
 import { SectionGlow } from "../layout/SectionGlow";
 import { Button } from "../ui/Button";
+import { RefreshIcon } from "../ui/RefreshIcon";
 import { getToneMeta, resolveActiveTone } from "./styleUtils";
 import { ToneBadge } from "./ToneBadge";
 
@@ -11,7 +13,7 @@ interface ActiveWindowCardProps {
   activeWindow: ActiveWindow | null;
   rules: AppContextRule[];
   busy: boolean;
-  onRefresh: () => void;
+  onRefresh: () => void | Promise<void>;
   onCreateFromActive: () => void;
 }
 
@@ -23,6 +25,7 @@ export function ActiveWindowCard({
   onCreateFromActive,
 }: ActiveWindowCardProps) {
   const { t } = useTranslation();
+  const { spinning: refreshSpinning, runRefresh } = useRefreshSpin(busy);
   const toneMeta = useMemo(() => getToneMeta(t), [t]);
   const activeTone = resolveActiveTone(rules, activeWindow);
 
@@ -70,11 +73,13 @@ export function ActiveWindowCard({
           <Button
             type="button"
             variant="ghost"
-            disabled={busy}
+            disabled={busy || refreshSpinning}
             className="inline-flex items-center gap-1.5"
-            onClick={onRefresh}
+            onClick={() => {
+              void runRefresh(onRefresh);
+            }}
           >
-            <RefreshCw size={14} aria-hidden />
+            <RefreshIcon spinning={refreshSpinning} size={14} />
             {t("style.activeWindow.refresh")}
           </Button>
           {activeWindow && (

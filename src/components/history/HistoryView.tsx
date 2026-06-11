@@ -1,10 +1,12 @@
-import { ArrowDownUp, RefreshCw, Search } from "lucide-react";
+import { ArrowDownUp } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useUiLocale } from "../../i18n/useUiLocale";
 import { useHistory } from "../../hooks/useHistory";
+import { useRefreshSpin } from "../../hooks/useRefreshSpin";
 import { SnippetListToolbarButton } from "../snippets/SnippetListToolbarButton";
 import { SectionGlow } from "../layout/SectionGlow";
-import { TextInput } from "../ui/TextInput";
+import { ExpandableSearchField } from "../ui/ExpandableSearchField";
+import { RefreshIcon } from "../ui/RefreshIcon";
 import { toolbarMenuOptions } from "../ui/toolbarMenu";
 import { HistoryList } from "./HistoryList";
 import { HistoryPagination } from "./HistoryPagination";
@@ -37,6 +39,8 @@ export function HistoryView() {
     copyEntry,
     reinjectEntry,
   } = useHistory();
+
+  const { spinning: refreshSpinning, runRefresh } = useRefreshSpin(busy);
 
   const sortLabels = useMemo(
     (): Record<HistorySort, string> => ({
@@ -86,22 +90,21 @@ export function HistoryView() {
 
         {loaded && (
           <div className="flex items-center gap-1">
-            <SnippetListToolbarButton
-              label={t("common.search")}
-              active={searchOpen}
-              disabled={busy}
-              onClick={() => {
-                setSearchOpen((current) => {
-                  if (current) {
-                    setSearchQuery("");
-                    void loadEntries({ query: "" });
-                  }
-                  return !current;
-                });
+            <ExpandableSearchField
+              open={searchOpen}
+              disabled={!loaded || busy}
+              label={t("history.searchLabel")}
+              placeholder={t("history.searchPlaceholder")}
+              value={searchQuery}
+              onChange={setSearchQuery}
+              onOpenChange={(next) => {
+                if (!next) {
+                  setSearchQuery("");
+                  void loadEntries({ query: "" });
+                }
+                setSearchOpen(next);
               }}
-            >
-              <Search size={16} strokeWidth={1.75} />
-            </SnippetListToolbarButton>
+            />
             {hasEntries && (
               <>
                 <SnippetListToolbarButton
@@ -120,33 +123,20 @@ export function HistoryView() {
                 </SnippetListToolbarButton>
                 <SnippetListToolbarButton
                   label={t("history.refresh")}
-                  disabled={busy}
+                  disabled={busy || refreshSpinning}
                   onClick={() => {
-                    void loadEntries({ query: searchQuery, page });
+                    void runRefresh(() =>
+                      loadEntries({ query: searchQuery, page }),
+                    );
                   }}
                 >
-                  <RefreshCw
-                    size={16}
-                    strokeWidth={1.75}
-                    className={busy ? "animate-spin" : undefined}
-                  />
+                  <RefreshIcon spinning={refreshSpinning} />
                 </SnippetListToolbarButton>
               </>
             )}
           </div>
         )}
       </div>
-
-      {searchOpen && (
-        <TextInput
-          label={t("history.searchLabel")}
-          value={searchQuery}
-          onChange={(event) => setSearchQuery(event.target.value)}
-          placeholder={t("history.searchPlaceholder")}
-          disabled={!loaded || busy}
-          autoFocus
-        />
-      )}
 
       {errorMessage && (
         <p className="text-body-sm text-accent-red">{errorMessage}</p>

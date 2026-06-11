@@ -1,8 +1,6 @@
 import {
   ArrowDownUp,
   Plus,
-  RefreshCw,
-  Search,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useUiLocale } from "../../i18n/useUiLocale";
@@ -11,10 +9,12 @@ import type {
   ToneProfile,
 } from "../../hooks/useAppContext";
 import { useAppContext } from "../../hooks/useAppContext";
+import { useRefreshSpin } from "../../hooks/useRefreshSpin";
 import { SnippetListToolbarButton } from "../snippets/SnippetListToolbarButton";
 import { SectionGlow } from "../layout/SectionGlow";
 import { Button } from "../ui/Button";
-import { TextInput } from "../ui/TextInput";
+import { ExpandableSearchField } from "../ui/ExpandableSearchField";
+import { RefreshIcon } from "../ui/RefreshIcon";
 import { toolbarMenuOptions } from "../ui/toolbarMenu";
 import { ActiveWindowCard } from "./ActiveWindowCard";
 import { StyleRuleModal } from "./StyleRuleModal";
@@ -60,6 +60,8 @@ export function StyleView() {
     reload,
   } = useAppContext();
 
+  const { spinning: refreshSpinning, runRefresh } = useRefreshSpin(busy);
+
   const sortLabels = useMemo(() => getStyleSortLabels(t), [t]);
 
   useEffect(() => {
@@ -104,7 +106,7 @@ export function StyleView() {
         activeWindow={activeWindow}
         rules={rules}
         busy={busy}
-        onRefresh={() => void refreshActiveWindow()}
+        onRefresh={() => refreshActiveWindow()}
         onCreateFromActive={() => {
           if (!activeWindow) return;
           openModal({
@@ -128,21 +130,20 @@ export function StyleView() {
 
         {loaded && rules.length > 0 && (
           <div className="flex items-center gap-1">
-            <SnippetListToolbarButton
-              label={t("common.search")}
-              active={searchOpen}
+            <ExpandableSearchField
+              open={searchOpen}
               disabled={busy}
-              onClick={() => {
-                setSearchOpen((current) => {
-                  if (current) {
-                    setSearchQuery("");
-                  }
-                  return !current;
-                });
+              label={t("style.searchLabel")}
+              placeholder={t("style.searchPlaceholder")}
+              value={searchQuery}
+              onChange={setSearchQuery}
+              onOpenChange={(next) => {
+                if (!next) {
+                  setSearchQuery("");
+                }
+                setSearchOpen(next);
               }}
-            >
-              <Search size={16} strokeWidth={1.75} />
-            </SnippetListToolbarButton>
+            />
             <SnippetListToolbarButton
               label={sortLabels[sort]}
               disabled={busy}
@@ -156,31 +157,18 @@ export function StyleView() {
             </SnippetListToolbarButton>
             <SnippetListToolbarButton
               label={t("common.refreshList")}
-              disabled={busy}
+              disabled={busy || refreshSpinning}
               onClick={() => {
-                void Promise.all([reload(), refreshActiveWindow()]);
+                void runRefresh(async () => {
+                  await Promise.all([reload(), refreshActiveWindow()]);
+                });
               }}
             >
-              <RefreshCw
-                size={16}
-                strokeWidth={1.75}
-                className={busy ? "animate-spin" : undefined}
-              />
+              <RefreshIcon spinning={refreshSpinning} />
             </SnippetListToolbarButton>
           </div>
         )}
       </div>
-
-      {loaded && rules.length > 0 && searchOpen && (
-        <TextInput
-          label={t("style.searchLabel")}
-          value={searchQuery}
-          onChange={(event) => setSearchQuery(event.target.value)}
-          placeholder={t("style.searchPlaceholder")}
-          disabled={busy}
-          autoFocus
-        />
-      )}
 
       {errorMessage && (
         <p className="text-body-sm text-accent-red">{errorMessage}</p>

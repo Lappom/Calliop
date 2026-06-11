@@ -11,6 +11,7 @@ import {
   getStateHints,
   isPipelineBusy,
   pipelineCardGlow,
+  pipelineCardGlowPulse,
   pipelineStateLabel,
 } from "./mainUtils";
 
@@ -34,16 +35,24 @@ export function PipelineStatusCard({
   const { t } = useTranslation();
   const stateHints = useMemo(() => getStateHints(t), [t]);
   const hasError = Boolean(errorMessage) || pipelineState === "error";
-  const glow = pipelineCardGlow(pipelineState, hasError);
+  const isDownloading = !modelReady && modelProgress !== null;
+  const glow = isDownloading
+    ? "orange"
+    : pipelineCardGlow(pipelineState, hasError);
+  const glowPulse = pipelineCardGlowPulse(
+    pipelineState,
+    hasError,
+    isDownloading,
+  );
   const statusColor = pipelineStatusColor(pipelineState, hasError);
   const busy = isPipelineBusy(pipelineState);
   const showPartial = partialTranscript.length > 0 && pipelineState === "recording";
 
-  if (!modelReady && modelProgress !== null) {
+  if (isDownloading) {
     return (
       <div
         className={[
-          glowSurfaceClasses("orange"),
+          glowSurfaceClasses("orange", glowPulse),
           "rounded-lg border border-hairline-strong bg-surface-card p-5 sm:p-6",
         ].join(" ")}
       >
@@ -67,7 +76,7 @@ export function PipelineStatusCard({
   return (
     <div
       className={[
-        glow ? glowSurfaceClasses(glow) : "",
+        glow ? glowSurfaceClasses(glow, glowPulse) : "",
         "rounded-lg border border-hairline-strong bg-surface-card p-5 sm:p-6",
       ]
         .filter(Boolean)

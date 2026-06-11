@@ -51,6 +51,15 @@
   --spacing-section: 96px;
   --spacing-band: 128px;
 
+  /* Motion — editorial restraint (see DESIGN.md Motion) */
+  --motion-instant: 0ms;
+  --motion-fast: 150ms;
+  --motion-base: 250ms;
+  --motion-slow: 400ms;
+  --ease-editorial: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-enter: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spring-soft: cubic-bezier(0.34, 1.2, 0.64, 1);
+
   /* Border radius */
   --rounded-none: 0px;
   --rounded-xs: 4px;

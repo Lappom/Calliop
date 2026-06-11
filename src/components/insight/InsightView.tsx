@@ -1,9 +1,10 @@
-import { RefreshCw } from "lucide-react";
 import { useMemo } from "react";
 import { useUiLocale } from "../../i18n/useUiLocale";
 import type { LatencyMetricsPayload } from "../../hooks/usePipelineState";
 import { useInsights } from "../../hooks/useInsights";
+import { useRefreshSpin } from "../../hooks/useRefreshSpin";
 import { SnippetListToolbarButton } from "../snippets/SnippetListToolbarButton";
+import { RefreshIcon } from "../ui/RefreshIcon";
 import { glowSurfaceClasses } from "../layout/glowSurface";
 import { ActivityChart } from "./charts/ActivityChart";
 import { AppUsageDonut } from "./charts/AppUsageDonut";
@@ -28,6 +29,7 @@ interface InsightViewProps {
 export function InsightView({ latencyMetrics }: InsightViewProps) {
   const { t, formatNumber } = useUiLocale();
   const { insights, loaded, errorMessage, reload } = useInsights();
+  const { spinning: refreshSpinning, runRefresh } = useRefreshSpin();
 
   const activeLatency = resolveActiveLatency(
     latencyMetrics,
@@ -64,11 +66,12 @@ export function InsightView({ latencyMetrics }: InsightViewProps) {
         {loaded && (
           <SnippetListToolbarButton
             label={t("insight.refresh")}
+            disabled={refreshSpinning}
             onClick={() => {
-              void reload();
+              void runRefresh(() => reload());
             }}
           >
-            <RefreshCw size={16} strokeWidth={1.75} />
+            <RefreshIcon spinning={refreshSpinning} />
           </SnippetListToolbarButton>
         )}
       </header>

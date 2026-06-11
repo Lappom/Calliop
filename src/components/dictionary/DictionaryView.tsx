@@ -2,17 +2,17 @@ import {
   ArrowDownUp,
   Filter,
   Plus,
-  RefreshCw,
-  Search,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useUiLocale } from "../../i18n/useUiLocale";
 import type { DictionaryWord } from "../../hooks/useDictionary";
 import { useDictionary } from "../../hooks/useDictionary";
+import { useRefreshSpin } from "../../hooks/useRefreshSpin";
 import { SectionGlow } from "../layout/SectionGlow";
 import { SnippetListToolbarButton } from "../snippets/SnippetListToolbarButton";
 import { Button } from "../ui/Button";
-import { TextInput } from "../ui/TextInput";
+import { ExpandableSearchField } from "../ui/ExpandableSearchField";
+import { RefreshIcon } from "../ui/RefreshIcon";
 import { toolbarMenuOptions } from "../ui/toolbarMenu";
 import { DictionaryTable } from "./DictionaryTable";
 import { DictionaryWordModal } from "./DictionaryWordModal";
@@ -51,6 +51,8 @@ export function DictionaryView() {
     removeWord,
     reload,
   } = useDictionary();
+
+  const { spinning: refreshSpinning, runRefresh } = useRefreshSpin(busy);
 
   const sortLabels = useMemo(() => getDictionarySortLabels(t), [t]);
 
@@ -128,21 +130,20 @@ export function DictionaryView() {
 
         {loaded && words.length > 0 && (
           <div className="flex items-center gap-1">
-            <SnippetListToolbarButton
-              label={t("common.search")}
-              active={searchOpen}
+            <ExpandableSearchField
+              open={searchOpen}
               disabled={busy}
-              onClick={() => {
-                setSearchOpen((current) => {
-                  if (current) {
-                    setSearchQuery("");
-                  }
-                  return !current;
-                });
+              label={t("dictionary.searchLabel")}
+              placeholder={t("dictionary.searchPlaceholder")}
+              value={searchQuery}
+              onChange={setSearchQuery}
+              onOpenChange={(next) => {
+                if (!next) {
+                  setSearchQuery("");
+                }
+                setSearchOpen(next);
               }}
-            >
-              <Search size={16} strokeWidth={1.75} />
-            </SnippetListToolbarButton>
+            />
             <SnippetListToolbarButton
               label={sourceFilterLabels[sourceFilter]}
               active={sourceFilter !== "all"}
@@ -174,31 +175,16 @@ export function DictionaryView() {
             </SnippetListToolbarButton>
             <SnippetListToolbarButton
               label={t("common.refreshList")}
-              disabled={busy}
+              disabled={busy || refreshSpinning}
               onClick={() => {
-                void reload();
+                void runRefresh(() => reload());
               }}
             >
-              <RefreshCw
-                size={16}
-                strokeWidth={1.75}
-                className={busy ? "animate-spin" : undefined}
-              />
+              <RefreshIcon spinning={refreshSpinning} />
             </SnippetListToolbarButton>
           </div>
         )}
       </div>
-
-      {loaded && words.length > 0 && searchOpen && (
-        <TextInput
-          label={t("dictionary.searchLabel")}
-          value={searchQuery}
-          onChange={(event) => setSearchQuery(event.target.value)}
-          placeholder={t("dictionary.searchPlaceholder")}
-          disabled={busy}
-          autoFocus
-        />
-      )}
 
       {errorMessage && (
         <p className="text-body-sm text-accent-red">{errorMessage}</p>
