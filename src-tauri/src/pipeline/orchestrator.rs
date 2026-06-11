@@ -8,9 +8,9 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize};
 use thiserror::Error;
 
-use calliop_prompt::ToneProfile;
+use calliop_prompt::{post_process_transcript, ToneProfile};
 
-use crate::app_context::{get_active_window, resolve_tone};
+use crate::app_context::{get_active_window, resolve_tone, ActiveWindow};
 use crate::audio::{AudioCapture, VadSegmenter, TARGET_SAMPLE_RATE};
 use crate::inject::{InjectError, TextInjector};
 use crate::llm::LlamaEngine;
@@ -181,11 +181,14 @@ impl PipelineOrchestrator {
         *self.app_context_rules.write() = rules;
     }
 
-    fn resolve_active_tone(&self) -> ToneProfile {
+    fn resolve_active_context(&self) -> (ToneProfile, Option<ActiveWindow>) {
         let rules = self.app_context_rules.read().clone();
         match get_active_window() {
-            Some(window) => resolve_tone(&window, &rules),
-            None => ToneProfile::Default,
+            Some(window) => {
+                let tone = resolve_tone(&window, &rules);
+                (tone, Some(window))
+            }
+            None => (ToneProfile::Default, None),
         }
     }
 
@@ -448,10 +451,17 @@ impl PipelineOrchestrator {
         }
 
         let stt_ms = streaming_stt_ms + fallback_stt_ms;
-        let full_text = transcripts.join(" ").trim().to_string();
+        let full_text = {
+            let raw = transcripts.join(" ").trim().to_string();
+            if raw.is_empty() {
+                raw
+            } else {
+                post_process_transcript(&raw)
+            }
+        };
 
-        // After STT the user may return to the target app; resolve before LLM wait/inject.
-        let active_tone = self.resolve_active_tone();
+        // After STT the user may return to the target app; capture before LLM wait/inject.
+        let (active_tone, active_window) = self.resolve_active_context();
 
         let auto_edit = self.auto_edit.load(Ordering::SeqCst);
         if !full_text.is_empty() && auto_edit && self.llm.lock().is_none() {
@@ -535,7 +545,6 @@ impl PipelineOrchestrator {
 
         if !text_to_inject.is_empty() {
             if let Some(store) = &self.history_store {
-                let window = get_active_window();
                 let entry = NewDictation {
                     text: text_to_inject.clone(),
                     audio_duration_ms,
@@ -543,8 +552,8 @@ impl PipelineOrchestrator {
                     llm_ms,
                     inject_ms,
                     total_ms,
-                    app_exe: window.as_ref().map(|w| w.exe_name.clone()),
-                    app_title: window.as_ref().map(|w| w.title.clone()),
+                    app_exe: active_window.as_ref().map(|w| w.exe_name.clone()),
+                    app_title: active_window.as_ref().map(|w| w.title.clone()),
                 };
                 if let Err(err) = store.insert_dictation(&entry) {
                     eprintln!("failed to persist dictation history: {err}");

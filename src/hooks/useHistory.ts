@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export interface DictationEntry {
   id: number;
@@ -24,10 +24,14 @@ export function useHistory() {
   const [entryFeedback, setEntryFeedback] = useState<
     Record<number, "copied" | "injected">
   >({});
+  const activeQueryRef = useRef("");
 
   const loadEntries = useCallback(async (query?: string) => {
     try {
-      const trimmed = query?.trim() ?? "";
+      const trimmed = (query ?? activeQueryRef.current).trim();
+      if (query !== undefined) {
+        activeQueryRef.current = trimmed;
+      }
       const result =
         trimmed.length > 0
           ? await invoke<DictationEntry[]>("search_dictations", {

@@ -73,7 +73,10 @@ Ponctuation courante : « point » → . ; « virgule » → , ; « point-virgul
 « à la ligne » / « retour à la ligne » → saut de ligne ; « nouveau paragraphe » → double saut de ligne ; \
 « tiret » / « trait d'union » → - ; « apostrophe » → ' ; « barre oblique » / « slash » → / ; \
 « arobase » / « at » → @ ; « dièse » / « hashtag » → # ; « esperluette » / « et commercial » → & ; \
-« pourcent » → % ; « plus » → + ; « moins » → - ; « égal » / « égale » → =. \
+« pourcent » → % ; « signe plus » / « plus » (entre tokens) → + ; \
+« signe moins » → - ; « signe égal » / « égale » → =. \
+Pour les adresses et chemins, colle les symboles aux tokens voisins \
+(ex. « contact at gmail point com » → contact@gmail.com ; « src slash lib » → src/lib). \
 Place la ponctuation au bon endroit même si la transcription STT a omis ou décalé les espaces. \
 Reformule légèrement si nécessaire pour améliorer la fluidité, sans changer le sens. \
 Conserve les jetons ⟦CALLIOP0⟧, ⟦CALLIOP1⟧, etc. inchangés s'ils apparaissent dans la transcription. \
@@ -194,6 +197,82 @@ fn strip_wrapping_quotes(text: &str) -> String {
     }
 }
 
+/// Example dictation baked into Whisper's `initial_prompt` so oral symbols are recognized.
+pub const WHISPER_ORAL_VOCABULARY_HINT: &str = "Mon email jean arobase gmail point com, \
+dossier src slash lib slash main point rs, tag hashtag rust, version signe plus signe plus.";
+
+pub fn whisper_oral_vocabulary_word_count() -> usize {
+    WHISPER_ORAL_VOCABULARY_HINT.split_whitespace().count()
+}
+
+/// Full transcript cleanup after STT: fix common mishearings, then oral punctuation.
+pub fn post_process_transcript(text: &str) -> String {
+    interpret_oral_punctuation(&normalize_stt_oral_mishearings(text))
+}
+
+/// Fixes frequent Whisper mis-transcriptions of spoken symbol commands (before punctuation pass).
+pub fn normalize_stt_oral_mishearings(text: &str) -> String {
+    let mut result = text.to_string();
+    for (phrase, replacement) in STT_ORAL_MISHEARING_FIXES {
+        result = replace_phrase_ci(&result, phrase, replacement);
+    }
+    let result = fix_misheard_arobase_phrase(&result, "a base", "arobase");
+    fix_misheard_arobase_phrase(&result, "à base", "arobase")
+}
+
+const STT_ORAL_MISHEARING_FIXES: &[(&str, &str)] = &[
+    ("arrobasse", "arobase"),
+    ("arrobase", "arobase"),
+    ("arro basse", "arobase"),
+    ("arro bas", "arobase"),
+    ("à robase", "arobase"),
+    ("a robase", "arobase"),
+    ("a robe base", "arobase"),
+    ("at sign", "at"),
+    ("bar oblique", "barre oblique"),
+    ("slache", "slash"),
+    ("slach", "slash"),
+    ("hashtague", "hashtag"),
+    ("hash tag", "hashtag"),
+    ("esperluete", "esperluette"),
+    ("et comercial", "et commercial"),
+    ("signe egale", "signe égal"),
+];
+
+/// Replaces « a base » with « arobase » unless it starts the idiom « a base de ».
+fn fix_misheard_arobase_phrase(text: &str, misheard: &str, replacement: &str) -> String {
+    let misheard_chars: Vec<char> = misheard.chars().collect();
+    let misheard_lower: Vec<char> = misheard.to_lowercase().chars().collect();
+    let text_chars: Vec<char> = text.chars().collect();
+    let mut out = String::new();
+    let mut index = 0;
+
+    while index < text_chars.len() {
+        if matches_phrase_ci(&text_chars, index, &misheard_lower)
+            && !is_word_char(at_char(&text_chars, index.wrapping_sub(1)))
+            && !is_word_char(at_char(
+                &text_chars,
+                index.saturating_add(misheard_chars.len()),
+            ))
+        {
+            let after = index + misheard_chars.len();
+            let rest: String = text_chars[after..].iter().collect();
+            let rest_trimmed = rest.trim_start();
+            if rest_trimmed.to_lowercase().starts_with("de ") {
+                out.push_str(&text_chars[index..after].iter().collect::<String>());
+            } else {
+                out.push_str(replacement);
+            }
+            index = after;
+        } else {
+            out.push(text_chars[index]);
+            index += 1;
+        }
+    }
+
+    out
+}
+
 /// Converts spoken French punctuation commands still present in text (e.g. « virgule » → `,`).
 pub fn interpret_oral_punctuation(text: &str) -> String {
     let mut result = interpret_oral_wrap_commands(text);
@@ -201,7 +280,9 @@ pub fn interpret_oral_punctuation(text: &str) -> String {
         result = replace_phrase_ci(&result, phrase, replacement);
     }
     result = replace_spoken_point(&result);
-    normalize_punctuation_spacing(&result)
+    result = normalize_punctuation_spacing(&result);
+    result = collapse_spaced_dots_in_identifiers(&result);
+    collapse_technical_symbol_spacing(&result)
 }
 
 const ORAL_WRAP_COMMANDS: &[(&str, &str, &str)] = &[
@@ -323,13 +404,21 @@ const ORAL_PUNCTUATION_PHRASES: &[(&str, &str)] = &[
     ("trait d'union", "-"),
     ("trait d union", "-"),
     ("et commercial", "&"),
+    ("signe égal", "="),
+    ("signe egal", "="),
+    ("signe plus", "+"),
+    ("signe moins", "-"),
     ("barre oblique", "/"),
+    ("égale", "="),
+    ("egale", "="),
     ("virgule", ","),
     ("apostrophe", "'"),
     ("esperluette", "&"),
     ("pourcent", "%"),
     ("tiret", "-"),
     ("arobase", "@"),
+    ("slash", "/"),
+    ("at", "@"),
     ("dièse", "#"),
     ("diese", "#"),
     ("hashtag", "#"),
@@ -415,6 +504,81 @@ fn is_word_char(ch: Option<char>) -> bool {
     ch.is_some_and(|c| c.is_alphanumeric() || c == '\'' || c == '_')
 }
 
+/// Removes spaces around technical symbols when they sit between tokens.
+fn collapse_technical_symbol_spacing(text: &str) -> String {
+    let symbols = ['@', '/', '#', '+', '='];
+    symbols
+        .iter()
+        .fold(text.to_string(), |current, symbol| collapse_around_symbol(&current, *symbol))
+}
+
+fn collapse_around_symbol(text: &str, symbol: char) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut index = 0;
+
+    while index < chars.len() {
+        if chars[index] == symbol {
+            while out.ends_with(' ') {
+                out.pop();
+            }
+            out.push(symbol);
+            index += 1;
+            while index < chars.len() && chars[index] == ' ' {
+                index += 1;
+            }
+        } else {
+            out.push(chars[index]);
+            index += 1;
+        }
+    }
+
+    out
+}
+
+fn is_identifier_char(ch: char) -> bool {
+    ch.is_alphanumeric() || ch == '-' || ch == '_'
+}
+
+/// Collapses spaced dots between identifier tokens (e.g. « gmail . com » → gmail.com).
+fn collapse_spaced_dots_in_identifiers(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut index = 0;
+
+    while index < chars.len() {
+        if chars[index] == '.'
+            && index > 0
+            && index + 1 < chars.len()
+            && is_identifier_char(chars[index - 1])
+        {
+            let mut left_end = index;
+            while left_end > 0 && chars[left_end - 1] == ' ' {
+                left_end -= 1;
+            }
+            if left_end > 0 && is_identifier_char(chars[left_end - 1]) {
+                let mut right_start = index + 1;
+                while right_start < chars.len() && chars[right_start] == ' ' {
+                    right_start += 1;
+                }
+                if right_start < chars.len() && is_identifier_char(chars[right_start]) {
+                    while out.ends_with(' ') {
+                        out.pop();
+                    }
+                    out.push('.');
+                    index = right_start;
+                    continue;
+                }
+            }
+        }
+
+        out.push(chars[index]);
+        index += 1;
+    }
+
+    out
+}
+
 fn normalize_punctuation_spacing(text: &str) -> String {
     let mut out = String::new();
     let chars: Vec<char> = text.chars().collect();
@@ -437,6 +601,15 @@ fn normalize_punctuation_spacing(text: &str) -> String {
             if index + 1 < chars.len() && chars[index + 1] == ' ' {
                 index += 1;
             }
+        } else if ch == '.'
+            && index + 1 < chars.len()
+            && is_identifier_char(chars[index + 1])
+            && out
+                .chars()
+                .next_back()
+                .is_some_and(is_identifier_char)
+        {
+            // Keep gmail.com intact for email-style dictation.
         } else if matches!(ch, ',' | ';' | ':' | '.' | '!' | '?' | '…')
             && index + 1 < chars.len()
             && chars[index + 1] != ' '
@@ -559,12 +732,60 @@ mod tests {
     }
 
     #[test]
+    fn normalizes_whisper_arobase_mishearings() {
+        let out = post_process_transcript("contact arrobase gmail point com");
+        assert_eq!(out, "contact@gmail.com");
+
+        let out = post_process_transcript("contact a base gmail point com");
+        assert_eq!(out, "contact@gmail.com");
+
+        let out = post_process_transcript("contact à Robase gmail point com");
+        assert_eq!(out, "contact@gmail.com");
+
+        let out = normalize_stt_oral_mishearings("recette à base de riz");
+        assert_eq!(out, "recette à base de riz");
+    }
+
+    #[test]
+    fn whisper_hint_covers_oral_symbols() {
+        assert!(WHISPER_ORAL_VOCABULARY_HINT.contains("arobase"));
+        assert!(WHISPER_ORAL_VOCABULARY_HINT.contains("slash"));
+        assert!(whisper_oral_vocabulary_word_count() > 0);
+    }
+
+    #[test]
+    fn converts_spoken_at_and_slash() {
+        let out = interpret_oral_punctuation("contact at gmail point com");
+        assert_eq!(out, "contact@gmail.com");
+
+        let out = interpret_oral_punctuation("ouvre src slash lib slash main point rs");
+        assert_eq!(out, "ouvre src/lib/main.rs");
+    }
+
+    #[test]
+    fn converts_arobase_and_barre_oblique() {
+        let out = interpret_oral_punctuation("mon mail arobase example point fr");
+        assert_eq!(out, "mon mail@example.fr");
+    }
+
+    #[test]
+    fn converts_signe_plus_and_hashtag() {
+        let out = interpret_oral_punctuation("version signe plus signe plus");
+        assert_eq!(out, "version++");
+
+        let out = interpret_oral_punctuation("tag hashtag rust");
+        assert_eq!(out, "tag#rust");
+    }
+
+    #[test]
     fn system_prompt_covers_oral_punctuation_commands() {
         assert!(SYSTEM_PROMPT.contains("virgule"));
         assert!(SYSTEM_PROMPT.contains("point d'interrogation"));
         assert!(SYSTEM_PROMPT.contains("point d'exclamation"));
         assert!(SYSTEM_PROMPT.contains("entre parenthèses"));
         assert!(SYSTEM_PROMPT.contains("entre guillemets"));
+        assert!(SYSTEM_PROMPT.contains("arobase"));
+        assert!(SYSTEM_PROMPT.contains("slash"));
         assert!(SYSTEM_PROMPT.contains("ne doivent jamais"));
     }
 

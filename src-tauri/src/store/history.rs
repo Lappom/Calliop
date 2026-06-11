@@ -221,7 +221,7 @@ impl Store {
         let words_today: i64 = conn.query_row(
             "SELECT COALESCE(SUM(word_count), 0)
              FROM dictations
-             WHERE date(created_at) = date('now', 'localtime')",
+             WHERE date(created_at, 'localtime') = date('now', 'localtime')",
             [],
             |row| row.get(0),
         )?;
