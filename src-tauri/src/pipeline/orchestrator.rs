@@ -10,7 +10,7 @@ use thiserror::Error;
 
 use calliop_prompt::{post_process_transcript, ToneProfile};
 
-use crate::app_context::{get_active_window, resolve_tone};
+use crate::app_context::{get_active_window, resolve_tone, ActiveWindow};
 use crate::audio::{AudioCapture, VadSegmenter, TARGET_SAMPLE_RATE};
 use crate::inject::{InjectError, TextInjector};
 use crate::llm::LlamaEngine;
@@ -212,6 +212,17 @@ impl PipelineOrchestrator {
 
     pub fn set_app_context_rules(&mut self, rules: Vec<AppContextRule>) {
         *self.app_context_rules.write() = rules;
+    }
+
+    fn resolve_active_context(&self) -> (ToneProfile, Option<ActiveWindow>) {
+        let rules = self.app_context_rules.read().clone();
+        match get_active_window() {
+            Some(window) => {
+                let tone = resolve_tone(&window, &rules);
+                (tone, Some(window))
+            }
+            None => (ToneProfile::Default, None),
+        }
     }
 
     pub fn state(&self) -> PipelineState {
@@ -418,15 +429,6 @@ impl PipelineOrchestrator {
         let audio_duration_ms =
             (samples.len() as u64).saturating_mul(1_000) / u64::from(TARGET_SAMPLE_RATE);
 
-        let context_rules = self.app_context_rules.read().clone();
-        let context_handle = thread::spawn(move || match get_active_window() {
-            Some(window) => {
-                let tone = resolve_tone(&window, &context_rules);
-                (tone, Some(window))
-            }
-            None => (ToneProfile::Default, None),
-        });
-
         if let Some(session) = self.streaming.take() {
             session.stop_flag.store(true, Ordering::SeqCst);
             if let Some(worker) = session.worker {
@@ -484,6 +486,9 @@ impl PipelineOrchestrator {
         let raw = transcripts.join(" ").trim().to_string();
         let stt_wait_ms = stop_instant.elapsed().as_millis() as u64;
 
+        // After STT the user may return to the target app; capture before LLM wait/inject.
+        let (active_tone, active_window) = self.resolve_active_context();
+
         let auto_edit = self.auto_edit.load(Ordering::SeqCst);
         let snippets = self.snippets.read().clone();
         let snippet_fallback = prepare_display_transcript(&raw, &snippets);
@@ -494,10 +499,6 @@ impl PipelineOrchestrator {
         } else {
             None
         };
-
-        let (active_tone, active_window) = context_handle.join().map_err(|_| {
-            PipelineError::Background("failed to resolve active window context".into())
-        })?;
 
         if !raw.is_empty() && auto_edit && self.llm.lock().is_none() {
             wait_for_llm_engine(&self.llm, LLM_INJECT_WAIT);
