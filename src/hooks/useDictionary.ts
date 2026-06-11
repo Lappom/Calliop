@@ -46,31 +46,10 @@ export function useDictionary() {
     void setup();
 
     const unlisten = listen<DictionaryUpdatedPayload>("dictionary-updated", (event) => {
-      const { added, removed, source } = event.payload;
-      if (removed.length > 0) {
+      const { added, removed } = event.payload;
+      if (added.length > 0 || removed.length > 0) {
         void loadWords();
-        return;
       }
-      if (added.length === 0) {
-        return;
-      }
-      setWords((current) => {
-        const existing = new Set(current.map((entry) => entry.word.toLowerCase()));
-        const now = new Date().toISOString();
-        const appended = added
-          .filter((word) => !existing.has(word.toLowerCase()))
-          .map((word, index) => ({
-            id: -(index + 1),
-            word,
-            source: source ?? "learned",
-            created_at: now,
-          }));
-        if (appended.length === 0) {
-          return current;
-        }
-        return [...appended, ...current];
-      });
-      setLoaded(true);
     });
 
     return () => {

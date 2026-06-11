@@ -170,9 +170,11 @@ fn refresh_whisper_prompt_with_cache(
         guard.rebuild(snippet_triggers, dictionary_words);
     }
 
+    // Lock cache before pipeline (never hold pipeline while acquiring cache).
+    let prompt = cache.lock().prompt();
     let mut pipeline_guard = pipeline.lock();
     pipeline_guard.set_snippets(snippets);
-    pipeline_guard.set_dictionary_prompt_arc(cache.lock().prompt());
+    pipeline_guard.set_dictionary_prompt_arc(prompt);
     Ok(())
 }
 
@@ -299,8 +301,8 @@ fn get_pipeline_state(state: State<'_, AppState>) -> String {
 }
 
 #[tauri::command]
-fn toggle_dictation(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    spawn_toggle(app.clone(), state.pipeline.clone());
+async fn toggle_dictation(app: AppHandle) -> Result<(), String> {
+    ensure_model_then_toggle(app).await;
     Ok(())
 }
 
@@ -901,10 +903,33 @@ async fn ensure_model_then_start(app: AppHandle) {
         spawn_deferred_llm_if_needed(app.clone());
     }
 
-    let pipeline = app.state::<AppState>().pipeline.clone();
-    if pipeline.lock().state() == PipelineState::Idle {
+    let state = app.state::<AppState>();
+    let still_holding = state.hotkey_press.lock().shortcut_down;
+    let pipeline = state.pipeline.clone();
+    if still_holding && pipeline.lock().state() == PipelineState::Idle {
         spawn_start(app, pipeline);
     }
+}
+
+async fn ensure_model_then_toggle(app: AppHandle) {
+    let state = app.state::<AppState>();
+    if !state.model_ready.load(Ordering::SeqCst) {
+        let _ = app.emit(
+            "pipeline-state",
+            PipelineStateEvent {
+                state: PipelineState::Idle.as_str().into(),
+                message: Some("Chargement du modèle…".into()),
+            },
+        );
+        if let Err(err) = ensure_model_inner(&app, &state).await {
+            let _ = app.emit("model-init-error", err);
+            return;
+        }
+        spawn_deferred_llm_if_needed(app.clone());
+    }
+
+    let pipeline = app.state::<AppState>().pipeline.clone();
+    spawn_toggle(app, pipeline);
 }
 
 fn handle_hotkey(app: &AppHandle, shortcut_state: ShortcutState) {
@@ -1026,8 +1051,10 @@ fn build_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         .on_menu_event(|app, event| match event.id().as_ref() {
             MENU_OPEN => show_main_window(app),
             MENU_TOGGLE => {
-                let state = app.state::<AppState>();
-                spawn_toggle(app.clone(), state.pipeline.clone());
+                let app_clone = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    ensure_model_then_toggle(app_clone).await;
+                });
             }
             MENU_AUTOSTART => {
                 let enabled = app.autolaunch().is_enabled().unwrap_or(false);
