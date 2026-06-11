@@ -21,7 +21,7 @@ use llama_cpp_2::token::LlamaToken;
 use serde::{Deserialize, Serialize};
 
 const CLEANUP_CONTEXT_TOKENS: u32 = 2048;
-const CLEANUP_MAX_OUTPUT_TOKENS: i32 = 96;
+const CLEANUP_MAX_OUTPUT_TOKENS: i32 = 256;
 
 fn resolve_chat_template(model: &LlamaModel) -> Result<LlamaChatTemplate, String> {
     match model.chat_template(None) {

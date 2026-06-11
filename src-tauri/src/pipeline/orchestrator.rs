@@ -529,10 +529,7 @@ impl PipelineOrchestrator {
                         text,
                         llm_ms,
                         invalidated,
-                    } = job.wait_for_inject(LLM_CLEANUP_TIMEOUT)
-                    else {
-                        unreachable!("LLM cleanup always completes or times out within LLM_CLEANUP_TIMEOUT");
-                    };
+                    } = job.wait_for_inject(LLM_CLEANUP_TIMEOUT);
                     let snippets = self.snippets.read().clone();
                     let text = if self.auto_edit.load(Ordering::SeqCst) {
                         if snippets == snippets_snapshot {
@@ -973,7 +970,7 @@ fn transcribe_segment(
     let raw = {
         let mut transcripts = stt.transcripts.lock();
         transcripts.push(text.text.clone());
-        transcripts.join(" ")
+        join_transcript_segments(transcripts.iter().map(String::as_str).collect::<Vec<_>>())
     };
     let display = prepare_partial_transcript(&raw, &stt.snippets.read());
 

@@ -55,7 +55,7 @@ pub struct AppSettings {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
-            auto_edit: false,
+            auto_edit: true,
             auto_learn: true,
             stt_language: DEFAULT_STT_LANGUAGE.to_string(),
             whisper_model: WhisperModel::default().as_setting_value().into(),
@@ -91,7 +91,7 @@ impl AppSettings {
 impl Store {
     pub fn load_settings(&self) -> Result<AppSettings, StoreError> {
         Ok(AppSettings {
-            auto_edit: self.get_bool(KEY_AUTO_EDIT, false)?,
+            auto_edit: self.get_bool(KEY_AUTO_EDIT, true)?,
             auto_learn: self.get_bool(KEY_AUTO_LEARN, true)?,
             stt_language: self
                 .get_string(KEY_STT_LANGUAGE, DEFAULT_STT_LANGUAGE)?
@@ -188,7 +188,7 @@ mod tests {
     #[test]
     fn default_settings_are_verbatim() {
         let settings = AppSettings::default();
-        assert!(!settings.auto_edit);
+        assert!(settings.auto_edit);
         assert!(settings.auto_learn);
         assert_eq!(settings.stt_language, DEFAULT_STT_LANGUAGE);
         assert_eq!(settings.whisper_model, "small");

@@ -106,7 +106,7 @@ function fromPayload(payload: SettingsPayload): AppSettings {
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
-  autoEdit: false,
+  autoEdit: true,
   autoLearn: true,
   sttLanguage: "fr",
   whisperModel: "small",

@@ -159,7 +159,7 @@ pub fn validate_cleanup_output(raw: &str, cleaned: &str) -> Result<String, Promp
 
     cleaned = strip_wrapping_quotes(&cleaned);
     cleaned = interpret_oral_punctuation(&cleaned);
-    cleaned = polish_transcript(&cleaned);
+    cleaned = polish_llm_output(&cleaned);
 
     let max_len = raw.len().saturating_mul(3).max(512);
     if cleaned.len() > max_len {
@@ -239,10 +239,16 @@ pub fn post_process_transcript(text: &str) -> String {
     polish_transcript(&text)
 }
 
-/// Deterministic polish applied after STT and after LLM cleanup validation.
+/// Deterministic polish applied after STT (includes filler stripping).
 fn polish_transcript(text: &str) -> String {
     let text = fix_malformed_punctuation(text);
     let text = strip_leading_oral_fillers(&text);
+    polish_llm_output(&text)
+}
+
+/// Final polish after LLM cleanup (no filler stripping — LLM already handles it).
+fn polish_llm_output(text: &str) -> String {
+    let text = fix_malformed_punctuation(text);
     let text = collapse_extra_whitespace(&text);
     fix_sentence_capitalization(&text)
 }
@@ -277,14 +283,12 @@ fn strip_leading_oral_fillers(text: &str) -> String {
         let mut stripped = false;
         for filler in ORAL_FILLERS {
             if let Some(rest) = strip_prefix_phrase_ci(&result, filler) {
-                if rest.is_empty() || rest.starts_with(' ') || rest.starts_with(',') {
-                    result = rest
-                        .trim_start_matches([',', ' ', '—', '-'])
-                        .trim_start()
-                        .to_string();
-                    stripped = true;
-                    break;
-                }
+                result = rest
+                    .trim_start_matches([',', ' ', '—', '-'])
+                    .trim_start()
+                    .to_string();
+                stripped = true;
+                break;
             }
         }
         if !stripped {
@@ -294,7 +298,7 @@ fn strip_leading_oral_fillers(text: &str) -> String {
     result
 }
 
-fn strip_prefix_phrase_ci(text: &str, phrase: &str) -> Option<&str> {
+fn strip_prefix_phrase_ci<'a>(text: &'a str, phrase: &str) -> Option<&'a str> {
     let (start, end) = find_phrase_range_ci(text, phrase)?;
     if start != 0 {
         return None;
@@ -306,6 +310,13 @@ fn should_lowercase_segment_join(previous: &str, next: &str) -> bool {
     let previous = previous.trim_end();
     if previous.is_empty() {
         return false;
+    }
+    if previous.ends_with("...") || previous.ends_with('…') {
+        return next
+            .trim()
+            .chars()
+            .next()
+            .is_some_and(|ch| ch.is_uppercase());
     }
     if matches!(
         previous.chars().last(),
@@ -388,24 +399,23 @@ fn collapse_extra_whitespace(text: &str) -> String {
 }
 
 fn fix_sentence_capitalization(text: &str) -> String {
-    let mut result = String::new();
-    let mut capitalize_next = true;
-
-    for ch in text.chars() {
-        if capitalize_next && ch.is_alphabetic() {
-            result.extend(ch.to_uppercase());
-            capitalize_next = false;
-        } else {
-            result.push(ch);
-            if matches!(ch, '.' | '!' | '?' | '…') {
-                capitalize_next = true;
-            } else if !ch.is_whitespace() {
-                capitalize_next = false;
-            }
+    if text.contains('@') || text.contains('/') {
+        return text.to_string();
+    }
+    let mut chars = text.chars();
+    match chars.next() {
+        None => String::new(),
+        Some(first) if first.is_alphabetic() => {
+            let mut out = first.to_uppercase().to_string();
+            out.extend(chars);
+            out
+        }
+        Some(first) => {
+            let mut out = String::from(first);
+            out.extend(chars);
+            out
         }
     }
-
-    result
 }
 
 /// Fixes frequent Whisper mis-transcriptions of spoken symbol commands (before punctuation pass).
@@ -1071,7 +1081,7 @@ mod tests {
     fn unclosed_thinking_block_keeps_trailing_text() {
         let raw_output = format!("{THINK_OPEN}hmm still thinking");
         let out = validate_cleanup_output("test", &raw_output).unwrap();
-        assert_eq!(out, "hmm still thinking");
+        assert_eq!(out, "Hmm still thinking");
     }
 
     #[test]
