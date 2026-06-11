@@ -1,6 +1,6 @@
 use calliop_prompt::ToneProfile;
 
-use crate::store::{AppContextMatchType, AppContextRule};
+use crate::store::{exe_names_match, AppContextMatchType, AppContextRule};
 
 use super::ActiveWindow;
 
@@ -16,7 +16,7 @@ pub fn resolve_tone(window: &ActiveWindow, rules: &[AppContextRule]) -> ToneProf
 
 fn rule_matches(window: &ActiveWindow, rule: &AppContextRule) -> bool {
     match rule.match_type {
-        AppContextMatchType::Exe => window.exe_name.eq_ignore_ascii_case(&rule.pattern),
+        AppContextMatchType::Exe => exe_names_match(&rule.pattern, &window.exe_name),
         AppContextMatchType::TitleContains => window
             .title
             .to_ascii_lowercase()

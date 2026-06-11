@@ -52,19 +52,40 @@ pub fn normalize_exe_pattern(pattern: &str) -> String {
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or(trimmed);
-    basename.to_ascii_lowercase()
+    let lower = basename.to_ascii_lowercase();
+    if lower.ends_with(".exe") {
+        lower
+    } else {
+        format!("{lower}.exe")
+    }
+}
+
+/// Compares exe rule patterns to a window process name, with or without `.exe`.
+pub fn exe_names_match(pattern: &str, window_exe: &str) -> bool {
+    normalize_exe_pattern(pattern) == normalize_exe_pattern(window_exe)
 }
 
 pub fn normalize_title_pattern(pattern: &str) -> String {
     pattern.trim().to_string()
 }
 
+fn exe_pattern_stem_char_count(pattern: &str) -> usize {
+    let trimmed = pattern.trim();
+    let basename = std::path::Path::new(trimmed)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(trimmed);
+    let lower = basename.to_ascii_lowercase();
+    let stem = lower.strip_suffix(".exe").unwrap_or(lower.as_str());
+    stem.chars().count()
+}
+
 pub fn is_valid_app_context_pattern(pattern: &str, match_type: AppContextMatchType) -> bool {
-    let normalized = match match_type {
-        AppContextMatchType::Exe => normalize_exe_pattern(pattern),
-        AppContextMatchType::TitleContains => normalize_title_pattern(pattern),
+    let char_count = match match_type {
+        AppContextMatchType::Exe => exe_pattern_stem_char_count(pattern),
+        AppContextMatchType::TitleContains => normalize_title_pattern(pattern).chars().count(),
     };
-    normalized.chars().count() >= 2
+    char_count >= 2
 }
 
 impl Store {
@@ -73,7 +94,7 @@ impl Store {
         let mut stmt = conn.prepare(
             "SELECT id, pattern, match_type, tone, created_at
              FROM app_context_rules
-             ORDER BY id ASC",
+             ORDER BY id DESC",
         )?;
 
         let rows = stmt.query_map([], |row| {
@@ -145,6 +166,11 @@ impl Store {
             },
             NewAppContextRule {
                 pattern: "outlook.exe".into(),
+                match_type: AppContextMatchType::Exe,
+                tone: ToneProfile::Formal,
+            },
+            NewAppContextRule {
+                pattern: "olk.exe".into(),
                 match_type: AppContextMatchType::Exe,
                 tone: ToneProfile::Formal,
             },
@@ -245,9 +271,46 @@ mod tests {
     #[test]
     fn seed_defaults_only_when_empty() {
         let store = test_store();
-        assert_eq!(store.seed_default_app_context_rules().unwrap(), 9);
+        assert_eq!(store.seed_default_app_context_rules().unwrap(), 10);
         assert_eq!(store.seed_default_app_context_rules().unwrap(), 0);
-        assert!(store.list_app_context_rules().unwrap().len() >= 9);
+        assert!(store.list_app_context_rules().unwrap().len() >= 10);
+    }
+
+    #[test]
+    fn newer_rules_take_priority_over_older() {
+        let store = test_store();
+        store
+            .add_app_context_rule(&NewAppContextRule {
+                pattern: "slack.exe".into(),
+                match_type: AppContextMatchType::Exe,
+                tone: ToneProfile::Casual,
+            })
+            .unwrap();
+        store
+            .add_app_context_rule(&NewAppContextRule {
+                pattern: "slack.exe".into(),
+                match_type: AppContextMatchType::Exe,
+                tone: ToneProfile::Formal,
+            })
+            .unwrap();
+
+        let rules = store.list_app_context_rules().unwrap();
+        assert_eq!(rules.len(), 2);
+        assert_eq!(rules[0].tone, ToneProfile::Formal);
+        assert_eq!(rules[1].tone, ToneProfile::Casual);
+    }
+
+    #[test]
+    fn normalize_exe_pattern_appends_suffix() {
+        assert_eq!(normalize_exe_pattern("Slack"), "slack.exe");
+        assert_eq!(normalize_exe_pattern("Slack.EXE"), "slack.exe");
+    }
+
+    #[test]
+    fn exe_names_match_with_or_without_suffix() {
+        assert!(exe_names_match("slack", "slack.exe"));
+        assert!(exe_names_match("slack.exe", "slack.exe"));
+        assert!(!exe_names_match("teams", "slack.exe"));
     }
 
     #[test]

@@ -7,7 +7,7 @@ mod settings;
 mod snippets;
 
 pub use app_context::{
-    is_valid_app_context_pattern, normalize_exe_pattern, normalize_title_pattern,
+    exe_names_match, is_valid_app_context_pattern, normalize_exe_pattern, normalize_title_pattern,
     AppContextMatchType, AppContextRule, NewAppContextRule,
 };
 pub use db::{db_path, Store, StoreError};

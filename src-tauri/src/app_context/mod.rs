@@ -73,6 +73,49 @@ mod tests {
     }
 
     #[test]
+    fn resolve_tone_exe_rule_without_exe_suffix() {
+        let window = ActiveWindow {
+            title: "VS Code".into(),
+            exe_name: "code.exe".into(),
+            exe_path: None,
+        };
+        let rules = vec![AppContextRule {
+            id: 1,
+            pattern: "code".into(),
+            match_type: AppContextMatchType::Exe,
+            tone: ToneProfile::Technical,
+            created_at: String::new(),
+        }];
+        assert_eq!(resolve_tone(&window, &rules), ToneProfile::Technical);
+    }
+
+    #[test]
+    fn resolve_tone_prefers_newer_rule() {
+        let window = ActiveWindow {
+            title: "General - Slack".into(),
+            exe_name: "slack.exe".into(),
+            exe_path: None,
+        };
+        let rules = vec![
+            AppContextRule {
+                id: 2,
+                pattern: "slack.exe".into(),
+                match_type: AppContextMatchType::Exe,
+                tone: ToneProfile::Formal,
+                created_at: String::new(),
+            },
+            AppContextRule {
+                id: 1,
+                pattern: "slack.exe".into(),
+                match_type: AppContextMatchType::Exe,
+                tone: ToneProfile::Casual,
+                created_at: String::new(),
+            },
+        ];
+        assert_eq!(resolve_tone(&window, &rules), ToneProfile::Formal);
+    }
+
+    #[test]
     fn resolve_tone_title_contains_rule() {
         let window = ActiveWindow {
             title: "Boîte de réception - Outlook".into(),

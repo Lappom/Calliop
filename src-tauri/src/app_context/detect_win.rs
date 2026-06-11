@@ -20,7 +20,8 @@ pub fn get_active_window() -> Option<ActiveWindow> {
     }
 
     let title = read_window_title(hwnd)?;
-    let (exe_name, exe_path) = read_process_info(hwnd)?;
+    let (exe_name, exe_path) =
+        read_process_info(hwnd).unwrap_or((String::new(), None));
     if is_own_process(&exe_path) {
         return None;
     }
