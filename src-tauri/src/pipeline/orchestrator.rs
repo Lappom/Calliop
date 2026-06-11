@@ -299,8 +299,13 @@ impl PipelineOrchestrator {
         let stt_ms = streaming_stt_ms + fallback_stt_ms;
         let full_text = transcripts.join(" ").trim().to_string();
 
+        let auto_edit = self.auto_edit.load(Ordering::SeqCst);
+        if !full_text.is_empty() && auto_edit && self.llm.lock().is_none() {
+            wait_for_llm_engine(&self.llm, LLM_INJECT_WAIT);
+        }
+
         let (text_to_inject, llm_ms, llm_invalidated) = if !full_text.is_empty()
-            && self.auto_edit.load(Ordering::SeqCst)
+            && auto_edit
             && self.llm.lock().is_some()
         {
             let job = start_llm_cleanup(
@@ -404,9 +409,34 @@ impl PipelineOrchestrator {
     }
 }
 
-fn invalidate_llm_engine(llm: &Arc<Mutex<Option<LlamaEngine>>>, llm_ready: &Arc<AtomicBool>) {
-    *llm.lock() = None;
-    llm_ready.store(false, Ordering::SeqCst);
+fn wait_for_llm_engine(llm: &Arc<Mutex<Option<LlamaEngine>>>, timeout: std::time::Duration) {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if llm.lock().is_some() {
+            return;
+        }
+        thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
+/// Clears the global LLM slot only if it is still vacant from this cleanup job, or still
+/// holds the same sidecar PID. Avoids wiping a newer engine installed while cleanup ran
+/// in the background.
+fn invalidate_llm_engine_from_cleanup(
+    llm: &Arc<Mutex<Option<LlamaEngine>>>,
+    llm_ready: &Arc<AtomicBool>,
+    cleanup_pid: Option<u32>,
+) -> bool {
+    let mut guard = llm.lock();
+    let should_invalidate = match guard.as_ref() {
+        None => true,
+        Some(engine) => cleanup_pid == Some(engine.pid()),
+    };
+    if should_invalidate {
+        *guard = None;
+        llm_ready.store(false, Ordering::SeqCst);
+    }
+    should_invalidate
 }
 
 fn restore_llm_engine(
@@ -470,21 +500,29 @@ impl LlmCleanupJob {
             }
             Ok(LlmCleanupOutcome::Failed) => {
                 let _ = self.worker.join();
-                invalidate_llm_engine(&self.llm, &self.llm_ready);
+                let invalidated = invalidate_llm_engine_from_cleanup(
+                    &self.llm,
+                    &self.llm_ready,
+                    self.worker_pid,
+                );
                 LlmCleanupWait::Completed {
                     text: self.raw,
                     llm_ms: self.start.elapsed().as_millis() as u64,
-                    invalidated: true,
+                    invalidated,
                 }
             }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => LlmCleanupWait::Pending(self),
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                 let _ = self.worker.join();
-                invalidate_llm_engine(&self.llm, &self.llm_ready);
+                let invalidated = invalidate_llm_engine_from_cleanup(
+                    &self.llm,
+                    &self.llm_ready,
+                    self.worker_pid,
+                );
                 LlmCleanupWait::Completed {
                     text: self.raw,
                     llm_ms: self.start.elapsed().as_millis() as u64,
-                    invalidated: true,
+                    invalidated,
                 }
             }
         }
@@ -498,10 +536,11 @@ impl LlmCleanupJob {
                     restore_llm_engine(&self.llm, &self.auto_edit, engine);
                     false
                 }
-                Ok(LlmCleanupOutcome::Failed) => {
-                    invalidate_llm_engine(&self.llm, &self.llm_ready);
-                    true
-                }
+                Ok(LlmCleanupOutcome::Failed) => invalidate_llm_engine_from_cleanup(
+                    &self.llm,
+                    &self.llm_ready,
+                    self.worker_pid,
+                ),
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                     eprintln!(
                         "llm cleanup timed out after {:?}, raw transcript already injected",
@@ -511,14 +550,20 @@ impl LlmCleanupJob {
                         force_kill_sidecar(pid);
                     }
                     let _ = self.worker.join();
-                    invalidate_llm_engine(&self.llm, &self.llm_ready);
-                    true
+                    invalidate_llm_engine_from_cleanup(
+                        &self.llm,
+                        &self.llm_ready,
+                        self.worker_pid,
+                    )
                 }
                 Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                     eprintln!("llm cleanup worker disconnected, raw transcript already injected");
                     let _ = self.worker.join();
-                    invalidate_llm_engine(&self.llm, &self.llm_ready);
-                    true
+                    invalidate_llm_engine_from_cleanup(
+                        &self.llm,
+                        &self.llm_ready,
+                        self.worker_pid,
+                    )
                 }
             };
 

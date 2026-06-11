@@ -173,6 +173,33 @@ fn parse_model_path(args: &[String]) -> Result<PathBuf, String> {
     Err("missing --model-path".into())
 }
 
+fn parse_oneshot_text(args: &[String]) -> Result<String, String> {
+    let mut text_parts = Vec::new();
+    let mut index = 1;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--oneshot" | "--serve" => index += 1,
+            "--model-path" => {
+                if index + 1 >= args.len() {
+                    return Err("missing value for --model-path".into());
+                }
+                index += 2;
+            }
+            arg if arg.starts_with('-') => return Err(format!("unknown flag: {arg}")),
+            arg => {
+                text_parts.push(arg);
+                index += 1;
+            }
+        }
+    }
+    let text = text_parts.join(" ");
+    if text.is_empty() {
+        Err("missing text argument".into())
+    } else {
+        Ok(text)
+    }
+}
+
 fn serve(model_path: PathBuf) -> Result<(), String> {
     let engine = InferenceEngine::load(&model_path)?;
     write_response(&WorkerResponse {
@@ -243,17 +270,9 @@ fn main() {
     let result = if args.iter().any(|arg| arg == "--serve") {
         serve(model_path)
     } else if args.iter().any(|arg| arg == "--oneshot") {
-        let text = args
-            .iter()
-            .skip(1)
-            .filter(|arg| *arg != "--oneshot" && *arg != "--model-path" && !arg.starts_with('-'))
-            .cloned()
-            .collect::<Vec<_>>()
-            .join(" ");
-        if text.is_empty() {
-            Err("missing text argument".into())
-        } else {
-            oneshot(model_path, text)
+        match parse_oneshot_text(&args) {
+            Ok(text) => oneshot(model_path, text),
+            Err(err) => Err(err),
         }
     } else {
         Err("expected --serve or --oneshot".into())
@@ -262,5 +281,23 @@ fn main() {
     if let Err(err) = result {
         eprintln!("{err}");
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_oneshot_text_skips_model_path_value() {
+        let args = vec![
+            "calliop-llm-worker".into(),
+            "--oneshot".into(),
+            "--model-path".into(),
+            "/tmp/model.gguf".into(),
+            "bonjour".into(),
+            "monde".into(),
+        ];
+        assert_eq!(parse_oneshot_text(&args).unwrap(), "bonjour monde");
     }
 }

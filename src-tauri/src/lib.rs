@@ -118,18 +118,36 @@ async fn set_settings(
     state: State<'_, AppState>,
     settings: SettingsPayload,
 ) -> Result<(), String> {
-    state
-        .store
-        .save_settings(&AppSettings {
-            auto_edit: settings.auto_edit,
-        })
-        .map_err(|e| e.to_string())?;
-
-    state.pipeline.lock().set_auto_edit(settings.auto_edit);
+    let previous = state.store.load_settings().map_err(|e| e.to_string())?;
 
     if settings.auto_edit {
-        ensure_llm_model(app, state.clone()).await?;
+        state.pipeline.lock().set_auto_edit(true);
+
+        if let Err(err) = ensure_llm_model(app, state.clone()).await {
+            state.pipeline.lock().set_auto_edit(previous.auto_edit);
+            shutdown_llm_engine(&state);
+            return Err(err);
+        }
+
+        if let Err(err) = state
+            .store
+            .save_settings(&AppSettings {
+                auto_edit: true,
+            })
+            .map_err(|e| e.to_string())
+        {
+            state.pipeline.lock().set_auto_edit(previous.auto_edit);
+            shutdown_llm_engine(&state);
+            return Err(err);
+        }
     } else {
+        state
+            .store
+            .save_settings(&AppSettings {
+                auto_edit: false,
+            })
+            .map_err(|e| e.to_string())?;
+        state.pipeline.lock().set_auto_edit(false);
         shutdown_llm_engine(&state);
     }
 
@@ -138,6 +156,10 @@ async fn set_settings(
 
 #[tauri::command]
 async fn ensure_llm_model(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    if !state.pipeline.lock().auto_edit_enabled() {
+        return Ok(());
+    }
+
     if llm_engine_is_live(&state) {
         return Ok(());
     }
@@ -147,6 +169,10 @@ async fn ensure_llm_model(app: AppHandle, state: State<'_, AppState>) -> Result<
     }
 
     let _init_guard = state.llm_init.lock().await;
+
+    if !state.pipeline.lock().auto_edit_enabled() {
+        return Ok(());
+    }
 
     if llm_engine_is_live(&state) {
         return Ok(());
@@ -162,6 +188,10 @@ async fn ensure_llm_model(app: AppHandle, state: State<'_, AppState>) -> Result<
     .map_err(|e| e.to_string())?
     .map_err(|e| e.to_string())?;
 
+    if !state.pipeline.lock().auto_edit_enabled() {
+        return Ok(());
+    }
+
     let engine = tauri::async_runtime::spawn_blocking(|| {
         let mut engine = llm::LlamaEngine::start()?;
         if let Err(err) = engine.cleanup("bonjour") {
@@ -169,13 +199,18 @@ async fn ensure_llm_model(app: AppHandle, state: State<'_, AppState>) -> Result<
         }
         Ok(engine)
     })
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e: llm::LlmError| e.to_string())?;
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e: llm::LlmError| e.to_string())?;
+
+    if !state.pipeline.lock().auto_edit_enabled() {
+        return Ok(());
+    }
 
     {
-        let mut llm = state.llm_engine.lock();
-        *llm = Some(engine);
+        *state.llm_engine.lock() = Some(engine);
+    }
+    {
         let mut pipeline = state.pipeline.lock();
         pipeline.set_llm_engine(Arc::clone(&state.llm_engine));
         pipeline.set_llm_ready(Arc::clone(&state.llm_ready));
@@ -223,8 +258,9 @@ async fn ensure_model(app: AppHandle, state: State<'_, AppState>) -> Result<(), 
         .map_err(|e| e.to_string())?;
 
     {
-        let mut whisper = state.whisper_engine.lock();
-        *whisper = Some(engine);
+        *state.whisper_engine.lock() = Some(engine);
+    }
+    {
         let mut pipeline = state.pipeline.lock();
         pipeline.set_whisper_engine(Arc::clone(&state.whisper_engine));
     }

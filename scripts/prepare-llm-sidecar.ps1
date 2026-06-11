@@ -10,13 +10,13 @@ $env:PATH = "$cmakeBin;$env:PATH"
 
 Push-Location $srcTauri
 try {
-    cargo build -p calliop-llm-worker
+    cargo build --release -p calliop-llm-worker
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
     $triple = & rustc --print host-tuple
-    $builtWorker = Join-Path $srcTauri "target/debug/calliop-llm-worker.exe"
+    $builtWorker = Join-Path $srcTauri "target/release/calliop-llm-worker.exe"
     if (-not (Test-Path $builtWorker)) {
-        $builtWorker = Join-Path $srcTauri "target/debug/calliop-llm-worker"
+        $builtWorker = Join-Path $srcTauri "target/release/calliop-llm-worker"
     }
 
     New-Item -ItemType Directory -Force -Path $binDir | Out-Null
