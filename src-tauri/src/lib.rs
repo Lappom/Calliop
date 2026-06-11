@@ -1,5 +1,6 @@
 pub mod app_context;
 pub mod audio;
+pub mod dictionary_notify;
 pub mod hotkey;
 pub mod inject;
 pub mod llm;
@@ -13,6 +14,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use calliop_prompt::ToneProfile;
+use dictionary_notify::{DictionaryNotifier, DictionaryUpdatedPayload};
 use inject::TextInjector;
 use parking_lot::Mutex;
 use pipeline::{
@@ -25,7 +27,7 @@ use store::{
     AppContextMatchType, AppContextRule, AppSettings, DictationEntry, DictionarySource,
     DictionaryWord, Insights, NewAppContextRule, Snippet, SnippetImport, Store, DEFAULT_LIST_LIMIT,
 };
-use stt::{build_whisper_initial_prompt, SttLanguage};
+use stt::{SttLanguage, WhisperPromptCache, MAX_INITIAL_PROMPT_WORDS};
 use tauri::{
     menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -33,7 +35,6 @@ use tauri::{
 };
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
-use tauri_plugin_notification::NotificationExt;
 
 /// Returns registered core module names (Phase 0 wiring check).
 pub fn registered_modules() -> [&'static str; 9] {
@@ -66,11 +67,14 @@ struct AppState {
     whisper_engine: Arc<Mutex<Option<stt::WhisperEngine>>>,
     llm_engine: Arc<Mutex<Option<llm::LlamaEngine>>>,
     store: Arc<Store>,
+    prompt_cache: Mutex<WhisperPromptCache>,
+    dictionary_notifier: Arc<DictionaryNotifier>,
     model_ready: AtomicBool,
     model_init: Arc<tokio::sync::Mutex<()>>,
     llm_ready: Arc<AtomicBool>,
     llm_init: Arc<tokio::sync::Mutex<()>>,
     hotkey_press: Mutex<HotkeyPressState>,
+    deferred_llm_on_boot: AtomicBool,
 }
 
 fn llm_engine_is_live(state: &AppState) -> bool {
@@ -91,7 +95,7 @@ pub(crate) fn spawn_llm_recovery_if_needed(app: AppHandle) {
         if llm_engine_is_live(&state) {
             return;
         }
-        if let Err(err) = ensure_llm_model(app.clone(), state).await {
+        if let Err(err) = ensure_llm_model_inner(&app, &state).await {
             eprintln!("llm recovery after invalidation failed: {err}");
         }
     });
@@ -145,24 +149,35 @@ fn snippet_to_payload(snippet: Snippet) -> SnippetPayload {
     }
 }
 
-fn refresh_whisper_prompt(
+fn sync_prompt_cache_to_pipeline(state: &AppState) {
+    let prompt = state.prompt_cache.lock().prompt();
+    state.pipeline.lock().set_dictionary_prompt_arc(prompt);
+}
+
+fn refresh_whisper_prompt_with_cache(
     store: &Store,
     pipeline: &Arc<Mutex<PipelineOrchestrator>>,
+    cache: &Mutex<WhisperPromptCache>,
 ) -> Result<(), String> {
     let snippets = store.list_snippets().map_err(|e| e.to_string())?;
+    let snippet_triggers: Vec<String> = snippets.iter().map(|s| s.trigger.clone()).collect();
+    let dictionary_words = store
+        .list_words_for_prompt(MAX_INITIAL_PROMPT_WORDS)
+        .map_err(|e| e.to_string())?;
+
     {
-        pipeline.lock().set_snippets(snippets.clone());
+        let mut guard = cache.lock();
+        guard.rebuild(snippet_triggers, dictionary_words);
     }
 
-    let words = store.list_words().map_err(|e| e.to_string())?;
-    let snippet_triggers: Vec<String> = snippets
-        .iter()
-        .map(|snippet| snippet.trigger.clone())
-        .collect();
-    let dictionary_words: Vec<String> = words.into_iter().map(|entry| entry.word).collect();
-    let prompt = build_whisper_initial_prompt(&snippet_triggers, &dictionary_words);
-    pipeline.lock().set_dictionary_prompt(prompt);
+    let mut pipeline_guard = pipeline.lock();
+    pipeline_guard.set_snippets(snippets);
+    pipeline_guard.set_dictionary_prompt_arc(cache.lock().prompt());
     Ok(())
+}
+
+fn refresh_whisper_prompt_full(state: &AppState) -> Result<(), String> {
+    refresh_whisper_prompt_with_cache(&state.store, &state.pipeline, &state.prompt_cache)
 }
 
 fn ensure_pipeline_snippets_loaded(store: &Store, pipeline: &Arc<Mutex<PipelineOrchestrator>>) {
@@ -173,24 +188,23 @@ fn ensure_pipeline_snippets_loaded(store: &Store, pipeline: &Arc<Mutex<PipelineO
 }
 
 fn refresh_whisper_prompt_state(state: &AppState) -> Result<(), String> {
-    refresh_whisper_prompt(&state.store, &state.pipeline)
+    refresh_whisper_prompt_full(state)
 }
 
-fn refresh_dictionary_prompt(
-    store: &Store,
-    pipeline: &Arc<Mutex<PipelineOrchestrator>>,
-) -> Result<(), String> {
-    refresh_whisper_prompt(store, pipeline)
-}
-
-fn refresh_dictionary_prompt_state(state: &AppState) -> Result<(), String> {
-    refresh_whisper_prompt_state(state)
+fn apply_dictionary_additions(state: &AppState, added: &[String]) -> Result<(), String> {
+    let changed = {
+        let mut cache = state.prompt_cache.lock();
+        cache.apply_additions(added)
+    };
+    if changed {
+        sync_prompt_cache_to_pipeline(state);
+    }
+    Ok(())
 }
 
 pub(crate) fn apply_learned_correction(
     app: &AppHandle,
-    store: &Store,
-    pipeline: &Arc<Mutex<PipelineOrchestrator>>,
+    state: &AppState,
     original: &str,
     corrected: &str,
 ) -> Result<Vec<String>, String> {
@@ -199,32 +213,24 @@ pub(crate) fn apply_learned_correction(
         return Ok(Vec::new());
     }
 
-    let mut added = Vec::new();
-    for word in candidates {
-        let inserted = store
-            .add_word(&word, DictionarySource::Learned)
-            .map_err(|e| e.to_string())?;
-        if inserted {
-            added.push(word);
-        }
+    let added = state
+        .store
+        .add_words_batch(&candidates, DictionarySource::Learned)
+        .map_err(|e| e.to_string())?;
+
+    if added.is_empty() {
+        return Ok(Vec::new());
     }
 
-    if !added.is_empty() {
-        if let Err(err) = refresh_dictionary_prompt(store, pipeline) {
-            for word in &added {
-                let _ = store.remove_word_by_normalized(word);
-            }
-            return Err(err);
+    if let Err(err) = apply_dictionary_additions(state, &added) {
+        for word in &added {
+            let _ = state.store.remove_word_by_normalized(word);
         }
-        send_dictionary_notification(app, &added);
-        emit_dictionary_updated(app);
+        return Err(err);
     }
 
+    state.dictionary_notifier.queue_added(app, added.clone());
     Ok(added)
-}
-
-fn emit_dictionary_updated(app: &AppHandle) {
-    let _ = app.emit("dictionary-updated", ());
 }
 
 fn emit_snippets_updated(app: &AppHandle) {
@@ -280,29 +286,6 @@ fn parse_match_type(value: &str) -> Result<AppContextMatchType, String> {
 fn parse_tone_profile(value: &str) -> Result<ToneProfile, String> {
     ToneProfile::parse(value)
         .ok_or_else(|| "Ton invalide (default, casual, formal ou technical).".into())
-}
-
-fn send_dictionary_notification(app: &AppHandle, words: &[String]) {
-    if words.is_empty() {
-        return;
-    }
-
-    let body = if words.len() == 1 {
-        format!("Mot ajouté au dictionnaire : {}", words[0])
-    } else {
-        format!(
-            "{} mots ajoutés au dictionnaire : {}",
-            words.len(),
-            words.join(", ")
-        )
-    };
-
-    let _ = app
-        .notification()
-        .builder()
-        .title("Calliop")
-        .body(body)
-        .show();
 }
 
 const MENU_OPEN: &str = "open";
@@ -423,13 +406,12 @@ async fn set_settings(
     Ok(())
 }
 
-#[tauri::command]
-async fn ensure_llm_model(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+async fn ensure_llm_model_inner(app: &AppHandle, state: &AppState) -> Result<(), String> {
     if !state.pipeline.lock().auto_edit_enabled() {
         return Ok(());
     }
 
-    if llm_engine_is_live(&state) {
+    if llm_engine_is_live(state) {
         return Ok(());
     }
 
@@ -443,11 +425,11 @@ async fn ensure_llm_model(app: AppHandle, state: State<'_, AppState>) -> Result<
         return Ok(());
     }
 
-    if llm_engine_is_live(&state) {
+    if llm_engine_is_live(state) {
         return Ok(());
     }
 
-    shutdown_llm_engine(&state);
+    shutdown_llm_engine(state);
 
     let app_for_download = app.clone();
     let _model_path = tauri::async_runtime::spawn_blocking(move || {
@@ -491,6 +473,11 @@ async fn ensure_llm_model(app: AppHandle, state: State<'_, AppState>) -> Result<
 }
 
 #[tauri::command]
+async fn ensure_llm_model(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    ensure_llm_model_inner(&app, &state).await
+}
+
+#[tauri::command]
 fn list_dictionary_words(state: State<'_, AppState>) -> Result<Vec<DictionaryWordPayload>, String> {
     state
         .store
@@ -522,11 +509,18 @@ fn add_dictionary_word(
         .map_err(|e| e.to_string())?;
 
     if inserted {
-        if let Err(err) = refresh_dictionary_prompt_state(&state) {
+        if let Err(err) = apply_dictionary_additions(&state, std::slice::from_ref(&normalized)) {
             let _ = state.store.remove_word_by_normalized(&normalized);
             return Err(err);
         }
-        emit_dictionary_updated(&app);
+        state.dictionary_notifier.emit_immediate(
+            &app,
+            DictionaryUpdatedPayload {
+                added: vec![normalized],
+                removed: vec![],
+                source: Some("manual".into()),
+            },
+        );
     }
 
     Ok(inserted)
@@ -549,12 +543,19 @@ fn remove_dictionary_word(
         return Err(format!("Mot introuvable (id {id})."));
     }
 
-    if let Err(err) = refresh_dictionary_prompt_state(&state) {
+    if let Err(err) = refresh_whisper_prompt_full(&state) {
         let _ = state.store.add_word(&entry.word, entry.source);
         return Err(err);
     }
 
-    emit_dictionary_updated(&app);
+    state.dictionary_notifier.emit_immediate(
+        &app,
+        DictionaryUpdatedPayload {
+            added: vec![],
+            removed: vec![entry.word],
+            source: None,
+        },
+    );
     Ok(())
 }
 
@@ -565,7 +566,7 @@ fn learn_from_correction(
     original: String,
     corrected: String,
 ) -> Result<Vec<String>, String> {
-    apply_learned_correction(&app, &state.store, &state.pipeline, &original, &corrected)
+    apply_learned_correction(&app, &state, &original, &corrected)
 }
 
 #[tauri::command]
@@ -813,8 +814,7 @@ fn set_autostart_enabled(app: AppHandle, enabled: bool) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
-async fn ensure_model(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+async fn ensure_model_inner(app: &AppHandle, state: &AppState) -> Result<(), String> {
     if state.model_ready.load(Ordering::SeqCst) {
         return Ok(());
     }
@@ -864,6 +864,49 @@ async fn ensure_model(app: AppHandle, state: State<'_, AppState>) -> Result<(), 
     Ok(())
 }
 
+#[tauri::command]
+async fn ensure_model(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    ensure_model_inner(&app, &state).await
+}
+
+fn spawn_deferred_llm_if_needed(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        let state = app.state::<AppState>();
+        if !state.deferred_llm_on_boot.swap(false, Ordering::SeqCst) {
+            return;
+        }
+        if !state.pipeline.lock().auto_edit_enabled() {
+            return;
+        }
+        if let Err(err) = ensure_llm_model_inner(&app, &state).await {
+            eprintln!("llm model initialization failed: {err}");
+        }
+    });
+}
+
+async fn ensure_model_then_start(app: AppHandle) {
+    let state = app.state::<AppState>();
+    if !state.model_ready.load(Ordering::SeqCst) {
+        let _ = app.emit(
+            "pipeline-state",
+            PipelineStateEvent {
+                state: PipelineState::Idle.as_str().into(),
+                message: Some("Chargement du modèle…".into()),
+            },
+        );
+        if let Err(err) = ensure_model_inner(&app, &state).await {
+            let _ = app.emit("model-init-error", err);
+            return;
+        }
+        spawn_deferred_llm_if_needed(app.clone());
+    }
+
+    let pipeline = app.state::<AppState>().pipeline.clone();
+    if pipeline.lock().state() == PipelineState::Idle {
+        spawn_start(app, pipeline);
+    }
+}
+
 fn handle_hotkey(app: &AppHandle, shortcut_state: ShortcutState) {
     let state = app.state::<AppState>();
 
@@ -881,7 +924,16 @@ fn handle_hotkey(app: &AppHandle, shortcut_state: ShortcutState) {
             press.was_idle_on_press = current == PipelineState::Idle;
 
             match current {
-                PipelineState::Idle => spawn_start(app.clone(), state.pipeline.clone()),
+                PipelineState::Idle => {
+                    if state.model_ready.load(Ordering::SeqCst) {
+                        spawn_start(app.clone(), state.pipeline.clone());
+                    } else {
+                        let app_clone = app.clone();
+                        tauri::async_runtime::spawn(async move {
+                            ensure_model_then_start(app_clone).await;
+                        });
+                    }
+                }
                 // Distinct second tap (after release) toggles off.
                 PipelineState::Recording => {
                     spawn_stop(app.clone(), state.pipeline.clone());
@@ -1019,15 +1071,12 @@ pub fn run() {
         .set_default_stt_language(initial_settings.stt_language_mode());
 
     {
-        let store = Arc::clone(&store);
-        let pipeline_arc = Arc::clone(&pipeline);
         let handler = Arc::new(move |app: &AppHandle, original: &str, corrected: &str| {
-            if !pipeline_arc.lock().auto_learn_enabled() {
+            let state = app.state::<AppState>();
+            if !state.pipeline.lock().auto_learn_enabled() {
                 return;
             }
-            if let Err(err) =
-                apply_learned_correction(app, &store, &pipeline_arc, original, corrected)
-            {
+            if let Err(err) = apply_learned_correction(app, &state, original, corrected) {
                 eprintln!("auto-learn correction failed: {err}");
             }
         });
@@ -1041,7 +1090,9 @@ pub fn run() {
         eprintln!("failed to load app context rules cache: {err}");
     }
 
-    if let Err(err) = refresh_whisper_prompt(&store, &pipeline) {
+    let prompt_cache = Mutex::new(WhisperPromptCache::default());
+    let dictionary_notifier = Arc::new(DictionaryNotifier::new());
+    if let Err(err) = refresh_whisper_prompt_with_cache(&store, &pipeline, &prompt_cache) {
         eprintln!("failed to load whisper prompt and snippets cache: {err}");
         ensure_pipeline_snippets_loaded(&store, &pipeline);
     }
@@ -1050,6 +1101,9 @@ pub fn run() {
     let whisper_engine = Arc::new(Mutex::new(None));
     let llm_engine = Arc::new(Mutex::new(None));
     let llm_ready = Arc::new(AtomicBool::new(false));
+    let model_init = Arc::new(tokio::sync::Mutex::new(()));
+    let llm_init = Arc::new(tokio::sync::Mutex::new(()));
+    let start_minimized = should_start_minimized();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -1070,15 +1124,18 @@ pub fn run() {
             whisper_engine: whisper_engine.clone(),
             llm_engine: llm_engine.clone(),
             store,
+            prompt_cache,
+            dictionary_notifier,
             model_ready: AtomicBool::new(false),
-            model_init: Arc::new(tokio::sync::Mutex::new(())),
+            model_init: Arc::clone(&model_init),
             llm_ready: llm_ready.clone(),
-            llm_init: Arc::new(tokio::sync::Mutex::new(())),
+            llm_init: Arc::clone(&llm_init),
             hotkey_press: Mutex::new(HotkeyPressState {
                 press_start: None,
                 was_idle_on_press: false,
                 shortcut_down: false,
             }),
+            deferred_llm_on_boot: AtomicBool::new(start_minimized && initial_settings.auto_edit),
         })
         .setup(move |app| {
             let _modules = registered_modules();
@@ -1106,23 +1163,25 @@ pub fn run() {
                 hide_main_window(app.handle());
             }
 
-            let app_handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                let state = app_handle.state::<AppState>();
-                if let Err(err) = ensure_model(app_handle.clone(), state).await {
-                    eprintln!("model initialization failed: {err}");
-                    let _ = app_handle.emit("model-init-error", err);
-                }
-            });
-
-            if initial_settings.auto_edit {
+            if !start_minimized {
                 let app_handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     let state = app_handle.state::<AppState>();
-                    if let Err(err) = ensure_llm_model(app_handle.clone(), state).await {
-                        eprintln!("llm model initialization failed: {err}");
+                    if let Err(err) = ensure_model(app_handle.clone(), state).await {
+                        eprintln!("model initialization failed: {err}");
+                        let _ = app_handle.emit("model-init-error", err);
                     }
                 });
+
+                if initial_settings.auto_edit {
+                    let app_handle = app.handle().clone();
+                    tauri::async_runtime::spawn(async move {
+                        let state = app_handle.state::<AppState>();
+                        if let Err(err) = ensure_llm_model(app_handle.clone(), state).await {
+                            eprintln!("llm model initialization failed: {err}");
+                        }
+                    });
+                }
             }
 
             Ok(())

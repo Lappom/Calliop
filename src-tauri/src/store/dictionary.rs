@@ -46,22 +46,67 @@ impl Store {
              ORDER BY word COLLATE NOCASE ASC",
         )?;
 
-        let rows = stmt.query_map([], |row| {
-            let source_raw: String = row.get(2)?;
-            let source = DictionarySource::parse(&source_raw).ok_or_else(|| {
-                rusqlite::Error::InvalidColumnType(2, "source".into(), rusqlite::types::Type::Text)
-            })?;
-
-            Ok(DictionaryWord {
-                id: row.get(0)?,
-                word: row.get(1)?,
-                source,
-                created_at: row.get(3)?,
-            })
-        })?;
+        let rows = stmt.query_map([], Self::map_dictionary_row)?;
 
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(StoreError::from)
+    }
+
+    /// Words for the Whisper prompt, most recently added first.
+    pub fn list_words_for_prompt(&self, limit: usize) -> Result<Vec<String>, StoreError> {
+        let conn = self.connection().lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT word FROM dictionary
+             ORDER BY datetime(created_at) DESC, id DESC
+             LIMIT ?1",
+        )?;
+
+        let rows = stmt.query_map(params![limit as i64], |row| row.get::<_, String>(0))?;
+
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StoreError::from)
+    }
+
+    pub fn add_words_batch(
+        &self,
+        words: &[String],
+        source: DictionarySource,
+    ) -> Result<Vec<String>, StoreError> {
+        let mut added = Vec::new();
+        let mut conn = self.connection().lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
+
+        for word in words {
+            let normalized = normalize_word(word);
+            if !is_valid_dictionary_word(&normalized) {
+                continue;
+            }
+            let changed = tx.execute(
+                "INSERT INTO dictionary (word, source) VALUES (?1, ?2)
+                 ON CONFLICT(word) DO NOTHING",
+                params![normalized, source.as_str()],
+            )?;
+            if changed > 0 {
+                added.push(normalized);
+            }
+        }
+
+        tx.commit()?;
+        Ok(added)
+    }
+
+    fn map_dictionary_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<DictionaryWord> {
+        let source_raw: String = row.get(2)?;
+        let source = DictionarySource::parse(&source_raw).ok_or_else(|| {
+            rusqlite::Error::InvalidColumnType(2, "source".into(), rusqlite::types::Type::Text)
+        })?;
+
+        Ok(DictionaryWord {
+            id: row.get(0)?,
+            word: row.get(1)?,
+            source,
+            created_at: row.get(3)?,
+        })
     }
 
     pub fn add_word(&self, word: &str, source: DictionarySource) -> Result<bool, StoreError> {
@@ -376,5 +421,29 @@ mod tests {
     fn extract_correction_words_learns_typo_substitutions() {
         let words = extract_correction_words("bonjour Calliop", "bonjour Calliope");
         assert_eq!(words, vec!["Calliope".to_string()]);
+    }
+
+    #[test]
+    fn add_words_batch_inserts_in_one_transaction() {
+        let store = test_store();
+        let added = store
+            .add_words_batch(
+                &["Alpha".into(), "alpha".into(), "Beta".into()],
+                DictionarySource::Learned,
+            )
+            .unwrap();
+        assert_eq!(added, vec!["Alpha".to_string(), "Beta".to_string()]);
+        assert_eq!(store.list_words().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn list_words_for_prompt_returns_recent_first() {
+        let store = test_store();
+        store.add_word("Older", DictionarySource::Manual).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        store.add_word("Newer", DictionarySource::Manual).unwrap();
+
+        let words = store.list_words_for_prompt(10).unwrap();
+        assert_eq!(words.first().map(String::as_str), Some("Newer"));
     }
 }

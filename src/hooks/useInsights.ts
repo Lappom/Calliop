@@ -41,6 +41,12 @@ export interface Insights {
   recentLatency: RecentLatencyEntry[];
 }
 
+interface DictionaryUpdatedPayload {
+  added: string[];
+  removed: string[];
+  source?: "manual" | "learned";
+}
+
 export function useInsights() {
   const [insights, setInsights] = useState<Insights | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -71,9 +77,29 @@ export function useInsights() {
     const unlistenHistory = listen("history-updated", () => {
       void loadInsights();
     });
-    const unlistenDictionary = listen("dictionary-updated", () => {
-      void loadInsights();
-    });
+    const unlistenDictionary = listen<DictionaryUpdatedPayload>(
+      "dictionary-updated",
+      (event) => {
+        const { added, removed, source } = event.payload;
+        if (removed.length > 0) {
+          void loadInsights();
+          return;
+        }
+        if (added.length === 0 || source === "manual") {
+          return;
+        }
+        setInsights((current) => {
+          if (!current) {
+            void loadInsights();
+            return current;
+          }
+          return {
+            ...current,
+            learnedCorrections: current.learnedCorrections + added.length,
+          };
+        });
+      },
+    );
 
     return () => {
       cancelled = true;

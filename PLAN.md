@@ -216,10 +216,10 @@ Application desktop qui permet de **dicter dans n'importe quelle application** a
 - [x] Optimiser le pipeline audio
 - [x] Optimiser le pipeline de transcription
 - [x] Optimiser le pipeline de post-traitement
-- [ ] Optimiser le pipeline de notification
-- [ ] Optimiser le pipeline de démarrage automatique
-- [ ] Optimiser le pipeline d'apprentissage automatique des corrections utilisateur
-- [ ] Optimiser le pipeline de dictionnaire personnel
+- [x] Optimiser le pipeline de notification
+- [x] Optimiser le pipeline de démarrage automatique
+- [x] Optimiser le pipeline d'apprentissage automatique des corrections utilisateur
+- [x] Optimiser le pipeline de dictionnaire personnel
 
 ---
 

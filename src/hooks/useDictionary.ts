@@ -11,6 +11,12 @@ export interface DictionaryWord {
   created_at: string;
 }
 
+interface DictionaryUpdatedPayload {
+  added: string[];
+  removed: string[];
+  source?: DictionarySource;
+}
+
 export function useDictionary() {
   const [words, setWords] = useState<DictionaryWord[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -39,8 +45,32 @@ export function useDictionary() {
 
     void setup();
 
-    const unlisten = listen("dictionary-updated", () => {
-      void loadWords();
+    const unlisten = listen<DictionaryUpdatedPayload>("dictionary-updated", (event) => {
+      const { added, removed, source } = event.payload;
+      if (removed.length > 0) {
+        void loadWords();
+        return;
+      }
+      if (added.length === 0) {
+        return;
+      }
+      setWords((current) => {
+        const existing = new Set(current.map((entry) => entry.word.toLowerCase()));
+        const now = new Date().toISOString();
+        const appended = added
+          .filter((word) => !existing.has(word.toLowerCase()))
+          .map((word, index) => ({
+            id: -(index + 1),
+            word,
+            source: source ?? "learned",
+            created_at: now,
+          }));
+        if (appended.length === 0) {
+          return current;
+        }
+        return [...appended, ...current];
+      });
+      setLoaded(true);
     });
 
     return () => {
