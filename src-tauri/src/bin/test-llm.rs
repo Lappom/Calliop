@@ -1,5 +1,7 @@
 use std::env;
 
+use calliop_prompt::ToneProfile;
+
 use calliop_lib::llm::{ensure_llm_model_blocking, LlamaEngine};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -17,7 +19,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Starting LLM worker...");
     let mut engine = LlamaEngine::start()?;
     println!("Cleaning: {raw}");
-    let cleaned = engine.cleanup(&raw)?;
+    let cleaned = engine.cleanup(&raw, ToneProfile::Default)?;
     println!("Cleaned: {cleaned}");
     Ok(())
 }

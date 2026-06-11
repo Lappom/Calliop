@@ -183,9 +183,9 @@ Application desktop qui permet de **dicter dans n'importe quelle application** a
 - [x] Import / export JSON
 
 #### 3d — Contexte par application
-- [ ] Détection fenêtre active (titre, bundle ID / exe)
-- [ ] Profils de ton : casual (Slack), formel (mail), technique (IDE/terminal)
-- [ ] Mapping configurable par app
+- [x] Détection fenêtre active (titre, bundle ID / exe)
+- [x] Profils de ton : casual (Slack), formel (mail), technique (IDE/terminal)
+- [x] Mapping configurable par app
 
 #### 3e — Multilingue
 - [ ] Auto-détection langue (Whisper)

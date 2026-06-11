@@ -500,6 +500,7 @@ dependencies = [
  "uiautomation",
  "voice_activity_detector",
  "whisper-rs",
+ "windows 0.58.0",
 ]
 
 [[package]]
@@ -517,6 +518,8 @@ dependencies = [
 name = "calliop-prompt"
 version = "0.1.0"
 dependencies = [
+ "serde",
+ "serde_json",
  "thiserror 2.0.18",
 ]
 

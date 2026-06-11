@@ -1,3 +1,5 @@
+use calliop_prompt::ToneProfile;
+
 use super::client::WorkerClient;
 use super::model::ensure_llm_model_blocking;
 use super::LlmError;
@@ -13,8 +15,8 @@ impl LlamaEngine {
         })
     }
 
-    pub fn cleanup(&mut self, raw: &str) -> Result<String, LlmError> {
-        self.client.cleanup(raw)
+    pub fn cleanup(&mut self, raw: &str, tone: ToneProfile) -> Result<String, LlmError> {
+        self.client.cleanup(raw, tone)
     }
 
     pub fn pid(&self) -> u32 {

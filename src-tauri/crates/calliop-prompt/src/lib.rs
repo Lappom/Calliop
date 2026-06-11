@@ -1,4 +1,55 @@
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+/// Writing tone applied during LLM cleanup based on the active application.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ToneProfile {
+    #[default]
+    Default,
+    Casual,
+    Formal,
+    Technical,
+}
+
+impl ToneProfile {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::Casual => "casual",
+            Self::Formal => "formal",
+            Self::Technical => "technical",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "default" => Some(Self::Default),
+            "casual" => Some(Self::Casual),
+            "formal" => Some(Self::Formal),
+            "technical" => Some(Self::Technical),
+            _ => None,
+        }
+    }
+}
+
+/// Builds the system prompt for LLM cleanup, optionally tuned for the target app tone.
+pub fn build_system_prompt(profile: ToneProfile) -> String {
+    let suffix = match profile {
+        ToneProfile::Default => String::new(),
+        ToneProfile::Casual => " Contexte : messagerie ou chat (ex. Slack). \
+Ton détendu et direct : phrases courtes, tutoiement si naturel, pas de formules de politesse lourdes."
+            .into(),
+        ToneProfile::Formal => " Contexte : courriel ou communication professionnelle formelle. \
+Vouvoiement si approprié, formules de politesse sobres, structure claire, ton professionnel."
+            .into(),
+        ToneProfile::Technical => " Contexte : développement logiciel ou terminal. \
+Style concis et technique : vocabulaire précis, commits ou commentaires courts si pertinent, \
+pas de langage marketing."
+            .into(),
+    };
+    format!("{SYSTEM_PROMPT}{suffix}")
+}
 
 const THINK_OPEN: &str = concat!("<", "think", ">");
 const THINK_CLOSE: &str = concat!("</", "think", ">");
@@ -522,5 +573,31 @@ mod tests {
         assert!(QWEN3_CHAT_TEMPLATE.contains("<|im_start|>"));
         assert!(QWEN3_CHAT_TEMPLATE.contains("add_generation_prompt"));
         assert!(QWEN3_CHAT_TEMPLATE.contains(concat!("<|", "im_end", "|>")));
+    }
+
+    #[test]
+    fn default_system_prompt_matches_base() {
+        assert_eq!(build_system_prompt(ToneProfile::Default), SYSTEM_PROMPT);
+    }
+
+    #[test]
+    fn tone_profiles_extend_system_prompt() {
+        let casual = build_system_prompt(ToneProfile::Casual);
+        assert!(casual.starts_with(SYSTEM_PROMPT));
+        assert!(casual.contains("Slack"));
+
+        let formal = build_system_prompt(ToneProfile::Formal);
+        assert!(formal.contains("courriel"));
+
+        let technical = build_system_prompt(ToneProfile::Technical);
+        assert!(technical.contains("développement"));
+    }
+
+    #[test]
+    fn tone_profile_roundtrip_serde() {
+        let json = serde_json::to_string(&ToneProfile::Formal).unwrap();
+        assert_eq!(json, "\"formal\"");
+        let parsed: ToneProfile = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, ToneProfile::Formal);
     }
 }

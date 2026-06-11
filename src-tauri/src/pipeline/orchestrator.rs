@@ -8,11 +8,14 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize};
 use thiserror::Error;
 
+use calliop_prompt::ToneProfile;
+
+use crate::app_context::{get_active_window, resolve_tone};
 use crate::audio::{AudioCapture, VadSegmenter};
 use crate::inject::{InjectError, TextInjector};
 use crate::llm::LlamaEngine;
 use crate::observe::CorrectionHandler;
-use crate::store::Snippet;
+use crate::store::{AppContextRule, Snippet};
 use crate::stt::{SttError, WhisperEngine};
 
 use super::snippets::{apply_snippets, finalize_llm_with_snippets, shield_snippet_triggers};
@@ -112,6 +115,7 @@ pub struct PipelineOrchestrator {
     streaming_stt_ms: Arc<AtomicU64>,
     dictionary_prompt: Arc<RwLock<Option<String>>>,
     snippets: Arc<RwLock<Vec<Snippet>>>,
+    app_context_rules: Arc<RwLock<Vec<AppContextRule>>>,
     auto_learn: Arc<AtomicBool>,
     observer_generation: Arc<AtomicU64>,
     correction_handler: Option<CorrectionHandler>,
@@ -133,6 +137,7 @@ impl PipelineOrchestrator {
             streaming_stt_ms: Arc::new(AtomicU64::new(0)),
             dictionary_prompt: Arc::new(RwLock::new(None)),
             snippets: Arc::new(RwLock::new(Vec::new())),
+            app_context_rules: Arc::new(RwLock::new(Vec::new())),
             auto_learn: Arc::new(AtomicBool::new(true)),
             observer_generation: Arc::new(AtomicU64::new(0)),
             correction_handler: None,
@@ -147,9 +152,16 @@ impl PipelineOrchestrator {
         *self.snippets.write() = snippets;
     }
 
-    fn apply_cached_snippets(&self, text: &str) -> String {
-        let snippets = self.snippets.read().clone();
-        apply_snippets(text, &snippets)
+    pub fn set_app_context_rules(&mut self, rules: Vec<AppContextRule>) {
+        *self.app_context_rules.write() = rules;
+    }
+
+    fn resolve_active_tone(&self) -> ToneProfile {
+        let rules = self.app_context_rules.read().clone();
+        match get_active_window() {
+            Some(window) => resolve_tone(&window, &rules),
+            None => ToneProfile::Default,
+        }
     }
 
     pub fn state(&self) -> PipelineState {
@@ -357,11 +369,13 @@ impl PipelineOrchestrator {
                 let snippets_at_shield = self.snippets.read().clone();
                 let (shielded_text, snippet_shields) =
                     shield_snippet_triggers(&full_text, &snippets_at_shield);
+                let tone = self.resolve_active_tone();
                 let job = start_llm_cleanup(
                     Arc::clone(&self.llm),
                     Arc::clone(&self.llm_ready),
                     Arc::clone(&self.auto_edit),
                     &shielded_text,
+                    tone,
                 );
                 match job.wait_for_inject(LLM_INJECT_WAIT) {
                     LlmCleanupWait::Completed {
@@ -651,6 +665,7 @@ fn start_llm_cleanup(
     llm_ready: Arc<AtomicBool>,
     auto_edit: Arc<AtomicBool>,
     raw: &str,
+    tone: ToneProfile,
 ) -> LlmCleanupJob {
     let raw = raw.to_string();
     let start = Instant::now();
@@ -662,7 +677,7 @@ fn start_llm_cleanup(
     let worker = thread::spawn(move || {
         let engine = llm_for_worker.lock().take();
         let outcome = match engine {
-            Some(mut engine) => match engine.cleanup(&raw_for_worker) {
+            Some(mut engine) => match engine.cleanup(&raw_for_worker, tone) {
                 Ok(cleaned) => LlmCleanupOutcome::Success { cleaned, engine },
                 Err(err) => {
                     eprintln!("llm cleanup failed, using raw transcript: {err}");

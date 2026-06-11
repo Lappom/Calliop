@@ -2,6 +2,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Command, Stdio};
 
+use calliop_prompt::ToneProfile;
 use serde::{Deserialize, Serialize};
 
 use super::model::model_path;
@@ -13,6 +14,8 @@ struct WorkerRequest<'a> {
     shutdown: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     text: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tone: Option<ToneProfile>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -87,10 +90,11 @@ impl WorkerClient {
         self.child.id()
     }
 
-    pub fn cleanup(&mut self, raw: &str) -> Result<String, LlmError> {
+    pub fn cleanup(&mut self, raw: &str, tone: ToneProfile) -> Result<String, LlmError> {
         let payload = serde_json::to_string(&WorkerRequest {
             shutdown: None,
             text: Some(raw),
+            tone: Some(tone),
         })
         .map_err(|err| LlmError::Worker(err.to_string()))?;
         writeln!(self.stdin, "{payload}")
@@ -122,6 +126,7 @@ impl Drop for WorkerClient {
         let payload = serde_json::to_string(&WorkerRequest {
             shutdown: Some(true),
             text: None,
+            tone: None,
         })
         .unwrap_or_else(|_| r#"{"shutdown":true}"#.to_string());
         let _ = writeln!(self.stdin, "{payload}");

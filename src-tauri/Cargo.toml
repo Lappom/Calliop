@@ -41,6 +41,11 @@ calliop-prompt = { path = "crates/calliop-prompt" }
 
 [target.'cfg(windows)'.dependencies]
 uiautomation = "0.17"
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+] }
 
 [features]
 default = []
@@ -64,3 +69,7 @@ path = "src/bin/test-inject.rs"
 [[bin]]
 name = "test-llm"
 path = "src/bin/test-llm.rs"
+
+[[bin]]
+name = "test-context"
+path = "src/bin/test-context.rs"
