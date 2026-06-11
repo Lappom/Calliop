@@ -39,13 +39,9 @@ if ($buildGpu) {
     # Cargo sets NUM_JOBS for build scripts; cmake-rs forwards it as `cmake --build --parallel N`,
     # which races MSBuild on vulkan-shaders-gen ExternalProject steps.
     $env:NUM_JOBS = "1"
-    Push-Location $srcTauri
-    try {
-        cargo fetch -p calliop-llm-worker --features gpu
-        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    } finally {
-        Pop-Location
-    }
+    $workerManifest = Join-Path $srcTauri "crates\calliop-llm-worker\Cargo.toml"
+    cargo fetch --manifest-path $workerManifest --features gpu
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $patchResult = & (Join-Path $PSScriptRoot "patch-llama-cpp-vulkan-build.ps1") | Select-Object -Last 1
     if ($patchResult -eq "PATCHED" -or $env:CALLIOP_CLEAN_LLAMA_VULKAN -eq "1") {
         foreach ($profile in @("release", "debug")) {
