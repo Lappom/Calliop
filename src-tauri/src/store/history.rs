@@ -304,7 +304,9 @@ impl Store {
     }
 }
 
-fn fetch_daily_activity(conn: &rusqlite::Connection) -> Result<Vec<DailyActivityEntry>, StoreError> {
+fn fetch_daily_activity(
+    conn: &rusqlite::Connection,
+) -> Result<Vec<DailyActivityEntry>, StoreError> {
     let mut stmt = conn.prepare(
         "WITH RECURSIVE days(day) AS (
             SELECT date('now', 'localtime', '-6 days')
@@ -330,7 +332,9 @@ fn fetch_daily_activity(conn: &rusqlite::Connection) -> Result<Vec<DailyActivity
         .map_err(StoreError::from)
 }
 
-fn fetch_recent_latency(conn: &rusqlite::Connection) -> Result<Vec<RecentLatencyEntry>, StoreError> {
+fn fetch_recent_latency(
+    conn: &rusqlite::Connection,
+) -> Result<Vec<RecentLatencyEntry>, StoreError> {
     let mut stmt = conn.prepare(
         "SELECT stt_ms, llm_ms, inject_ms, total_ms, created_at
          FROM dictations

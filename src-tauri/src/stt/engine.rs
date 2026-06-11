@@ -34,7 +34,10 @@ pub struct TranscriptResult {
 }
 
 pub struct WhisperEngine {
+    // Kept alive so WhisperState remains valid for the engine lifetime.
+    #[allow(dead_code)]
     context: WhisperContext,
+    state: WhisperState,
     language: SttLanguage,
     n_threads: i32,
 }
@@ -53,8 +56,13 @@ impl WhisperEngine {
                     message: e.to_string(),
                 })?;
 
+        let state = context
+            .create_state()
+            .map_err(|e| SttError::CreateState(e.to_string()))?;
+
         Ok(Self {
             context,
+            state,
             language: SttLanguage::default_fixed(),
             n_threads: std::thread::available_parallelism()
                 .map(|n| n.get() as i32)
@@ -76,7 +84,7 @@ impl WhisperEngine {
     }
 
     pub fn transcribe(
-        &self,
+        &mut self,
         audio: &[f32],
         initial_prompt: Option<&str>,
     ) -> Result<TranscriptResult, SttError> {
@@ -84,7 +92,7 @@ impl WhisperEngine {
     }
 
     pub fn transcribe_with_language(
-        &self,
+        &mut self,
         audio: &[f32],
         initial_prompt: Option<&str>,
         language: SttLanguage,
@@ -93,20 +101,15 @@ impl WhisperEngine {
             return Err(SttError::EmptyAudio);
         }
 
-        let mut state = self
-            .context
-            .create_state()
-            .map_err(|e| SttError::CreateState(e.to_string()))?;
-
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
         configure_full_params(&mut params, language, self.n_threads(), initial_prompt);
-        state
+        self.state
             .full(params, audio)
             .map_err(|e| SttError::Transcribe(e.to_string()))?;
 
-        let text = collect_transcript(&state)?;
+        let text = collect_transcript(&self.state)?;
         let detected_language = if matches!(language, SttLanguage::Auto) {
-            let lang_id = state.full_lang_id_from_state();
+            let lang_id = self.state.full_lang_id_from_state();
             get_lang_str(lang_id).map(str::to_string)
         } else {
             None

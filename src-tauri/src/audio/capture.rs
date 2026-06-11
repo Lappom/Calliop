@@ -7,7 +7,6 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use thiserror::Error;
 
 pub const TARGET_SAMPLE_RATE: u32 = 16_000;
-
 pub type AudioChunkSender = std::sync::mpsc::Sender<Vec<f32>>;
 pub type AudioLevelSender = std::sync::mpsc::Sender<f32>;
 
@@ -84,13 +83,52 @@ impl ResampleStreamState {
 
 struct StreamingSidecar {
     resample_state: Mutex<ResampleStreamState>,
+    accumulated_16k: Mutex<Vec<f32>>,
     chunk_tx: Option<AudioChunkSender>,
     level_tx: Option<AudioLevelSender>,
     last_level_emit: Mutex<Instant>,
+    convert_scratch: Mutex<Vec<f32>>,
+    /// When true, stop returns the accumulated 16 kHz stream instead of resampling raw PCM.
+    streaming_capture: bool,
 }
 
 impl StreamingSidecar {
-    fn push_chunk(&self, chunk: &[f32]) {
+    fn push_f32(&self, chunk: &[f32], raw_buffer: Option<&Arc<Mutex<Vec<f32>>>>) {
+        if let Some(buffer) = raw_buffer {
+            append_samples(buffer, chunk);
+        }
+        self.process_resampled(chunk);
+    }
+
+    fn push_i16(&self, data: &[i16], raw_buffer: Option<&Arc<Mutex<Vec<f32>>>>) {
+        let mut scratch = self.convert_scratch.lock().expect("convert scratch lock");
+        scratch.clear();
+        scratch.reserve(data.len());
+        for &sample in data {
+            scratch.push(sample as f32 / i16::MAX as f32);
+        }
+        let converted = scratch.as_slice();
+        if let Some(buffer) = raw_buffer {
+            append_samples(buffer, converted);
+        }
+        self.process_resampled(converted);
+    }
+
+    fn push_u16(&self, data: &[u16], raw_buffer: Option<&Arc<Mutex<Vec<f32>>>>) {
+        let mut scratch = self.convert_scratch.lock().expect("convert scratch lock");
+        scratch.clear();
+        scratch.reserve(data.len());
+        for &sample in data {
+            scratch.push((sample as f32 / u16::MAX as f32) * 2.0 - 1.0);
+        }
+        let converted = scratch.as_slice();
+        if let Some(buffer) = raw_buffer {
+            append_samples(buffer, converted);
+        }
+        self.process_resampled(converted);
+    }
+
+    fn process_resampled(&self, chunk: &[f32]) {
         if self.chunk_tx.is_none() && self.level_tx.is_none() {
             return;
         }
@@ -100,8 +138,17 @@ impl StreamingSidecar {
         let delta = state.drain_delta();
         drop(state);
 
-        if delta.is_empty() {
-            return;
+        if !delta.is_empty() {
+            self.emit_delta(delta);
+        }
+    }
+
+    fn emit_delta(&self, delta: Vec<f32>) {
+        if self.streaming_capture {
+            self.accumulated_16k
+                .lock()
+                .expect("accumulated lock")
+                .extend_from_slice(&delta);
         }
 
         if let Some(level_tx) = &self.level_tx {
@@ -125,11 +172,17 @@ impl StreamingSidecar {
         let mut state = self.resample_state.lock().expect("resample lock");
         let delta = state.drain_remainder();
         drop(state);
-        if let Some(tx) = &self.chunk_tx {
-            if !delta.is_empty() {
-                let _ = tx.send(delta);
-            }
+        if !delta.is_empty() {
+            self.emit_delta(delta);
         }
+    }
+
+    fn take_accumulated(&self) -> Vec<f32> {
+        std::mem::take(&mut *self.accumulated_16k.lock().expect("accumulated lock"))
+    }
+
+    fn uses_streaming_accumulator(&self) -> bool {
+        self.streaming_capture
     }
 }
 
@@ -266,6 +319,8 @@ fn start_session(
 
     let source_sample_rate = config.sample_rate().0;
     let source_channels = config.channels();
+    let streaming_capture = chunk_tx.is_some();
+    let retain_raw_buffer = !streaming_capture;
 
     {
         let mut guard = buffer.lock().expect("audio buffer lock poisoned");
@@ -277,12 +332,19 @@ fn start_session(
             source_sample_rate,
             source_channels,
         )),
+        accumulated_16k: Mutex::new(Vec::new()),
         chunk_tx,
         level_tx,
         last_level_emit: Mutex::new(Instant::now() - Duration::from_millis(100)),
+        convert_scratch: Mutex::new(Vec::new()),
+        streaming_capture,
     });
 
-    let stream_buffer = Arc::clone(buffer);
+    let stream_buffer = if retain_raw_buffer {
+        Some(Arc::clone(buffer))
+    } else {
+        None
+    };
     let stream_sidecar = Arc::clone(&sidecar);
     let err_fn = |err| eprintln!("audio stream error: {err}");
 
@@ -293,8 +355,7 @@ fn start_session(
                 .build_input_stream(
                     &stream_config,
                     move |data: &[f32], _| {
-                        append_samples(&stream_buffer, data);
-                        stream_sidecar.push_chunk(data);
+                        stream_sidecar.push_f32(data, stream_buffer.as_ref());
                     },
                     err_fn,
                     None,
@@ -307,10 +368,7 @@ fn start_session(
                 .build_input_stream(
                     &stream_config,
                     move |data: &[i16], _| {
-                        let samples: Vec<f32> =
-                            data.iter().map(|&s| s as f32 / i16::MAX as f32).collect();
-                        append_samples(&stream_buffer, &samples);
-                        stream_sidecar.push_chunk(&samples);
+                        stream_sidecar.push_i16(data, stream_buffer.as_ref());
                     },
                     err_fn,
                     None,
@@ -323,12 +381,7 @@ fn start_session(
                 .build_input_stream(
                     &stream_config,
                     move |data: &[u16], _| {
-                        let samples: Vec<f32> = data
-                            .iter()
-                            .map(|&s| (s as f32 / u16::MAX as f32) * 2.0 - 1.0)
-                            .collect();
-                        append_samples(&stream_buffer, &samples);
-                        stream_sidecar.push_chunk(&samples);
+                        stream_sidecar.push_u16(data, stream_buffer.as_ref());
                     },
                     err_fn,
                     None,
@@ -361,6 +414,10 @@ fn stop_session(
 ) -> Result<Vec<f32>, AudioError> {
     let active = session.take().ok_or(AudioError::NotRecording)?;
     active.sidecar.flush();
+
+    if active.sidecar.uses_streaming_accumulator() {
+        return Ok(active.sidecar.take_accumulated());
+    }
 
     let raw = buffer.lock().expect("audio buffer lock poisoned").clone();
     Ok(resample_to_16k_mono(
@@ -562,5 +619,27 @@ mod tests {
                 "streamed={streamed_sample} batch={batch_sample}"
             );
         }
+    }
+
+    #[test]
+    fn streaming_sidecar_accumulates_16k_deltas() {
+        let (chunk_tx, _chunk_rx) = std::sync::mpsc::channel::<Vec<f32>>();
+        let sidecar = StreamingSidecar {
+            resample_state: Mutex::new(ResampleStreamState::new(16_000, 1)),
+            accumulated_16k: Mutex::new(Vec::new()),
+            chunk_tx: Some(chunk_tx),
+            level_tx: None,
+            last_level_emit: Mutex::new(Instant::now()),
+            convert_scratch: Mutex::new(Vec::new()),
+            streaming_capture: true,
+        };
+
+        let samples: Vec<f32> = (0..320).map(|i| i as f32 / 320.0).collect();
+        sidecar.push_f32(&samples, None);
+        sidecar.flush();
+
+        let accumulated = sidecar.take_accumulated();
+        assert_eq!(accumulated.len(), samples.len());
+        assert!((accumulated[10] - samples[10]).abs() < f32::EPSILON);
     }
 }

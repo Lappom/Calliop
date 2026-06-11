@@ -53,7 +53,7 @@ impl VadSegmenter {
 
         while self.pending.len() >= VAD_CHUNK_SIZE {
             let chunk: Vec<f32> = self.pending.drain(..VAD_CHUNK_SIZE).collect();
-            let probability = self.vad.predict(chunk.clone());
+            let probability = self.vad.predict(chunk.iter().copied());
             self.process_chunk(chunk, probability, &mut completed)?;
         }
 
@@ -67,7 +67,7 @@ impl VadSegmenter {
         if !self.pending.is_empty() {
             let mut chunk = self.pending.drain(..).collect::<Vec<_>>();
             chunk.resize(VAD_CHUNK_SIZE, 0.0);
-            let probability = self.vad.predict(chunk.clone());
+            let probability = self.vad.predict(chunk.iter().copied());
             self.process_chunk(chunk, probability, &mut completed)?;
         }
 

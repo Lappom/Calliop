@@ -47,7 +47,8 @@ fn prepare_partial_transcript(raw: &str, snippets: &[Snippet]) -> String {
 
 /// Maximum time to wait for LLM cleanup (Qwen3 1.7B on CPU can take tens of seconds).
 const LLM_CLEANUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
-/// Fast-path budget before injecting the raw transcript; LLM continues in background if slower.
+/// Max wait for LLM-polished text before falling back to post-processed injection.
+/// Typical Qwen3 1.7B CPU cleanup is ~3 s; keep headroom for variance.
 const LLM_INJECT_WAIT: std::time::Duration = std::time::Duration::from_secs(4);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -85,10 +86,17 @@ pub struct PartialTranscriptEvent {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct LatencyMetricsEvent {
+    /// Cumulative Whisper inference time (overlaps with recording when streaming).
     #[serde(rename = "sttMs")]
     pub stt_ms: u64,
+    /// Wall-clock STT drain after hotkey release until the transcript is ready.
+    #[serde(rename = "sttWaitMs")]
+    pub stt_wait_ms: u64,
     #[serde(rename = "llmMs")]
     pub llm_ms: u64,
+    /// Wall-clock time blocked waiting for LLM before injection (0 when fast-path used).
+    #[serde(rename = "llmBlockedMs")]
+    pub llm_blocked_ms: u64,
     #[serde(rename = "injectMs")]
     pub inject_ms: u64,
     #[serde(rename = "totalMs")]
@@ -149,7 +157,7 @@ pub struct PipelineOrchestrator {
     segment_transcripts: Arc<Mutex<Vec<String>>>,
     failed_segments: Arc<Mutex<Vec<FailedSegment>>>,
     streaming_stt_ms: Arc<AtomicU64>,
-    dictionary_prompt: Arc<RwLock<Option<String>>>,
+    dictionary_prompt: Arc<RwLock<Option<Arc<str>>>>,
     snippets: Arc<RwLock<Vec<Snippet>>>,
     app_context_rules: Arc<RwLock<Vec<AppContextRule>>>,
     auto_learn: Arc<AtomicBool>,
@@ -195,7 +203,7 @@ impl PipelineOrchestrator {
     }
 
     pub fn set_dictionary_prompt(&mut self, prompt: Option<String>) {
-        *self.dictionary_prompt.write() = prompt;
+        *self.dictionary_prompt.write() = prompt.map(|value| Arc::from(value.as_str()));
     }
 
     pub fn set_snippets(&mut self, snippets: Vec<Snippet>) {
@@ -355,7 +363,7 @@ impl PipelineOrchestrator {
         // Fail fast before opening the mic if VAD cannot initialize.
         VadSegmenter::new()?;
 
-        let (chunk_tx, chunk_rx) = std::sync::mpsc::channel();
+        let (chunk_tx, chunk_rx) = std::sync::mpsc::channel::<Vec<f32>>();
         let (level_tx, level_rx) = std::sync::mpsc::channel();
         self.audio
             .start_with_streaming(Some(chunk_tx), Some(level_tx))?;
@@ -395,13 +403,10 @@ impl PipelineOrchestrator {
         let app_level = app.clone();
         let level_stop = Arc::clone(&stop_flag);
         let level_listener = thread::spawn(move || {
-            while !level_stop.load(Ordering::SeqCst) {
-                match level_rx.recv_timeout(std::time::Duration::from_millis(100)) {
-                    Ok(level) => {
-                        let _ = app_level.emit("audio-level", AudioLevelEvent { level });
-                    }
-                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
-                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            while let Ok(level) = level_rx.recv() {
+                let _ = app_level.emit("audio-level", AudioLevelEvent { level });
+                if level_stop.load(Ordering::SeqCst) {
+                    break;
                 }
             }
         });
@@ -443,8 +448,8 @@ impl PipelineOrchestrator {
 
         let mut fallback_stt_ms = 0_u64;
         {
-            let engine_guard = self.whisper.lock();
-            let Some(engine) = engine_guard.as_ref() else {
+            let mut engine_guard = self.whisper.lock();
+            let Some(engine) = engine_guard.as_mut() else {
                 return Err(PipelineError::ModelNotLoaded);
             };
 
@@ -479,68 +484,86 @@ impl PipelineOrchestrator {
 
         let stt_ms = streaming_stt_ms + fallback_stt_ms;
         let raw = transcripts.join(" ").trim().to_string();
+        let stt_wait_ms = stop_instant.elapsed().as_millis() as u64;
 
         // After STT the user may return to the target app; capture before LLM wait/inject.
         let (active_tone, active_window) = self.resolve_active_context();
 
         let auto_edit = self.auto_edit.load(Ordering::SeqCst);
+        let snippets = self.snippets.read().clone();
+        let snippet_fallback = prepare_display_transcript(&raw, &snippets);
+        let llm_input = if !raw.is_empty() && auto_edit {
+            let (shielded_raw, snippet_shields) = shield_snippet_triggers(&raw, &snippets);
+            let full_text = post_process_transcript(shielded_raw.trim());
+            Some((full_text, snippet_shields))
+        } else {
+            None
+        };
+
         if !raw.is_empty() && auto_edit && self.llm.lock().is_none() {
             wait_for_llm_engine(&self.llm, LLM_INJECT_WAIT);
         }
 
-        let snippets = self.snippets.read().clone();
-        let snippet_fallback = prepare_display_transcript(&raw, &snippets);
-
+        let mut llm_blocked_ms = 0_u64;
         let (text_to_inject, llm_ms, llm_invalidated) =
-            if !raw.is_empty() && auto_edit && self.llm.lock().is_some() {
-                let snippets_at_shield = snippets.clone();
-                let (shielded_raw, snippet_shields) =
-                    shield_snippet_triggers(&raw, &snippets_at_shield);
-                let full_text = post_process_transcript(shielded_raw.trim());
-                let job = start_llm_cleanup(
-                    Arc::clone(&self.llm),
-                    Arc::clone(&self.llm_ready),
-                    Arc::clone(&self.auto_edit),
-                    &full_text,
-                    active_tone,
-                );
-                match job.wait_for_inject(LLM_INJECT_WAIT) {
-                    LlmCleanupWait::Completed {
-                        text,
-                        llm_ms,
-                        invalidated,
-                    } => {
-                        let snippets = self.snippets.read().clone();
-                        let text = if self.auto_edit.load(Ordering::SeqCst) {
-                            if snippets == snippets_at_shield {
-                                finalize_llm_with_snippets(
-                                    &text,
-                                    &snippet_shields,
-                                    &snippet_fallback,
-                                    &snippets,
-                                )
-                            } else {
-                                let from_cleaned = apply_snippets(&text, &snippets);
-                                if from_cleaned != text {
-                                    from_cleaned
+            if let Some((full_text, snippet_shields)) = llm_input {
+                if self.llm.lock().is_none() {
+                    let text = if snippet_shields.is_empty() {
+                        full_text
+                    } else {
+                        unshield_snippets(&full_text, &snippet_shields)
+                    };
+                    (text, 0, false)
+                } else {
+                    let snippets_snapshot = snippets.clone();
+                    let job = start_llm_cleanup(
+                        Arc::clone(&self.llm),
+                        Arc::clone(&self.llm_ready),
+                        Arc::clone(&self.auto_edit),
+                        &full_text,
+                        active_tone,
+                    );
+                    let llm_wait_start = Instant::now();
+                    let outcome = match job.wait_for_inject(LLM_INJECT_WAIT) {
+                        LlmCleanupWait::Completed {
+                            text,
+                            llm_ms,
+                            invalidated,
+                        } => {
+                            let snippets = self.snippets.read().clone();
+                            let text = if self.auto_edit.load(Ordering::SeqCst) {
+                                if snippets == snippets_snapshot {
+                                    finalize_llm_with_snippets(
+                                        &text,
+                                        &snippet_shields,
+                                        &snippet_fallback,
+                                        &snippets,
+                                    )
                                 } else {
-                                    snippet_fallback.clone()
+                                    let from_cleaned = apply_snippets(&text, &snippets);
+                                    if from_cleaned != text {
+                                        from_cleaned
+                                    } else {
+                                        snippet_fallback.clone()
+                                    }
                                 }
-                            }
-                        } else {
-                            snippet_fallback.clone()
-                        };
-                        (text, llm_ms, invalidated)
-                    }
-                    LlmCleanupWait::Pending(job) => {
-                        job.finalize_in_background(app.clone());
-                        let text = if snippet_shields.is_empty() {
-                            full_text
-                        } else {
-                            unshield_snippets(&full_text, &snippet_shields)
-                        };
-                        (text, 0, false)
-                    }
+                            } else {
+                                snippet_fallback.clone()
+                            };
+                            (text, llm_ms, invalidated)
+                        }
+                        LlmCleanupWait::Pending(job) => {
+                            job.finalize_in_background(app.clone());
+                            let text = if snippet_shields.is_empty() {
+                                full_text
+                            } else {
+                                unshield_snippets(&full_text, &snippet_shields)
+                            };
+                            (text, 0, false)
+                        }
+                    };
+                    llm_blocked_ms = llm_wait_start.elapsed().as_millis() as u64;
+                    outcome
                 }
             } else if raw.is_empty() {
                 (String::new(), 0, false)
@@ -566,7 +589,9 @@ impl PipelineOrchestrator {
             "latency-metrics",
             LatencyMetricsEvent {
                 stt_ms,
+                stt_wait_ms,
                 llm_ms,
+                llm_blocked_ms,
                 inject_ms,
                 total_ms,
             },
@@ -876,7 +901,7 @@ struct StreamingSttContext {
     transcripts: Arc<Mutex<Vec<String>>>,
     failed_segments: Arc<Mutex<Vec<FailedSegment>>>,
     stt_time_ms: Arc<AtomicU64>,
-    dictionary_prompt: Arc<RwLock<Option<String>>>,
+    dictionary_prompt: Arc<RwLock<Option<Arc<str>>>>,
     session_stt_language: Arc<RwLock<SttLanguage>>,
     session_detected_language: Arc<RwLock<Option<SttLanguage>>>,
     pending_detection: Arc<Mutex<Option<SttLanguage>>>,
@@ -896,9 +921,20 @@ fn streaming_worker(
 
     let mut segment_index = 0_u32;
 
-    loop {
-        match chunk_rx.recv_timeout(std::time::Duration::from_millis(100)) {
-            Ok(chunk) => {
+    while let Ok(chunk) = chunk_rx.recv() {
+        let segments = match vad.push(&chunk) {
+            Ok(segments) => segments,
+            Err(err) => {
+                eprintln!("VAD error: {err}");
+                continue;
+            }
+        };
+        for segment in segments {
+            transcribe_segment(&app, &stt, segment, segment_index);
+            segment_index += 1;
+        }
+        if stop_flag.load(Ordering::SeqCst) {
+            while let Ok(chunk) = chunk_rx.try_recv() {
                 let segments = match vad.push(&chunk) {
                     Ok(segments) => segments,
                     Err(err) => {
@@ -911,12 +947,7 @@ fn streaming_worker(
                     segment_index += 1;
                 }
             }
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                if stop_flag.load(Ordering::SeqCst) {
-                    break;
-                }
-            }
-            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            break;
         }
     }
 
@@ -938,8 +969,8 @@ fn transcribe_segment(
     let prompt = stt.dictionary_prompt.read().clone();
     let segment_language = *stt.session_stt_language.read();
     let text = {
-        let engine_guard = stt.whisper.lock();
-        let Some(engine) = engine_guard.as_ref() else {
+        let mut engine_guard = stt.whisper.lock();
+        let Some(engine) = engine_guard.as_mut() else {
             stt.failed_segments.lock().push(FailedSegment {
                 samples: segment,
                 language: segment_language,
@@ -969,8 +1000,11 @@ fn transcribe_segment(
         return;
     }
 
-    stt.transcripts.lock().push(text.text.clone());
-    let raw = stt.transcripts.lock().join(" ");
+    let raw = {
+        let mut transcripts = stt.transcripts.lock();
+        transcripts.push(text.text.clone());
+        transcripts.join(" ")
+    };
     let display = prepare_partial_transcript(&raw, &stt.snippets.read());
 
     let _ = app.emit(

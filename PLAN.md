@@ -213,9 +213,9 @@ Application desktop qui permet de **dicter dans n'importe quelle application** a
 
 **Objectif :** optimiser les performances du pipeline.
 
-- [ ] Optimiser le pipeline audio
-- [ ] Optimiser le pipeline de transcription
-- [ ] Optimiser le pipeline de post-traitement
+- [x] Optimiser le pipeline audio
+- [x] Optimiser le pipeline de transcription
+- [x] Optimiser le pipeline de post-traitement
 - [ ] Optimiser le pipeline de notification
 - [ ] Optimiser le pipeline de démarrage automatique
 - [ ] Optimiser le pipeline d'apprentissage automatique des corrections utilisateur

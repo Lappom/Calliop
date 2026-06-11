@@ -271,7 +271,11 @@ fn fix_misheard_arobase_phrase(text: &str, misheard: &str, replacement: &str) ->
     out
 }
 
-fn is_arobase_mishearing_context(text_chars: &[char], phrase_start: usize, phrase_end: usize) -> bool {
+fn is_arobase_mishearing_context(
+    text_chars: &[char],
+    phrase_start: usize,
+    phrase_end: usize,
+) -> bool {
     if !has_identifier_token_before(text_chars, phrase_start) {
         return false;
     }
@@ -449,8 +453,8 @@ const ORAL_PUNCTUATION_PHRASES: &[(&str, &str)] = &[
 const HASHTAG_PHRASES: &[&str] = &["hashtag", "dièse", "diese"];
 
 const POINT_DETERMINERS: &[&str] = &[
-    "mon", "ton", "son", "ma", "ta", "sa", "mes", "tes", "ses", "notre", "votre", "leur",
-    "leurs", "le", "la", "les", "un", "une", "des", "ce", "cet", "cette", "ces", "du", "de",
+    "mon", "ton", "son", "ma", "ta", "sa", "mes", "tes", "ses", "notre", "votre", "leur", "leurs",
+    "le", "la", "les", "un", "une", "des", "ce", "cet", "cette", "ces", "du", "de",
 ];
 
 const TAG_STOPWORDS: &[&str] = &[
@@ -548,8 +552,7 @@ fn replace_spoken_point(text: &str) -> String {
 }
 
 fn is_point_noun_usage(chars: &[char], point_start: usize) -> bool {
-    is_point_noun_phrase(chars, point_start + 5)
-        || has_point_determiner_before(chars, point_start)
+    is_point_noun_phrase(chars, point_start + 5) || has_point_determiner_before(chars, point_start)
 }
 
 fn has_point_determiner_before(chars: &[char], point_start: usize) -> bool {
@@ -571,7 +574,10 @@ fn is_hashtag_symbol_context(chars: &[char], phrase_start: usize, phrase_end: us
 
 fn is_tag_token(word: &str) -> bool {
     let word = word.trim();
-    if word.is_empty() || !word.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    if word.is_empty()
+        || !word
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
     {
         return false;
     }
@@ -594,10 +600,7 @@ fn word_after(chars: &[char], index: usize) -> Option<String> {
         return None;
     }
     let after: String = chars[index..].iter().collect();
-    after
-        .split_whitespace()
-        .next()
-        .map(|word| word.to_string())
+    after.split_whitespace().next().map(|word| word.to_string())
 }
 
 fn replace_phrase_with_context(
@@ -665,9 +668,9 @@ fn is_word_char(ch: Option<char>) -> bool {
 /// Removes spaces around technical symbols when they sit between tokens.
 fn collapse_technical_symbol_spacing(text: &str) -> String {
     let symbols = ['@', '/', '#', '+', '='];
-    symbols
-        .iter()
-        .fold(text.to_string(), |current, symbol| collapse_around_symbol(&current, *symbol))
+    symbols.iter().fold(text.to_string(), |current, symbol| {
+        collapse_around_symbol(&current, *symbol)
+    })
 }
 
 fn collapse_around_symbol(text: &str, symbol: char) -> String {
@@ -706,20 +709,15 @@ fn leading_non_space_char(chars: &[char], mut index: usize) -> Option<char> {
     chars.get(index).copied()
 }
 
-fn should_collapse_around_symbol(
-    out: &str,
-    chars: &[char],
-    index: usize,
-    symbol: char,
-) -> bool {
+fn should_collapse_around_symbol(out: &str, chars: &[char], index: usize, symbol: char) -> bool {
     if symbol == '#' {
-        return match (
-            trailing_word(out).as_deref(),
-            leading_word(chars, index + 1).as_deref(),
-        ) {
-            (Some(prev), Some(next)) if is_tag_token(prev) && is_tag_token(next) => true,
-            _ => false,
-        };
+        return matches!(
+            (
+                trailing_word(out).as_deref(),
+                leading_word(chars, index + 1).as_deref(),
+            ),
+            (Some(prev), Some(next)) if is_tag_token(prev) && is_tag_token(next)
+        );
     }
 
     let prev = out.chars().rev().find(|ch| !ch.is_whitespace());
@@ -816,10 +814,7 @@ fn normalize_punctuation_spacing(text: &str) -> String {
         } else if ch == '.'
             && index + 1 < chars.len()
             && is_identifier_char(chars[index + 1])
-            && out
-                .chars()
-                .next_back()
-                .is_some_and(is_identifier_char)
+            && out.chars().next_back().is_some_and(is_identifier_char)
         {
             // Keep gmail.com intact for email-style dictation.
         } else if matches!(ch, ',' | ';' | ':' | '.' | '!' | '?' | '…')
