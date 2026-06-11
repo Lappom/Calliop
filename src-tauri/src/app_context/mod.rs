@@ -16,6 +16,8 @@ pub struct ActiveWindow {
     pub exe_name: String,
     #[serde(rename = "exePath")]
     pub exe_path: Option<String>,
+    #[serde(skip)]
+    pub process_id: Option<u32>,
 }
 
 /// Returns the foreground window outside Calliop, if detectable.
@@ -51,6 +53,7 @@ mod tests {
             title: "General - Slack".into(),
             exe_name: "slack.exe".into(),
             exe_path: None,
+            process_id: None,
         };
         let rules = vec![AppContextRule {
             id: 1,
@@ -68,6 +71,7 @@ mod tests {
             title: "Untitled".into(),
             exe_name: "notepad.exe".into(),
             exe_path: None,
+            process_id: None,
         };
         assert_eq!(resolve_tone(&window, &[]), ToneProfile::Default);
     }
@@ -78,6 +82,7 @@ mod tests {
             title: "VS Code".into(),
             exe_name: "code.exe".into(),
             exe_path: None,
+            process_id: None,
         };
         let rules = vec![AppContextRule {
             id: 1,
@@ -95,6 +100,7 @@ mod tests {
             title: "General - Slack".into(),
             exe_name: "slack.exe".into(),
             exe_path: None,
+            process_id: None,
         };
         let rules = vec![
             AppContextRule {
@@ -121,6 +127,7 @@ mod tests {
             title: "Boîte de réception - Outlook".into(),
             exe_name: "olk.exe".into(),
             exe_path: None,
+            process_id: None,
         };
         let rules = vec![AppContextRule {
             id: 1,

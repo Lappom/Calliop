@@ -1,9 +1,9 @@
 import { AppWindow, RefreshCw, Sparkles } from "lucide-react";
 import type { ActiveWindow, AppContextRule } from "../../hooks/useAppContext";
 import { SectionGlow } from "../layout/SectionGlow";
-import { BadgePill } from "../ui/BadgePill";
 import { Button } from "../ui/Button";
 import { resolveActiveTone, TONE_META } from "./styleUtils";
+import { ToneBadge } from "./ToneBadge";
 
 interface ActiveWindowCardProps {
   activeWindow: ActiveWindow | null;
@@ -46,7 +46,9 @@ export function ActiveWindowCard({
                 </>
               ) : (
                 <p className="text-body-sm m-0 text-ash">
-                  Aucune fenêtre détectée — ou Calliop est au premier plan.
+                  Aucune application détectée pour l&apos;instant. Cliquez dans
+                  l&apos;application cible (même sur votre autre écran) — la
+                  détection se met à jour automatiquement.
                 </p>
               )}
             </div>
@@ -55,7 +57,7 @@ export function ActiveWindowCard({
           <div className="flex flex-wrap items-center gap-2 sm:flex-col sm:items-end">
             <div className="flex items-center gap-2">
               <Sparkles size={14} className="text-accent-blue" aria-hidden />
-              <BadgePill active>{toneMeta.label}</BadgePill>
+              <ToneBadge tone={activeTone} />
             </div>
             <p className="text-caption m-0 max-w-xs text-right text-ash">
               {toneMeta.description}

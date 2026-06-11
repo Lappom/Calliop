@@ -1,6 +1,9 @@
 //! Windows foreground window detection via Win32 APIs.
 
 use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
+use std::thread;
+use std::time::Duration;
 
 use windows::core::PWSTR;
 use windows::Win32::Foundation::{CloseHandle, HWND, MAX_PATH};
@@ -13,39 +16,75 @@ use windows::Win32::UI::WindowsAndMessaging::{
 
 use super::ActiveWindow;
 
+static LAST_EXTERNAL_FOREGROUND: Mutex<Option<ActiveWindow>> = Mutex::new(None);
+static FOREGROUND_POLL_STARTED: OnceLock<()> = OnceLock::new();
+
+const POLL_INTERVAL: Duration = Duration::from_millis(400);
+
+pub fn ensure_foreground_poll_started() {
+    FOREGROUND_POLL_STARTED.get_or_init(|| {
+        thread::spawn(|| loop {
+            if let Some(window) = read_foreground_window() {
+                if !is_calliop_window(&window) {
+                    if let Ok(mut cache) = LAST_EXTERNAL_FOREGROUND.lock() {
+                        *cache = Some(window);
+                    }
+                }
+            }
+            thread::sleep(POLL_INTERVAL);
+        });
+    });
+}
+
 pub fn get_active_window() -> Option<ActiveWindow> {
+    ensure_foreground_poll_started();
+
+    if let Some(current) = read_foreground_window() {
+        if !is_calliop_window(&current) {
+            if let Ok(mut cache) = LAST_EXTERNAL_FOREGROUND.lock() {
+                *cache = Some(current.clone());
+            }
+            return Some(current);
+        }
+    }
+
+    LAST_EXTERNAL_FOREGROUND
+        .lock()
+        .ok()
+        .and_then(|cache| cache.clone())
+}
+
+fn read_foreground_window() -> Option<ActiveWindow> {
     let hwnd = unsafe { GetForegroundWindow() };
     if hwnd.0.is_null() {
         return None;
     }
 
-    let title = read_window_title(hwnd)?;
+    let title = read_window_title(hwnd);
     let process_id = window_process_id(hwnd);
     let (exe_name, exe_path) = read_process_info(hwnd).unwrap_or((String::new(), None));
-    if is_own_process(&exe_path, process_id) {
-        return None;
-    }
 
     Some(ActiveWindow {
         title,
         exe_name,
         exe_path,
+        process_id,
     })
 }
 
-fn read_window_title(hwnd: HWND) -> Option<String> {
+fn read_window_title(hwnd: HWND) -> String {
     let length = unsafe { GetWindowTextLengthW(hwnd) };
     if length <= 0 {
-        return Some(String::new());
+        return String::new();
     }
 
     let mut buffer = vec![0_u16; (length as usize) + 1];
     let copied = unsafe { GetWindowTextW(hwnd, &mut buffer) };
     if copied <= 0 {
-        return None;
+        return String::new();
     }
     buffer.truncate(copied as usize);
-    Some(String::from_utf16_lossy(&buffer))
+    String::from_utf16_lossy(&buffer)
 }
 
 fn window_process_id(hwnd: HWND) -> Option<u32> {
@@ -93,33 +132,73 @@ fn read_process_info(hwnd: HWND) -> Option<(String, Option<String>)> {
     result
 }
 
-fn is_own_process(exe_path: &Option<String>, process_id: Option<u32>) -> bool {
-    if process_id == Some(std::process::id()) {
+fn is_calliop_window(window: &ActiveWindow) -> bool {
+    if window
+        .exe_name
+        .eq_ignore_ascii_case("calliop.exe")
+        || window.exe_name.eq_ignore_ascii_case("calliop")
+    {
         return true;
     }
-    let Some(path) = exe_path else {
-        return false;
-    };
-    std::env::current_exe()
-        .ok()
-        .is_some_and(|own_exe| own_exe.to_string_lossy().eq_ignore_ascii_case(path))
+
+    if window
+        .process_id
+        .is_some_and(|pid| pid == std::process::id())
+    {
+        return true;
+    }
+
+    if let Some(path) = &window.exe_path {
+        if std::env::current_exe()
+            .ok()
+            .is_some_and(|own_exe| own_exe.to_string_lossy().eq_ignore_ascii_case(path))
+        {
+            return true;
+        }
+    }
+
+    false
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn get_active_window_smoke() {
-        // May return None in headless CI; should not panic.
         let _ = super::get_active_window();
     }
 
     #[test]
-    fn is_own_process_matches_current_pid() {
-        assert!(super::is_own_process(&None, Some(std::process::id())));
+    fn is_calliop_window_matches_exe_name() {
+        let window = ActiveWindow {
+            title: String::new(),
+            exe_name: "calliop.exe".into(),
+            exe_path: None,
+            process_id: None,
+        };
+        assert!(super::is_calliop_window(&window));
     }
 
     #[test]
-    fn is_own_process_without_pid_or_path_is_false() {
-        assert!(!super::is_own_process(&None, None));
+    fn is_calliop_window_matches_current_pid() {
+        let window = ActiveWindow {
+            title: String::new(),
+            exe_name: String::new(),
+            exe_path: None,
+            process_id: Some(std::process::id()),
+        };
+        assert!(super::is_calliop_window(&window));
+    }
+
+    #[test]
+    fn is_calliop_window_external_process_is_false() {
+        let window = ActiveWindow {
+            title: "Chrome".into(),
+            exe_name: "chrome.exe".into(),
+            exe_path: None,
+            process_id: Some(4242),
+        };
+        assert!(!super::is_calliop_window(&window));
     }
 }

@@ -4,7 +4,7 @@ import {
   RefreshCw,
   Search,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type {
   AppContextMatchType,
   ToneProfile,
@@ -55,6 +55,13 @@ export function StyleView() {
     refreshActiveWindow,
     reload,
   } = useAppContext();
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      void refreshActiveWindow();
+    }, 1000);
+    return () => window.clearInterval(intervalId);
+  }, [refreshActiveWindow]);
 
   const visibleRules = useMemo(() => {
     const filtered = filterStyleRules(rules, searchQuery);

@@ -1731,6 +1731,7 @@ pub fn run() {
         .setup(move |app| {
             let _modules = registered_modules();
             build_tray(app.handle()).map_err(|e| e.to_string())?;
+            let _ = app_context::get_active_window();
 
             let hotkey_setting = initial_settings.hotkey.clone();
             let shortcut = hotkey::parse_shortcut(&hotkey_setting).unwrap_or_else(|err| {

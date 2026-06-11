@@ -1,7 +1,7 @@
 import { ArrowRight, Trash2 } from "lucide-react";
 import type { AppContextRule } from "../../hooks/useAppContext";
-import { BadgePill } from "../ui/BadgePill";
-import { MATCH_TYPE_LABELS, TONE_META } from "./styleUtils";
+import { MATCH_TYPE_LABELS } from "./styleUtils";
+import { ToneBadge } from "./ToneBadge";
 
 interface StyleRulesTableProps {
   rules: AppContextRule[];
@@ -42,13 +42,9 @@ export function StyleRulesTable({
                       className="hidden shrink-0 text-ash sm:inline"
                       aria-hidden
                     />
-                    <BadgePill active className="hidden sm:inline-flex">
-                      {TONE_META[rule.tone].label}
-                    </BadgePill>
+                    <ToneBadge tone={rule.tone} className="hidden sm:inline-flex" />
                   </div>
-                  <BadgePill active className="mt-2 sm:hidden">
-                    {TONE_META[rule.tone].label}
-                  </BadgePill>
+                  <ToneBadge tone={rule.tone} className="mt-2 sm:hidden" />
                 </td>
                 <td className="w-12 shrink-0 px-2 py-2">
                   <div className="flex justify-end opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
