@@ -639,6 +639,11 @@ fn get_pipeline_state(state: State<'_, AppState>) -> String {
 }
 
 #[tauri::command]
+fn is_model_ready(state: State<'_, AppState>) -> bool {
+    state.model_ready.load(Ordering::SeqCst)
+}
+
+#[tauri::command]
 async fn toggle_dictation(app: AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
     if is_mic_probe_active(&state) {
@@ -1638,6 +1643,7 @@ async fn ensure_model_inner(app: &AppHandle, state: &AppState) -> Result<(), Str
     let _init_guard = state.model_init.lock().await;
 
     if state.model_ready.load(Ordering::SeqCst) {
+        let _ = app.emit("model-ready", ());
         return Ok(());
     }
 
@@ -2372,6 +2378,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_pipeline_state,
+            is_model_ready,
             toggle_dictation,
             ensure_model,
             ensure_llm_model,

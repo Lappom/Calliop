@@ -39,7 +39,7 @@ export function PipelineStatusCard({
   const busy = isPipelineBusy(pipelineState);
   const showPartial = partialTranscript.length > 0 && pipelineState === "recording";
 
-  if (!modelReady) {
+  if (!modelReady && modelProgress !== null) {
     return (
       <div
         className={[
@@ -51,19 +51,11 @@ export function PipelineStatusCard({
           {t("main.pipeline.preparing")}
         </p>
         <p className="text-heading-sm relative m-0 mt-2 text-ink">
-          {modelProgress !== null
-            ? t("main.pipeline.downloadWhisper")
-            : t("main.pipeline.initWhisper")}
+          {t("main.pipeline.downloadWhisper")}
         </p>
-        {modelProgress !== null ? (
-          <div className="relative mt-4">
-            <ProgressBar value={modelProgress} />
-          </div>
-        ) : (
-          <p className="text-body-sm relative mt-3 text-charcoal">
-            {t("main.pipeline.firstLaunchHint")}
-          </p>
-        )}
+        <div className="relative mt-4">
+          <ProgressBar value={modelProgress} />
+        </div>
       </div>
     );
   }

@@ -50,20 +50,6 @@ export function usePipelineState() {
   useEffect(() => {
     let cancelled = false;
 
-    const setup = async () => {
-      try {
-        const state = await invoke<string>("get_pipeline_state");
-        if (!cancelled) {
-          setPipelineState(state as PipelineState);
-        }
-      } catch {
-        // Backend not ready yet.
-      }
-
-    };
-
-    void setup();
-
     const unlisteners = Promise.all([
       listen<PipelineStatePayload>("pipeline-state", (event) => {
         setPipelineState(event.payload.state);
@@ -81,6 +67,10 @@ export function usePipelineState() {
       }),
       listen("model-ready", () => {
         setModelReady(true);
+        setModelProgress(null);
+      }),
+      listen("model-unready", () => {
+        setModelReady(false);
         setModelProgress(null);
       }),
       listen<ModelDownloadProgress>("model-download-progress", (event) => {
@@ -105,6 +95,28 @@ export function usePipelineState() {
         setLatencyMetrics(event.payload);
       }),
     ]);
+
+    const setup = async () => {
+      await unlisteners;
+
+      try {
+        const [state, ready] = await Promise.all([
+          invoke<string>("get_pipeline_state"),
+          invoke<boolean>("is_model_ready"),
+        ]);
+        if (!cancelled) {
+          setPipelineState(state as PipelineState);
+          if (ready) {
+            setModelReady(true);
+            setModelProgress(null);
+          }
+        }
+      } catch {
+        // Backend not ready yet.
+      }
+    };
+
+    void setup();
 
     return () => {
       cancelled = true;
