@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -7,10 +7,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use thiserror::Error;
 
 pub const TARGET_SAMPLE_RATE: u32 = 16_000;
-/// Bounded channel capacity (~2 s of 16 kHz audio at typical chunk sizes).
-pub const AUDIO_CHUNK_CHANNEL_CAPACITY: usize = 64;
-
-pub type AudioChunkSender = std::sync::mpsc::SyncSender<Vec<f32>>;
+pub type AudioChunkSender = std::sync::mpsc::Sender<Vec<f32>>;
 pub type AudioLevelSender = std::sync::mpsc::Sender<f32>;
 
 #[derive(Debug, Error)]
@@ -91,8 +88,6 @@ struct StreamingSidecar {
     level_tx: Option<AudioLevelSender>,
     last_level_emit: Mutex<Instant>,
     convert_scratch: Mutex<Vec<f32>>,
-    dropped_chunks: AtomicU32,
-    drop_logged: AtomicBool,
     /// When true, stop returns the accumulated 16 kHz stream instead of resampling raw PCM.
     streaming_capture: bool,
 }
@@ -165,18 +160,7 @@ impl StreamingSidecar {
         }
 
         if let Some(tx) = &self.chunk_tx {
-            match tx.try_send(delta) {
-                Ok(()) => {}
-                Err(std::sync::mpsc::TrySendError::Full(_)) => {
-                    let prev = self.dropped_chunks.fetch_add(1, Ordering::Relaxed);
-                    if prev == 0 && !self.drop_logged.swap(true, Ordering::Relaxed) {
-                        eprintln!(
-                            "audio streaming: chunk channel full (capacity {AUDIO_CHUNK_CHANNEL_CAPACITY}), dropping chunks"
-                        );
-                    }
-                }
-                Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {}
-            }
+            let _ = tx.send(delta);
         }
     }
 
@@ -353,8 +337,6 @@ fn start_session(
         level_tx,
         last_level_emit: Mutex::new(Instant::now() - Duration::from_millis(100)),
         convert_scratch: Mutex::new(Vec::new()),
-        dropped_chunks: AtomicU32::new(0),
-        drop_logged: AtomicBool::new(false),
         streaming_capture,
     });
 
@@ -641,8 +623,7 @@ mod tests {
 
     #[test]
     fn streaming_sidecar_accumulates_16k_deltas() {
-        let (chunk_tx, _chunk_rx) =
-            std::sync::mpsc::sync_channel::<Vec<f32>>(AUDIO_CHUNK_CHANNEL_CAPACITY);
+        let (chunk_tx, _chunk_rx) = std::sync::mpsc::channel::<Vec<f32>>();
         let sidecar = StreamingSidecar {
             resample_state: Mutex::new(ResampleStreamState::new(16_000, 1)),
             accumulated_16k: Mutex::new(Vec::new()),
@@ -650,8 +631,6 @@ mod tests {
             level_tx: None,
             last_level_emit: Mutex::new(Instant::now()),
             convert_scratch: Mutex::new(Vec::new()),
-            dropped_chunks: AtomicU32::new(0),
-            drop_logged: AtomicBool::new(false),
             streaming_capture: true,
         };
 

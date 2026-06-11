@@ -5,7 +5,7 @@ mod vad;
 
 pub use capture::{
     resample_to_16k_mono, AudioCapture, AudioChunkSender, AudioError, AudioLevelSender,
-    AUDIO_CHUNK_CHANNEL_CAPACITY, TARGET_SAMPLE_RATE,
+    TARGET_SAMPLE_RATE,
 };
 pub use vad::{VadError, VadSegmenter, VAD_CHUNK_SIZE};
 

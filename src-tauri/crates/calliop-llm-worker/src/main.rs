@@ -210,7 +210,7 @@ impl InferenceEngine {
 
         let mut decoder = encoding_rs::UTF_8.new_decoder();
         let mut output = String::new();
-        let mut n_cur = batch.n_tokens();
+        let mut n_cur = full_tokens.len() as i32;
         let mut sampler = LlamaSampler::greedy();
 
         let mut generated = 0_i32;

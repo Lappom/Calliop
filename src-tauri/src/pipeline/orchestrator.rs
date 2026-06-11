@@ -11,7 +11,7 @@ use thiserror::Error;
 use calliop_prompt::{post_process_transcript, ToneProfile};
 
 use crate::app_context::{get_active_window, resolve_tone};
-use crate::audio::{AudioCapture, VadSegmenter, AUDIO_CHUNK_CHANNEL_CAPACITY, TARGET_SAMPLE_RATE};
+use crate::audio::{AudioCapture, VadSegmenter, TARGET_SAMPLE_RATE};
 use crate::inject::{InjectError, TextInjector};
 use crate::llm::LlamaEngine;
 use crate::observe::CorrectionHandler;
@@ -352,8 +352,7 @@ impl PipelineOrchestrator {
         // Fail fast before opening the mic if VAD cannot initialize.
         VadSegmenter::new()?;
 
-        let (chunk_tx, chunk_rx) =
-            std::sync::mpsc::sync_channel::<Vec<f32>>(AUDIO_CHUNK_CHANNEL_CAPACITY);
+        let (chunk_tx, chunk_rx) = std::sync::mpsc::channel::<Vec<f32>>();
         let (level_tx, level_rx) = std::sync::mpsc::channel();
         self.audio
             .start_with_streaming(Some(chunk_tx), Some(level_tx))?;
