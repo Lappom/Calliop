@@ -11,6 +11,7 @@ use calliop_prompt::{
     QWEN3_CHAT_TEMPLATE,
 };
 use llama_cpp_2::context::params::LlamaContextParams;
+use llama_cpp_2::context::LlamaContext;
 use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::model::params::LlamaModelParams;
@@ -69,11 +70,32 @@ impl InferenceEngine {
         })
     }
 
-    fn cleanup(&self, raw: &str, tone: ToneProfile) -> Result<String, String> {
+    fn new_session_context(&self) -> Result<(LlamaContext<'_>, LlamaBatch), String> {
+        let ctx_size = NonZeroU32::new(CLEANUP_CONTEXT_TOKENS).expect("non-zero context");
+        let ctx_params = LlamaContextParams::default()
+            .with_n_ctx(Some(ctx_size))
+            .with_n_threads(self.n_threads);
+        let ctx = self
+            .model
+            .new_context(&self.backend, ctx_params)
+            .map_err(|err| err.to_string())?;
+        let batch = LlamaBatch::new(CLEANUP_CONTEXT_TOKENS as usize, 1);
+        Ok((ctx, batch))
+    }
+
+    fn cleanup_with_context(
+        &self,
+        ctx: &mut LlamaContext<'_>,
+        batch: &mut LlamaBatch,
+        raw: &str,
+        tone: ToneProfile,
+    ) -> Result<String, String> {
         let raw = raw.trim();
         if raw.is_empty() {
             return Err("empty input text".into());
         }
+
+        ctx.clear_kv_cache();
 
         let system_prompt = build_system_prompt(tone);
         let user_message = build_cleanup_user_message(raw).map_err(|err| err.to_string())?;
@@ -92,29 +114,20 @@ impl InferenceEngine {
             .str_to_token(&prompt, AddBos::Never)
             .map_err(|err| err.to_string())?;
 
-        let ctx_size = NonZeroU32::new(CLEANUP_CONTEXT_TOKENS).expect("non-zero context");
-        let ctx_params = LlamaContextParams::default()
-            .with_n_ctx(Some(ctx_size))
-            .with_n_threads(self.n_threads);
-        let mut ctx = self
-            .model
-            .new_context(&self.backend, ctx_params)
-            .map_err(|err| err.to_string())?;
-
         let max_tokens =
             (tokens.len() as i32 + CLEANUP_MAX_OUTPUT_TOKENS).min(CLEANUP_CONTEXT_TOKENS as i32);
         if tokens.len() >= max_tokens as usize {
             return Err("prompt too long".into());
         }
 
-        let mut batch = LlamaBatch::new(max_tokens as usize, 1);
+        batch.clear();
         let last_index = (tokens.len().saturating_sub(1)) as i32;
         for (i, token) in (0_i32..).zip(tokens) {
             batch
                 .add(token, i, &[0], i == last_index)
                 .map_err(|err| err.to_string())?;
         }
-        ctx.decode(&mut batch).map_err(|err| err.to_string())?;
+        ctx.decode(batch).map_err(|err| err.to_string())?;
 
         let mut decoder = encoding_rs::UTF_8.new_decoder();
         let mut output = String::new();
@@ -141,7 +154,7 @@ impl InferenceEngine {
                 .add(token, n_cur, &[0], true)
                 .map_err(|err| err.to_string())?;
             n_cur += 1;
-            ctx.decode(&mut batch).map_err(|err| err.to_string())?;
+            ctx.decode(batch).map_err(|err| err.to_string())?;
             generated += 1;
         }
 
@@ -204,6 +217,7 @@ fn parse_oneshot_text(args: &[String]) -> Result<String, String> {
 
 fn serve(model_path: PathBuf) -> Result<(), String> {
     let engine = InferenceEngine::load(&model_path)?;
+    let (mut ctx, mut batch) = engine.new_session_context()?;
     write_response(&WorkerResponse {
         text: Some(String::new()),
         error: None,
@@ -227,7 +241,7 @@ fn serve(model_path: PathBuf) -> Result<(), String> {
         };
 
         let tone = request.tone.unwrap_or_default();
-        match engine.cleanup(&text, tone) {
+        match engine.cleanup_with_context(&mut ctx, &mut batch, &text, tone) {
             Ok(cleaned) => write_response(&WorkerResponse {
                 text: Some(cleaned),
                 error: None,
@@ -244,7 +258,8 @@ fn serve(model_path: PathBuf) -> Result<(), String> {
 
 fn oneshot(model_path: PathBuf, text: String) -> Result<(), String> {
     let engine = InferenceEngine::load(&model_path)?;
-    let cleaned = engine.cleanup(&text, ToneProfile::Default)?;
+    let (mut ctx, mut batch) = engine.new_session_context()?;
+    let cleaned = engine.cleanup_with_context(&mut ctx, &mut batch, &text, ToneProfile::Default)?;
     println!("{cleaned}");
     Ok(())
 }

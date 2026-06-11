@@ -3,8 +3,8 @@ use std::thread;
 use std::time::Duration;
 
 use arboard::Clipboard;
-use parking_lot::Mutex;
 use enigo::{Direction, Enigo, Key, Keyboard, Settings};
+use parking_lot::Mutex;
 use thiserror::Error;
 
 const PASTE_DELAY_MS: u64 = 150;

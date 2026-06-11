@@ -56,7 +56,7 @@ Hotkey OFF / release (toggle or PTT)
 - Rust core exposes commands for start/stop dictation, settings read/write, history queries.
 - Commands: `get_settings`, `set_settings`, `get_stt_language`, `cycle_dictation_language`, `ensure_llm_model`, `list_dictionary_words`, `add_dictionary_word`, `remove_dictionary_word`, `learn_from_correction`, `list_snippets`, `add_snippet`, `remove_snippet`, `import_snippets`, `export_snippets`, `get_active_window`, `list_app_context_rules`, `add_app_context_rule`, `remove_app_context_rule`, `list_dictations`, `search_dictations`, `copy_dictation`, `reinject_dictation`, `get_insights`
 - Events: `pipeline-state`, `partial-transcript`, `audio-level`, `latency-metrics`, `stt-language-changed`, `llm-model-download-progress`, `llm-ready`, `dictionary-updated`, `snippets-updated`, `app-context-updated`, `history-updated`
-- Dictionary words and snippet triggers are cached as a Whisper `initial_prompt` string (`Arc<RwLock<Option<String>>>` in pipeline); refreshed on CRUD and on startup.
+- Dictionary words and snippet triggers are cached as a Whisper `initial_prompt` string (`Arc<RwLock<Option<Arc<str>>>>` in pipeline); refreshed on CRUD and on startup.
 - Snippet triggers are expanded deterministically in `pipeline/snippets.rs` after LLM cleanup (or on raw transcript in verbatim mode), before injection.
 - `auto_learn` (default on): after inject, `observe/` polls the focused control via UIA for ~60s; stabilized corrections call `apply_learned_correction` (same path as in-app `learn_from_correction`).
 
@@ -75,3 +75,4 @@ Hotkey OFF / release (toggle or PTT)
 - Phase 3d: per-app tone profiles (`casual` / `formal` / `technical`) via `app_context_rules` + Win32 foreground detection; tone passed to LLM sidecar only when `auto_edit` is on
 - Phase 3e: STT language `fr` / `en` / `auto` in SQLite (`stt_language`); Whisper `set_detect_language` for auto; session override per dictation; overlay badge cycles language mid-recording via `cycle_dictation_language`
 - Phase 3f–3g: `dictations` + `dictations_fts` (FTS5) in SQLite; persist after inject with latencies, word count, audio duration, active window exe/title; `get_insights` aggregates WPM (vs 40 WPM typing baseline), daily/total words, learned corrections, per-app usage
+- Phase 3.5 perf: streaming capture accumulates 16 kHz PCM (no raw-buffer clone/resample on stop); bounded `sync_channel(64)` with non-blocking `try_send`; reusable I16/U16 convert scratch; persistent `WhisperState` across segments; LLM sidecar reuses one `LlamaContext` with `clear_kv_cache` between cleanups

@@ -11,7 +11,7 @@ use thiserror::Error;
 use calliop_prompt::{post_process_transcript, ToneProfile};
 
 use crate::app_context::{get_active_window, resolve_tone, ActiveWindow};
-use crate::audio::{AudioCapture, VadSegmenter, TARGET_SAMPLE_RATE};
+use crate::audio::{AudioCapture, VadSegmenter, AUDIO_CHUNK_CHANNEL_CAPACITY, TARGET_SAMPLE_RATE};
 use crate::inject::{InjectError, TextInjector};
 use crate::llm::LlamaEngine;
 use crate::observe::CorrectionHandler;
@@ -149,7 +149,7 @@ pub struct PipelineOrchestrator {
     segment_transcripts: Arc<Mutex<Vec<String>>>,
     failed_segments: Arc<Mutex<Vec<FailedSegment>>>,
     streaming_stt_ms: Arc<AtomicU64>,
-    dictionary_prompt: Arc<RwLock<Option<String>>>,
+    dictionary_prompt: Arc<RwLock<Option<Arc<str>>>>,
     snippets: Arc<RwLock<Vec<Snippet>>>,
     app_context_rules: Arc<RwLock<Vec<AppContextRule>>>,
     auto_learn: Arc<AtomicBool>,
@@ -195,7 +195,7 @@ impl PipelineOrchestrator {
     }
 
     pub fn set_dictionary_prompt(&mut self, prompt: Option<String>) {
-        *self.dictionary_prompt.write() = prompt;
+        *self.dictionary_prompt.write() = prompt.map(|value| Arc::from(value.as_str()));
     }
 
     pub fn set_snippets(&mut self, snippets: Vec<Snippet>) {
@@ -355,7 +355,8 @@ impl PipelineOrchestrator {
         // Fail fast before opening the mic if VAD cannot initialize.
         VadSegmenter::new()?;
 
-        let (chunk_tx, chunk_rx) = std::sync::mpsc::channel();
+        let (chunk_tx, chunk_rx) =
+            std::sync::mpsc::sync_channel::<Vec<f32>>(AUDIO_CHUNK_CHANNEL_CAPACITY);
         let (level_tx, level_rx) = std::sync::mpsc::channel();
         self.audio
             .start_with_streaming(Some(chunk_tx), Some(level_tx))?;
@@ -395,13 +396,10 @@ impl PipelineOrchestrator {
         let app_level = app.clone();
         let level_stop = Arc::clone(&stop_flag);
         let level_listener = thread::spawn(move || {
-            while !level_stop.load(Ordering::SeqCst) {
-                match level_rx.recv_timeout(std::time::Duration::from_millis(100)) {
-                    Ok(level) => {
-                        let _ = app_level.emit("audio-level", AudioLevelEvent { level });
-                    }
-                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
-                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            while let Ok(level) = level_rx.recv() {
+                let _ = app_level.emit("audio-level", AudioLevelEvent { level });
+                if level_stop.load(Ordering::SeqCst) {
+                    break;
                 }
             }
         });
@@ -443,8 +441,8 @@ impl PipelineOrchestrator {
 
         let mut fallback_stt_ms = 0_u64;
         {
-            let engine_guard = self.whisper.lock();
-            let Some(engine) = engine_guard.as_ref() else {
+            let mut engine_guard = self.whisper.lock();
+            let Some(engine) = engine_guard.as_mut() else {
                 return Err(PipelineError::ModelNotLoaded);
             };
 
@@ -493,9 +491,8 @@ impl PipelineOrchestrator {
 
         let (text_to_inject, llm_ms, llm_invalidated) =
             if !raw.is_empty() && auto_edit && self.llm.lock().is_some() {
-                let snippets_at_shield = snippets.clone();
-                let (shielded_raw, snippet_shields) =
-                    shield_snippet_triggers(&raw, &snippets_at_shield);
+                let snippets_snapshot = snippets.clone();
+                let (shielded_raw, snippet_shields) = shield_snippet_triggers(&raw, &snippets);
                 let full_text = post_process_transcript(shielded_raw.trim());
                 let job = start_llm_cleanup(
                     Arc::clone(&self.llm),
@@ -512,7 +509,7 @@ impl PipelineOrchestrator {
                     } => {
                         let snippets = self.snippets.read().clone();
                         let text = if self.auto_edit.load(Ordering::SeqCst) {
-                            if snippets == snippets_at_shield {
+                            if snippets == snippets_snapshot {
                                 finalize_llm_with_snippets(
                                     &text,
                                     &snippet_shields,
@@ -876,7 +873,7 @@ struct StreamingSttContext {
     transcripts: Arc<Mutex<Vec<String>>>,
     failed_segments: Arc<Mutex<Vec<FailedSegment>>>,
     stt_time_ms: Arc<AtomicU64>,
-    dictionary_prompt: Arc<RwLock<Option<String>>>,
+    dictionary_prompt: Arc<RwLock<Option<Arc<str>>>>,
     session_stt_language: Arc<RwLock<SttLanguage>>,
     session_detected_language: Arc<RwLock<Option<SttLanguage>>>,
     pending_detection: Arc<Mutex<Option<SttLanguage>>>,
@@ -896,9 +893,20 @@ fn streaming_worker(
 
     let mut segment_index = 0_u32;
 
-    loop {
-        match chunk_rx.recv_timeout(std::time::Duration::from_millis(100)) {
-            Ok(chunk) => {
+    while let Ok(chunk) = chunk_rx.recv() {
+        let segments = match vad.push(&chunk) {
+            Ok(segments) => segments,
+            Err(err) => {
+                eprintln!("VAD error: {err}");
+                continue;
+            }
+        };
+        for segment in segments {
+            transcribe_segment(&app, &stt, segment, segment_index);
+            segment_index += 1;
+        }
+        if stop_flag.load(Ordering::SeqCst) {
+            while let Ok(chunk) = chunk_rx.try_recv() {
                 let segments = match vad.push(&chunk) {
                     Ok(segments) => segments,
                     Err(err) => {
@@ -911,12 +919,7 @@ fn streaming_worker(
                     segment_index += 1;
                 }
             }
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                if stop_flag.load(Ordering::SeqCst) {
-                    break;
-                }
-            }
-            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            break;
         }
     }
 
@@ -938,8 +941,8 @@ fn transcribe_segment(
     let prompt = stt.dictionary_prompt.read().clone();
     let segment_language = *stt.session_stt_language.read();
     let text = {
-        let engine_guard = stt.whisper.lock();
-        let Some(engine) = engine_guard.as_ref() else {
+        let mut engine_guard = stt.whisper.lock();
+        let Some(engine) = engine_guard.as_mut() else {
             stt.failed_segments.lock().push(FailedSegment {
                 samples: segment,
                 language: segment_language,
@@ -969,8 +972,11 @@ fn transcribe_segment(
         return;
     }
 
-    stt.transcripts.lock().push(text.text.clone());
-    let raw = stt.transcripts.lock().join(" ");
+    let raw = {
+        let mut transcripts = stt.transcripts.lock();
+        transcripts.push(text.text.clone());
+        transcripts.join(" ")
+    };
     let display = prepare_partial_transcript(&raw, &stt.snippets.read());
 
     let _ = app.emit(
