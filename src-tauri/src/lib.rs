@@ -1,3 +1,4 @@
+pub mod app_context;
 pub mod audio;
 pub mod hotkey;
 pub mod inject;
@@ -11,15 +12,17 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
+use calliop_prompt::ToneProfile;
 use parking_lot::Mutex;
 use pipeline::{
     spawn_start, spawn_stop, spawn_toggle, PipelineOrchestrator, PipelineState, PipelineStateEvent,
 };
 use serde::{Deserialize, Serialize};
 use store::{
-    extract_correction_words, is_valid_dictionary_word, is_valid_snippet_content, is_valid_trigger,
-    normalize_trigger, normalize_word, AppSettings, DictionarySource, DictionaryWord, Snippet,
-    SnippetImport, Store,
+    extract_correction_words, is_valid_app_context_pattern, is_valid_dictionary_word,
+    is_valid_snippet_content, is_valid_trigger, normalize_trigger, normalize_word,
+    AppContextMatchType, AppContextRule, AppSettings, DictionarySource, DictionaryWord,
+    NewAppContextRule, Snippet, SnippetImport, Store,
 };
 use stt::build_whisper_initial_prompt;
 use tauri::{
@@ -32,7 +35,7 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tauri_plugin_notification::NotificationExt;
 
 /// Returns registered core module names (Phase 0 wiring check).
-pub fn registered_modules() -> [&'static str; 8] {
+pub fn registered_modules() -> [&'static str; 9] {
     [
         audio::module_name(),
         stt::module_name(),
@@ -41,6 +44,7 @@ pub fn registered_modules() -> [&'static str; 8] {
         hotkey::module_name(),
         store::module_name(),
         observe::module_name(),
+        app_context::module_name(),
         pipeline::module_name(),
     ]
 }
@@ -62,6 +66,7 @@ struct AppState {
     llm_engine: Arc<Mutex<Option<llm::LlamaEngine>>>,
     store: Arc<Store>,
     model_ready: AtomicBool,
+    model_init: Arc<tokio::sync::Mutex<()>>,
     llm_ready: Arc<AtomicBool>,
     llm_init: Arc<tokio::sync::Mutex<()>>,
     hotkey_press: Mutex<HotkeyPressState>,
@@ -154,10 +159,7 @@ fn refresh_whisper_prompt(
     Ok(())
 }
 
-fn ensure_pipeline_snippets_loaded(
-    store: &Store,
-    pipeline: &Arc<Mutex<PipelineOrchestrator>>,
-) {
+fn ensure_pipeline_snippets_loaded(store: &Store, pipeline: &Arc<Mutex<PipelineOrchestrator>>) {
     match store.list_snippets() {
         Ok(snippets) => pipeline.lock().set_snippets(snippets),
         Err(err) => eprintln!("failed to load snippets cache: {err}"),
@@ -221,6 +223,57 @@ fn emit_dictionary_updated(app: &AppHandle) {
 
 fn emit_snippets_updated(app: &AppHandle) {
     let _ = app.emit("snippets-updated", ());
+}
+
+fn emit_app_context_updated(app: &AppHandle) {
+    let _ = app.emit("app-context-updated", ());
+}
+
+fn refresh_app_context_rules(
+    store: &Store,
+    pipeline: &Arc<Mutex<PipelineOrchestrator>>,
+) -> Result<(), String> {
+    let rules = store.list_app_context_rules().map_err(|e| e.to_string())?;
+    pipeline.lock().set_app_context_rules(rules);
+    Ok(())
+}
+
+fn refresh_app_context_rules_state(state: &AppState) -> Result<(), String> {
+    refresh_app_context_rules(&state.store, &state.pipeline)
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AppContextRulePayload {
+    id: i64,
+    pattern: String,
+    #[serde(rename = "matchType")]
+    match_type: String,
+    tone: String,
+    #[serde(rename = "createdAt")]
+    created_at: String,
+}
+
+fn app_context_rule_to_payload(rule: AppContextRule) -> AppContextRulePayload {
+    AppContextRulePayload {
+        id: rule.id,
+        pattern: rule.pattern,
+        match_type: match rule.match_type {
+            AppContextMatchType::Exe => "exe".into(),
+            AppContextMatchType::TitleContains => "title_contains".into(),
+        },
+        tone: rule.tone.as_str().into(),
+        created_at: rule.created_at,
+    }
+}
+
+fn parse_match_type(value: &str) -> Result<AppContextMatchType, String> {
+    AppContextMatchType::parse(value)
+        .ok_or_else(|| "Type de correspondance invalide (exe ou title_contains).".into())
+}
+
+fn parse_tone_profile(value: &str) -> Result<ToneProfile, String> {
+    ToneProfile::parse(value)
+        .ok_or_else(|| "Ton invalide (default, casual, formal ou technical).".into())
 }
 
 fn send_dictionary_notification(app: &AppHandle, words: &[String]) {
@@ -363,7 +416,7 @@ async fn ensure_llm_model(app: AppHandle, state: State<'_, AppState>) -> Result<
 
     let engine = tauri::async_runtime::spawn_blocking(|| {
         let mut engine = llm::LlamaEngine::start()?;
-        if let Err(err) = engine.cleanup("bonjour") {
+        if let Err(err) = engine.cleanup("bonjour", ToneProfile::Default) {
             eprintln!("llm warmup failed (non-fatal): {err}");
         }
         Ok(engine)
@@ -578,6 +631,72 @@ fn export_snippets(state: State<'_, AppState>) -> Result<String, String> {
 }
 
 #[tauri::command]
+fn get_active_window() -> Option<app_context::ActiveWindow> {
+    app_context::get_active_window()
+}
+
+#[tauri::command]
+fn list_app_context_rules(
+    state: State<'_, AppState>,
+) -> Result<Vec<AppContextRulePayload>, String> {
+    state
+        .store
+        .list_app_context_rules()
+        .map(|rules| rules.into_iter().map(app_context_rule_to_payload).collect())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn add_app_context_rule(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    pattern: String,
+    match_type: String,
+    tone: String,
+) -> Result<bool, String> {
+    let match_type = parse_match_type(&match_type)?;
+    let tone = parse_tone_profile(&tone)?;
+    if !is_valid_app_context_pattern(&pattern, match_type) {
+        return Err("Le motif doit contenir au moins 2 caractères.".into());
+    }
+
+    let inserted = state
+        .store
+        .add_app_context_rule(&NewAppContextRule {
+            pattern,
+            match_type,
+            tone,
+        })
+        .map_err(|e| e.to_string())?;
+
+    if inserted {
+        refresh_app_context_rules_state(&state)?;
+        emit_app_context_updated(&app);
+    }
+
+    Ok(inserted)
+}
+
+#[tauri::command]
+fn remove_app_context_rule(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: i64,
+) -> Result<(), String> {
+    let removed = state
+        .store
+        .remove_app_context_rule(id)
+        .map_err(|e| e.to_string())?;
+    if !removed {
+        return Err(format!("Règle introuvable (id {id})."));
+    }
+
+    refresh_app_context_rules_state(&state)?;
+    emit_app_context_updated(&app);
+    Ok(())
+}
+
+#[tauri::command]
 fn is_autostart_enabled(app: AppHandle) -> Result<bool, String> {
     app.autolaunch().is_enabled().map_err(|e| e.to_string())
 }
@@ -596,6 +715,12 @@ fn set_autostart_enabled(app: AppHandle, enabled: bool) -> Result<(), String> {
 
 #[tauri::command]
 async fn ensure_model(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    if state.model_ready.load(Ordering::SeqCst) {
+        return Ok(());
+    }
+
+    let _init_guard = state.model_init.lock().await;
+
     if state.model_ready.load(Ordering::SeqCst) {
         return Ok(());
     }
@@ -800,6 +925,13 @@ pub fn run() {
         pipeline.lock().set_correction_handler(handler);
     }
 
+    if let Err(err) = store.seed_default_app_context_rules() {
+        eprintln!("failed to seed default app context rules: {err}");
+    }
+    if let Err(err) = refresh_app_context_rules(&store, &pipeline) {
+        eprintln!("failed to load app context rules cache: {err}");
+    }
+
     if let Err(err) = refresh_whisper_prompt(&store, &pipeline) {
         eprintln!("failed to load whisper prompt and snippets cache: {err}");
         ensure_pipeline_snippets_loaded(&store, &pipeline);
@@ -829,6 +961,7 @@ pub fn run() {
             llm_engine: llm_engine.clone(),
             store,
             model_ready: AtomicBool::new(false),
+            model_init: Arc::new(tokio::sync::Mutex::new(())),
             llm_ready: llm_ready.clone(),
             llm_init: Arc::new(tokio::sync::Mutex::new(())),
             hotkey_press: Mutex::new(HotkeyPressState {
@@ -868,6 +1001,7 @@ pub fn run() {
                 let state = app_handle.state::<AppState>();
                 if let Err(err) = ensure_model(app_handle.clone(), state).await {
                     eprintln!("model initialization failed: {err}");
+                    let _ = app_handle.emit("model-init-error", err);
                 }
             });
 
@@ -900,7 +1034,11 @@ pub fn run() {
             add_snippet,
             remove_snippet,
             import_snippets,
-            export_snippets
+            export_snippets,
+            get_active_window,
+            list_app_context_rules,
+            add_app_context_rule,
+            remove_app_context_rule
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
@@ -919,7 +1057,17 @@ mod integration_tests {
     fn all_modules_are_wired() {
         assert_eq!(
             registered_modules(),
-            ["audio", "stt", "llm", "inject", "hotkey", "store", "observe", "pipeline",]
+            [
+                "audio",
+                "stt",
+                "llm",
+                "inject",
+                "hotkey",
+                "store",
+                "observe",
+                "app_context",
+                "pipeline",
+            ]
         );
     }
 }

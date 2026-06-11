@@ -366,7 +366,8 @@ mod tests {
     fn finalize_llm_with_snippets_falls_back_when_tokens_missing() {
         let snippets = vec![snippet("mon calendrier", "https://calendly.com/me")];
         let (_, shields) = shield_snippet_triggers("mon calendrier", &snippets);
-        let result = finalize_llm_with_snippets("Mon agenda", &shields, "mon calendrier", &snippets);
+        let result =
+            finalize_llm_with_snippets("Mon agenda", &shields, "mon calendrier", &snippets);
         assert_eq!(result, "https://calendly.com/me");
     }
 }

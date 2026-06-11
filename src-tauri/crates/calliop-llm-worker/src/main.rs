@@ -7,7 +7,8 @@ use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 
 use calliop_prompt::{
-    build_cleanup_user_message, validate_cleanup_output, QWEN3_CHAT_TEMPLATE, SYSTEM_PROMPT,
+    build_cleanup_user_message, build_system_prompt, validate_cleanup_output, ToneProfile,
+    QWEN3_CHAT_TEMPLATE,
 };
 use llama_cpp_2::context::params::LlamaContextParams;
 use llama_cpp_2::llama_backend::LlamaBackend;
@@ -35,6 +36,7 @@ fn resolve_chat_template(model: &LlamaModel) -> Result<LlamaChatTemplate, String
 struct WorkerRequest {
     shutdown: Option<bool>,
     text: Option<String>,
+    tone: Option<ToneProfile>,
 }
 
 #[derive(Debug, Serialize)]
@@ -67,16 +69,16 @@ impl InferenceEngine {
         })
     }
 
-    fn cleanup(&self, raw: &str) -> Result<String, String> {
+    fn cleanup(&self, raw: &str, tone: ToneProfile) -> Result<String, String> {
         let raw = raw.trim();
         if raw.is_empty() {
             return Err("empty input text".into());
         }
 
+        let system_prompt = build_system_prompt(tone);
         let user_message = build_cleanup_user_message(raw).map_err(|err| err.to_string())?;
         let messages = vec![
-            LlamaChatMessage::new("system".into(), SYSTEM_PROMPT.into())
-                .map_err(|err| err.to_string())?,
+            LlamaChatMessage::new("system".into(), system_prompt).map_err(|err| err.to_string())?,
             LlamaChatMessage::new("user".into(), user_message).map_err(|err| err.to_string())?,
         ];
 
@@ -224,7 +226,8 @@ fn serve(model_path: PathBuf) -> Result<(), String> {
             continue;
         };
 
-        match engine.cleanup(&text) {
+        let tone = request.tone.unwrap_or_default();
+        match engine.cleanup(&text, tone) {
             Ok(cleaned) => write_response(&WorkerResponse {
                 text: Some(cleaned),
                 error: None,
@@ -241,7 +244,7 @@ fn serve(model_path: PathBuf) -> Result<(), String> {
 
 fn oneshot(model_path: PathBuf, text: String) -> Result<(), String> {
     let engine = InferenceEngine::load(&model_path)?;
-    let cleaned = engine.cleanup(&text)?;
+    let cleaned = engine.cleanup(&text, ToneProfile::Default)?;
     println!("{cleaned}");
     Ok(())
 }

@@ -66,17 +66,6 @@ export function usePipelineState() {
         // Backend not ready yet.
       }
 
-      try {
-        await invoke("ensure_model");
-        if (!cancelled) {
-          setModelReady(true);
-          setModelProgress(null);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setErrorMessage(String(err));
-        }
-      }
     };
 
     void setup();
@@ -101,7 +90,13 @@ export function usePipelineState() {
         setModelProgress(null);
       }),
       listen<ModelDownloadProgress>("model-download-progress", (event) => {
-        setModelProgress(event.payload.percent);
+        setModelProgress((current) => {
+          const next = event.payload.percent;
+          return current === null || next >= current ? next : current;
+        });
+      }),
+      listen<string>("model-init-error", (event) => {
+        setErrorMessage(event.payload);
       }),
       listen<PartialTranscriptPayload>("partial-transcript", (event) => {
         setPartialTranscript((current) => {

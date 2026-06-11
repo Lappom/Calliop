@@ -1,10 +1,15 @@
 //! SQLite persistence for config, dictionary, and history (Phase 1+).
 
+mod app_context;
 mod db;
 mod dictionary;
 mod settings;
 mod snippets;
 
+pub use app_context::{
+    exe_names_match, is_valid_app_context_pattern, normalize_exe_pattern, normalize_title_pattern,
+    AppContextMatchType, AppContextRule, NewAppContextRule,
+};
 pub use db::{db_path, Store, StoreError};
 pub use dictionary::{
     extract_correction_words, is_valid_dictionary_word, normalize_word, DictionarySource,

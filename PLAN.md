@@ -183,9 +183,9 @@ Application desktop qui permet de **dicter dans n'importe quelle application** a
 - [x] Import / export JSON
 
 #### 3d — Contexte par application
-- [ ] Détection fenêtre active (titre, bundle ID / exe)
-- [ ] Profils de ton : casual (Slack), formel (mail), technique (IDE/terminal)
-- [ ] Mapping configurable par app
+- [x] Détection fenêtre active (titre, bundle ID / exe)
+- [x] Profils de ton : casual (Slack), formel (mail), technique (IDE/terminal)
+- [x] Mapping configurable par app
 
 #### 3e — Multilingue
 - [ ] Auto-détection langue (Whisper)
@@ -196,6 +196,14 @@ Application desktop qui permet de **dicter dans n'importe quelle application** a
 - [ ] Toutes les dictées en SQLite
 - [ ] Recherche full-text
 - [ ] Re-copie / réinjection
+
+#### 3g — Insight
+- [ ] Latence dernière dictée
+- [ ] Mots dictés aujourd'hui
+- [ ] Mots par minute (Pourcentage global comparaision au global typing speed)
+- [ ] Nombre total de mots dictés
+- [ ] Corrections apprises
+- [ ] Utilisation par application (contexte)
 
 **Critère de done :** dicter un message Slack poli, un commit message technique, un snippet « mon calendrier ».
 

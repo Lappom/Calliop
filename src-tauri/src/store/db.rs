@@ -105,6 +105,16 @@ pub(crate) fn init_schema(conn: &Connection) -> Result<(), StoreError> {
         )",
         [],
     )?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS app_context_rules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            pattern TEXT NOT NULL,
+            match_type TEXT NOT NULL,
+            tone TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )",
+        [],
+    )?;
     Ok(())
 }
 
