@@ -175,6 +175,7 @@ Application desktop qui permet de **dicter dans n'importe quelle application** a
 - [ ] CRUD mots / noms propres dans Settings
 - [ ] Injection dans `initial_prompt` Whisper
 - [ ] Apprentissage auto des corrections utilisateur
+- [ ] Notifications sur les corrections utilisateur
 
 #### 3c — Snippets vocaux
 - [ ] Définition trigger → texte complet
@@ -197,6 +198,19 @@ Application desktop qui permet de **dicter dans n'importe quelle application** a
 - [ ] Re-copie / réinjection
 
 **Critère de done :** dicter un message Slack poli, un commit message technique, un snippet « mon calendrier ».
+
+---
+
+### Phase 3.5 — Optimisation des performances
+
+**Objectif :** optimiser les performances du pipeline.
+
+- [ ] Optimiser le pipeline audio
+- [ ] Optimiser le pipeline de transcription
+- [ ] Optimiser le pipeline de post-traitement
+- [ ] Optimiser le pipeline de notification
+- [ ] Optimiser le pipeline de démarrage automatique
+
 
 ---
 

@@ -150,9 +150,23 @@ fn resolve_worker_exe() -> Result<PathBuf, LlmError> {
         }
     }
 
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let profile = if cfg!(debug_assertions) {
+        "debug"
+    } else {
+        "release"
+    };
+
     for basename in [worker_exe_basename(), worker_exe_legacy_basename()] {
-        if let Ok(current) = std::env::current_exe() {
-            if let Some(dir) = current.parent() {
+        let bundled = manifest_dir.join("bin").join(&basename);
+        if bundled.exists() {
+            return Ok(bundled);
+        }
+    }
+
+    if let Ok(current) = std::env::current_exe() {
+        if let Some(dir) = current.parent() {
+            for basename in [worker_exe_basename(), worker_exe_legacy_basename()] {
                 let sidecar = dir.join(&basename);
                 if sidecar.exists() {
                     return Ok(sidecar);
@@ -161,20 +175,14 @@ fn resolve_worker_exe() -> Result<PathBuf, LlmError> {
         }
     }
 
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     for basename in [worker_exe_basename(), worker_exe_legacy_basename()] {
-        let bundled = manifest_dir.join("bin").join(&basename);
-        if bundled.exists() {
-            return Ok(bundled);
+        let built = manifest_dir
+            .join("target")
+            .join(profile)
+            .join(&basename);
+        if built.exists() {
+            return Ok(built);
         }
-    }
-
-    let dev_candidate = manifest_dir
-        .join("target")
-        .join("debug")
-        .join(worker_exe_legacy_basename());
-    if dev_candidate.exists() {
-        return Ok(dev_candidate);
     }
 
     Err(LlmError::Worker(format!(
