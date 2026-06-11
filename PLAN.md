@@ -228,7 +228,8 @@ Application desktop qui permet de **dicter dans n'importe quelle application** a
 **Objectif :** produit installable par un non-développeur.
 
 - [ ] Fenêtre Settings complète
-- [ ] Gestion modèles (small / medium / large, CPU vs GPU)
+- [ ] Gestion modèles : Whisper STT (small / medium) + LLM auto-edit (CPU vs GPU optionnel)
+- [ ] Choix modèle LLM : **Qwen3-0.6B-Instruct** Q4_K_M (~484 Mo, latence CPU réduite) ou **Qwen3-1.7B-Instruct** Q4_K_M (~1,1 Go, défaut Phase 3, meilleure fidélité sur le prompt de nettoyage FR)
 - [ ] Onboarding (permissions micro + accessibilité, test dictée)
 - [ ] Installeurs : MSI/NSIS (Win), DMG (macOS), AppImage/deb (Linux)
 - [ ] Auto-update Tauri (optionnel, désactivable)
