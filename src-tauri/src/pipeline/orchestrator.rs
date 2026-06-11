@@ -36,6 +36,15 @@ fn prepare_display_transcript(raw: &str, snippets: &[Snippet]) -> String {
     }
 }
 
+/// Live overlay only: expand snippets without oral punctuation (avoids premature « point » → « . »).
+fn prepare_partial_transcript(raw: &str, snippets: &[Snippet]) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    apply_snippets(trimmed, snippets)
+}
+
 /// Maximum time to wait for LLM cleanup (Qwen3 1.7B on CPU can take tens of seconds).
 const LLM_CLEANUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
 /// Fast-path budget before injecting the raw transcript; LLM continues in background if slower.
@@ -962,7 +971,7 @@ fn transcribe_segment(
 
     stt.transcripts.lock().push(text.text.clone());
     let raw = stt.transcripts.lock().join(" ");
-    let display = prepare_display_transcript(&raw, &stt.snippets.read());
+    let display = prepare_partial_transcript(&raw, &stt.snippets.read());
 
     let _ = app.emit(
         "partial-transcript",

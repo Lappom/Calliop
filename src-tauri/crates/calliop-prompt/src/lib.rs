@@ -306,6 +306,7 @@ pub fn interpret_oral_punctuation(text: &str) -> String {
         result = replace_phrase_ci(&result, phrase, replacement);
     }
     result = replace_spoken_at(&result);
+    result = replace_spoken_hashtag(&result);
     result = replace_spoken_point(&result);
     result = normalize_punctuation_spacing(&result);
     result = collapse_spaced_dots_in_identifiers(&result);
@@ -443,9 +444,18 @@ const ORAL_PUNCTUATION_PHRASES: &[(&str, &str)] = &[
     ("tiret", "-"),
     ("arobase", "@"),
     ("slash", "/"),
-    ("dièse", "#"),
-    ("diese", "#"),
-    ("hashtag", "#"),
+];
+
+const HASHTAG_PHRASES: &[&str] = &["hashtag", "dièse", "diese"];
+
+const POINT_DETERMINERS: &[&str] = &[
+    "mon", "ton", "son", "ma", "ta", "sa", "mes", "tes", "ses", "notre", "votre", "leur",
+    "leurs", "le", "la", "les", "un", "une", "des", "ce", "cet", "cette", "ces", "du", "de",
+];
+
+const TAG_STOPWORDS: &[&str] = &[
+    "le", "la", "les", "un", "une", "des", "de", "du", "en", "et", "ou", "au", "aux", "pour",
+    "par", "sur", "sous", "dans", "avec", "sans", "the", "a", "an", "for", "to", "of",
 ];
 
 fn replace_phrase_ci(text: &str, phrase: &str, replacement: &str) -> String {
@@ -507,6 +517,14 @@ fn is_at_symbol_context(chars: &[char], after_index: usize) -> bool {
         || rest_lower.contains(" barre oblique ")
 }
 
+fn replace_spoken_hashtag(text: &str) -> String {
+    let mut result = text.to_string();
+    for phrase in HASHTAG_PHRASES {
+        result = replace_phrase_with_context(&result, phrase, "#", is_hashtag_symbol_context);
+    }
+    result
+}
+
 fn replace_spoken_point(text: &str) -> String {
     let chars: Vec<char> = text.chars().collect();
     let mut out = String::new();
@@ -516,12 +534,95 @@ fn replace_spoken_point(text: &str) -> String {
         if matches_phrase_ci(&chars, index, &['p', 'o', 'i', 'n', 't'])
             && !is_word_char(at_char(&chars, index.wrapping_sub(1)))
             && !is_word_char(at_char(&chars, index + 5))
-            && !is_point_noun_phrase(&chars, index + 5)
+            && !is_point_noun_usage(&chars, index)
         {
             out.push('.');
             index += 5;
         } else {
             out.push(chars[index]);
+            index += 1;
+        }
+    }
+
+    out
+}
+
+fn is_point_noun_usage(chars: &[char], point_start: usize) -> bool {
+    is_point_noun_phrase(chars, point_start + 5)
+        || has_point_determiner_before(chars, point_start)
+}
+
+fn has_point_determiner_before(chars: &[char], point_start: usize) -> bool {
+    word_before(chars, point_start)
+        .is_some_and(|word| POINT_DETERMINERS.contains(&word.to_ascii_lowercase().as_str()))
+}
+
+fn is_hashtag_symbol_context(chars: &[char], phrase_start: usize, phrase_end: usize) -> bool {
+    match (
+        word_before(chars, phrase_start).as_deref(),
+        word_after(chars, phrase_end).as_deref(),
+    ) {
+        (Some(prev), Some(next)) if is_tag_token(prev) && is_tag_token(next) => true,
+        (None, Some(next)) if is_tag_token(next) => true,
+        (Some(prev), None) if is_tag_token(prev) => true,
+        _ => false,
+    }
+}
+
+fn is_tag_token(word: &str) -> bool {
+    let word = word.trim();
+    if word.is_empty() || !word.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
+        return false;
+    }
+    !TAG_STOPWORDS.contains(&word.to_ascii_lowercase().as_str())
+}
+
+fn word_before(chars: &[char], index: usize) -> Option<String> {
+    if index == 0 {
+        return None;
+    }
+    let before: String = chars[..index].iter().collect();
+    before
+        .split_whitespace()
+        .next_back()
+        .map(|word| word.to_string())
+}
+
+fn word_after(chars: &[char], index: usize) -> Option<String> {
+    if index >= chars.len() {
+        return None;
+    }
+    let after: String = chars[index..].iter().collect();
+    after
+        .split_whitespace()
+        .next()
+        .map(|word| word.to_string())
+}
+
+fn replace_phrase_with_context(
+    text: &str,
+    phrase: &str,
+    replacement: &str,
+    context: fn(&[char], usize, usize) -> bool,
+) -> String {
+    let phrase_chars: Vec<char> = phrase.chars().collect();
+    let phrase_lower: Vec<char> = phrase.to_lowercase().chars().collect();
+    let text_chars: Vec<char> = text.chars().collect();
+    let mut out = String::new();
+    let mut index = 0;
+
+    while index < text_chars.len() {
+        let after = index + phrase_chars.len();
+        if matches_phrase_ci(&text_chars, index, &phrase_lower)
+            && !is_word_char(at_char(&text_chars, index.wrapping_sub(1)))
+            && !is_word_char(at_char(&text_chars, after))
+            && context(&text_chars, index, after)
+        {
+            out.push_str(replacement);
+            index = after;
+        } else {
+            out.push(text_chars[index]);
             index += 1;
         }
     }
@@ -611,6 +712,16 @@ fn should_collapse_around_symbol(
     index: usize,
     symbol: char,
 ) -> bool {
+    if symbol == '#' {
+        return match (
+            trailing_word(out).as_deref(),
+            leading_word(chars, index + 1).as_deref(),
+        ) {
+            (Some(prev), Some(next)) if is_tag_token(prev) && is_tag_token(next) => true,
+            _ => false,
+        };
+    }
+
     let prev = out.chars().rev().find(|ch| !ch.is_whitespace());
     let next = leading_non_space_char(chars, index + 1);
     let prev_ok = prev.is_some_and(|ch| is_identifier_char(ch) || ch == symbol);
@@ -620,6 +731,21 @@ fn should_collapse_around_symbol(
         _ => false,
     };
     prev_ok && next_ok
+}
+
+fn trailing_word(text: &str) -> Option<String> {
+    text.split_whitespace().next_back().map(str::to_string)
+}
+
+fn leading_word(chars: &[char], mut index: usize) -> Option<String> {
+    while index < chars.len() && chars[index].is_whitespace() {
+        index += 1;
+    }
+    if index >= chars.len() {
+        return None;
+    }
+    let rest: String = chars[index..].iter().collect();
+    rest.split_whitespace().next().map(str::to_string)
 }
 
 fn is_identifier_char(ch: char) -> bool {
@@ -780,6 +906,21 @@ mod tests {
     fn preserves_point_in_noun_phrase() {
         let out = interpret_oral_punctuation("Le point de vue est clair");
         assert_eq!(out, "Le point de vue est clair");
+    }
+
+    #[test]
+    fn preserves_point_noun_at_end_of_utterance() {
+        let out = post_process_transcript("voici mon point");
+        assert_eq!(out, "voici mon point");
+
+        let out = post_process_transcript("bonjour point");
+        assert_eq!(out, "bonjour.");
+    }
+
+    #[test]
+    fn preserves_hashtag_word_in_prose() {
+        let out = interpret_oral_punctuation("le hashtag pour rust");
+        assert_eq!(out, "le hashtag pour rust");
     }
 
     #[test]
