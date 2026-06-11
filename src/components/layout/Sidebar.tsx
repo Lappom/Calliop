@@ -4,7 +4,7 @@ import {
   BookOpen,
   Braces,
   History,
-  Layers,
+  Palette,
   Mic,
   Settings,
 } from "lucide-react";
@@ -33,7 +33,7 @@ const primaryItems: NavItem[] = [
   { id: "main", label: "Accueil", icon: Mic },
   { id: "dictionary", label: "Dictionnaire", icon: BookOpen },
   { id: "snippets", label: "Snippets", icon: Braces },
-  { id: "context", label: "Contexte", icon: Layers },
+  { id: "style", label: "Style", icon: Palette },
   { id: "history", label: "Historique", icon: History },
   { id: "insight", label: "Insight", icon: BarChart3 },
 ];

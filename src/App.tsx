@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { AppShell } from "./components/layout/AppShell";
 import { ModelDownloadToasts } from "./components/layout/ModelDownloadToasts";
-import { ContexteView } from "./components/context/ContexteView";
+import { StyleView } from "./components/style/StyleView";
 import { DictionaryView } from "./components/dictionary/DictionaryView";
 import { HistoryView } from "./components/history/HistoryView";
 import { InsightView } from "./components/insight/InsightView";
@@ -69,7 +69,7 @@ function App() {
         {currentView === "main" && <MainView {...pipeline} />}
         {currentView === "dictionary" && <DictionaryView />}
         {currentView === "snippets" && <SnippetsView />}
-        {currentView === "context" && <ContexteView />}
+        {currentView === "style" && <StyleView />}
         {currentView === "history" && <HistoryView />}
         {currentView === "insight" && (
           <InsightView latencyMetrics={pipeline.latencyMetrics} />
