@@ -154,7 +154,12 @@ pub(crate) fn apply_learned_correction(
     }
 
     if !added.is_empty() {
-        refresh_dictionary_prompt(store, pipeline)?;
+        if let Err(err) = refresh_dictionary_prompt(store, pipeline) {
+            for word in &added {
+                let _ = store.remove_word_by_normalized(word);
+            }
+            return Err(err);
+        }
         send_dictionary_notification(app, &added);
         emit_dictionary_updated(app);
     }
@@ -613,6 +618,9 @@ pub fn run() {
         let store = Arc::clone(&store);
         let pipeline_arc = Arc::clone(&pipeline);
         let handler = Arc::new(move |app: &AppHandle, original: &str, corrected: &str| {
+            if !pipeline_arc.lock().auto_learn_enabled() {
+                return;
+            }
             if let Err(err) =
                 apply_learned_correction(app, &store, &pipeline_arc, original, corrected)
             {

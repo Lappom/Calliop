@@ -56,13 +56,36 @@ pub fn extract_region(
         };
     }
 
-    let prefix_pos = if anchors.prefix.is_empty() {
-        0
-    } else {
-        document.rfind(&anchors.prefix)? + anchors.prefix.len()
-    };
+    if anchors.prefix.is_empty() {
+        return extract_region_after_prefix(document, 0, anchors, max_region_len);
+    }
 
-    let after_prefix = &document[prefix_pos..];
+    let mut last_region = None;
+    let mut search_from = 0;
+    while let Some(rel) = document[search_from..].find(&anchors.prefix) {
+        let prefix_end = search_from + rel + anchors.prefix.len();
+        if let Some(region) =
+            extract_region_after_prefix(document, prefix_end, anchors, max_region_len)
+        {
+            last_region = Some(region);
+        }
+        search_from = search_from + rel + 1;
+    }
+
+    last_region
+}
+
+fn extract_region_after_prefix(
+    document: &str,
+    prefix_end: usize,
+    anchors: &InjectionAnchors,
+    max_region_len: usize,
+) -> Option<String> {
+    if prefix_end > document.len() {
+        return None;
+    }
+
+    let after_prefix = &document[prefix_end..];
     let region = if anchors.suffix.is_empty() {
         after_prefix.trim().to_string()
     } else {
@@ -197,6 +220,18 @@ mod tests {
         let anchors = build_anchors(doc, "Calliop").expect("anchors");
         assert_eq!(anchors.prefix, "one two three");
         assert_eq!(anchors.suffix, "four five six");
+    }
+
+    #[test]
+    fn extract_region_prefers_last_valid_prefix_match() {
+        let anchors = build_anchors(
+            "one two three Calliop four five six",
+            "Calliop",
+        )
+        .expect("anchors");
+        let doc = "one two three noise one two three Calliope four five six";
+        let region = extract_region(doc, &anchors, 64).expect("region");
+        assert_eq!(region, "Calliope");
     }
 
     #[test]

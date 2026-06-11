@@ -120,7 +120,63 @@ fn tokenize_words(text: &str) -> Vec<(String, String)> {
         .collect()
 }
 
-/// Returns words present in `corrected` but absent from `original` (case-insensitive).
+enum WordEditOp {
+    Equal,
+    Insert(String),
+    Delete,
+    Substitute,
+}
+
+fn word_edit_ops(original_keys: &[String], corrected: &[(String, String)]) -> Vec<WordEditOp> {
+    let n = original_keys.len();
+    let m = corrected.len();
+    let mut dp = vec![vec![0u32; m + 1]; n + 1];
+
+    for i in 1..=n {
+        dp[i][0] = i as u32;
+    }
+    for j in 1..=m {
+        dp[0][j] = j as u32;
+    }
+
+    for i in 1..=n {
+        for j in 1..=m {
+            if original_keys[i - 1] == corrected[j - 1].0 {
+                dp[i][j] = dp[i - 1][j - 1];
+            } else {
+                dp[i][j] = (dp[i - 1][j - 1] + 1)
+                    .min(dp[i - 1][j] + 1)
+                    .min(dp[i][j - 1] + 1);
+            }
+        }
+    }
+
+    let mut ops = Vec::new();
+    let mut i = n;
+    let mut j = m;
+    while i > 0 || j > 0 {
+        if i > 0 && j > 0 && original_keys[i - 1] == corrected[j - 1].0 {
+            ops.push(WordEditOp::Equal);
+            i -= 1;
+            j -= 1;
+        } else if i > 0 && j > 0 && dp[i][j] == dp[i - 1][j - 1] + 1 {
+            ops.push(WordEditOp::Substitute);
+            i -= 1;
+            j -= 1;
+        } else if i > 0 && dp[i][j] == dp[i - 1][j] + 1 {
+            ops.push(WordEditOp::Delete);
+            i -= 1;
+        } else {
+            ops.push(WordEditOp::Insert(corrected[j - 1].1.clone()));
+            j -= 1;
+        }
+    }
+
+    ops.reverse();
+    ops
+}
+
+/// Returns words newly inserted in `corrected` relative to `original`.
 pub fn extract_correction_words(original: &str, corrected: &str) -> Vec<String> {
     if original.trim() == corrected.trim() {
         return Vec::new();
@@ -128,20 +184,19 @@ pub fn extract_correction_words(original: &str, corrected: &str) -> Vec<String> 
 
     let original_tokens = tokenize_words(original);
     let corrected_tokens = tokenize_words(corrected);
-    let original_set: HashSet<String> = original_tokens.into_iter().map(|(key, _)| key).collect();
+    let original_keys: Vec<String> = original_tokens.into_iter().map(|(key, _)| key).collect();
+    let ops = word_edit_ops(&original_keys, &corrected_tokens);
 
     let mut seen = HashSet::new();
     let mut result = Vec::new();
 
-    for (key, word) in corrected_tokens {
-        if original_set.contains(&key) || seen.contains(&key) {
-            continue;
+    for op in ops {
+        if let WordEditOp::Insert(word) = op {
+            let key = word.to_lowercase();
+            if is_valid_dictionary_word(&word) && seen.insert(key) {
+                result.push(word);
+            }
         }
-        if !is_valid_dictionary_word(&word) {
-            continue;
-        }
-        seen.insert(key);
-        result.push(word);
     }
 
     result
@@ -221,5 +276,11 @@ mod tests {
     fn extract_correction_words_is_case_insensitive() {
         let words = extract_correction_words("bonjour", "Bonjour Calliop");
         assert_eq!(words, vec!["Calliop".to_string()]);
+    }
+
+    #[test]
+    fn extract_correction_words_ignores_substitutions() {
+        let words = extract_correction_words("le chat est ici", "la chat est ici");
+        assert!(words.is_empty());
     }
 }

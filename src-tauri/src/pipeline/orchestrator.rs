@@ -163,7 +163,11 @@ impl PipelineOrchestrator {
     }
 
     pub fn set_auto_learn(&mut self, enabled: bool) {
+        let was_enabled = self.auto_learn.load(Ordering::SeqCst);
         self.auto_learn.store(enabled, Ordering::SeqCst);
+        if was_enabled && !enabled {
+            self.observer_generation.fetch_add(1, Ordering::SeqCst);
+        }
     }
 
     pub fn auto_learn_enabled(&self) -> bool {
