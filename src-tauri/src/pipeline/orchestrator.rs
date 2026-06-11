@@ -851,7 +851,9 @@ fn start_llm_cleanup(
 fn force_kill_sidecar(pid: u32) {
     #[cfg(windows)]
     {
-        let _ = std::process::Command::new("taskkill")
+        let mut command = std::process::Command::new("taskkill");
+        crate::process_util::hide_console(&mut command);
+        let _ = command
             .args(["/PID", &pid.to_string(), "/F", "/T"])
             .output();
     }

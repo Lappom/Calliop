@@ -58,7 +58,11 @@ jobs:
             patchelf \
             cmake \
             clang \
-            libclang-dev
+            libclang-dev \
+            vulkan-tools \
+            libvulkan-dev \
+            mesa-vulkan-drivers \
+            glslc
 
       - name: Check formatting
         run: cargo fmt --check
@@ -106,7 +110,11 @@ jobs:
             patchelf \
             cmake \
             clang \
-            libclang-dev
+            libclang-dev \
+            vulkan-tools \
+            libvulkan-dev \
+            mesa-vulkan-drivers \
+            glslc
 
       - name: Install Vulkan SDK (Windows)
         if: matrix.platform == 'windows-latest'

@@ -7,6 +7,7 @@ pub mod inject;
 pub mod llm;
 pub mod observe;
 pub mod pipeline;
+pub mod process_util;
 pub mod store;
 pub mod stt;
 
