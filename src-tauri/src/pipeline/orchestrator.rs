@@ -12,7 +12,10 @@ use crate::audio::{AudioCapture, VadSegmenter};
 use crate::inject::{InjectError, TextInjector};
 use crate::llm::LlamaEngine;
 use crate::observe::CorrectionHandler;
+use crate::store::Snippet;
 use crate::stt::{SttError, WhisperEngine};
+
+use super::snippets::apply_snippets;
 
 /// Maximum time to wait for LLM cleanup (Qwen3 1.7B on CPU can take tens of seconds).
 const LLM_CLEANUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
@@ -108,6 +111,7 @@ pub struct PipelineOrchestrator {
     failed_segments: Arc<Mutex<Vec<Vec<f32>>>>,
     streaming_stt_ms: Arc<AtomicU64>,
     dictionary_prompt: Arc<RwLock<Option<String>>>,
+    snippets: Arc<RwLock<Vec<Snippet>>>,
     auto_learn: Arc<AtomicBool>,
     observer_generation: Arc<AtomicU64>,
     correction_handler: Option<CorrectionHandler>,
@@ -128,6 +132,7 @@ impl PipelineOrchestrator {
             failed_segments: Arc::new(Mutex::new(Vec::new())),
             streaming_stt_ms: Arc::new(AtomicU64::new(0)),
             dictionary_prompt: Arc::new(RwLock::new(None)),
+            snippets: Arc::new(RwLock::new(Vec::new())),
             auto_learn: Arc::new(AtomicBool::new(true)),
             observer_generation: Arc::new(AtomicU64::new(0)),
             correction_handler: None,
@@ -136,6 +141,15 @@ impl PipelineOrchestrator {
 
     pub fn set_dictionary_prompt(&mut self, prompt: Option<String>) {
         *self.dictionary_prompt.write() = prompt;
+    }
+
+    pub fn set_snippets(&mut self, snippets: Vec<Snippet>) {
+        *self.snippets.write() = snippets;
+    }
+
+    fn apply_cached_snippets(&self, text: &str) -> String {
+        let snippets = self.snippets.read().clone();
+        apply_snippets(text, &snippets)
     }
 
     pub fn state(&self) -> PipelineState {
@@ -372,6 +386,8 @@ impl PipelineOrchestrator {
             let _ = app.emit("llm-unready", ());
             crate::spawn_llm_recovery_if_needed(app.clone());
         }
+
+        let text_to_inject = self.apply_cached_snippets(&text_to_inject);
 
         self.set_state(app, PipelineState::Injecting, None);
         let inject_start = Instant::now();

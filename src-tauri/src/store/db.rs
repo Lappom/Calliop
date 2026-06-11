@@ -96,6 +96,15 @@ pub(crate) fn init_schema(conn: &Connection) -> Result<(), StoreError> {
         )",
         [],
     )?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS snippets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            trigger TEXT NOT NULL UNIQUE COLLATE NOCASE,
+            content TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )",
+        [],
+    )?;
     Ok(())
 }
 

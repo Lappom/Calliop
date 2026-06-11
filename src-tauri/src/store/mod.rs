@@ -3,6 +3,7 @@
 mod db;
 mod dictionary;
 mod settings;
+mod snippets;
 
 pub use db::{db_path, Store, StoreError};
 pub use dictionary::{
@@ -10,6 +11,9 @@ pub use dictionary::{
     DictionaryWord,
 };
 pub use settings::{AppSettings, KEY_AUTO_EDIT, KEY_AUTO_LEARN};
+pub use snippets::{
+    is_valid_snippet_content, is_valid_trigger, normalize_trigger, Snippet, SnippetImport,
+};
 
 pub fn module_name() -> &'static str {
     "store"

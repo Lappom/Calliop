@@ -178,9 +178,9 @@ Application desktop qui permet de **dicter dans n'importe quelle application** a
 - [x] Notifications sur les corrections utilisateur
 
 #### 3c — Snippets vocaux
-- [ ] Définition trigger → texte complet
-- [ ] Matching dans post-processing LLM
-- [ ] Import / export JSON
+- [x] Définition trigger → texte complet
+- [x] Matching dans post-processing LLM
+- [x] Import / export JSON
 
 #### 3d — Contexte par application
 - [ ] Détection fenêtre active (titre, bundle ID / exe)

@@ -17,8 +17,9 @@ use pipeline::{
 };
 use serde::{Deserialize, Serialize};
 use store::{
-    extract_correction_words, is_valid_dictionary_word, normalize_word, AppSettings,
-    DictionarySource, DictionaryWord, Store,
+    extract_correction_words, is_valid_dictionary_word, is_valid_snippet_content, is_valid_trigger,
+    normalize_trigger, normalize_word, AppSettings, DictionarySource, DictionaryWord, Snippet,
+    SnippetImport, Store,
 };
 use stt::build_initial_prompt;
 use tauri::{
@@ -116,19 +117,55 @@ fn dictionary_word_to_payload(word: DictionaryWord) -> DictionaryWordPayload {
     }
 }
 
-fn refresh_dictionary_prompt(
+#[derive(Debug, Clone, Serialize)]
+struct SnippetPayload {
+    id: i64,
+    trigger: String,
+    content: String,
+    created_at: String,
+}
+
+fn snippet_to_payload(snippet: Snippet) -> SnippetPayload {
+    SnippetPayload {
+        id: snippet.id,
+        trigger: snippet.trigger,
+        content: snippet.content,
+        created_at: snippet.created_at,
+    }
+}
+
+fn refresh_whisper_prompt(
     store: &Store,
     pipeline: &Arc<Mutex<PipelineOrchestrator>>,
 ) -> Result<(), String> {
     let words = store.list_words().map_err(|e| e.to_string())?;
-    let prompt_words: Vec<String> = words.into_iter().map(|entry| entry.word).collect();
+    let snippets = store.list_snippets().map_err(|e| e.to_string())?;
+
+    let mut prompt_words: Vec<String> = words.into_iter().map(|entry| entry.word).collect();
+    for snippet in &snippets {
+        prompt_words.push(snippet.trigger.clone());
+    }
+
     let prompt = build_initial_prompt(&prompt_words);
-    pipeline.lock().set_dictionary_prompt(prompt);
+    let mut pipeline = pipeline.lock();
+    pipeline.set_dictionary_prompt(prompt);
+    pipeline.set_snippets(snippets);
     Ok(())
 }
 
+fn refresh_whisper_prompt_state(state: &AppState) -> Result<(), String> {
+    refresh_whisper_prompt(&state.store, &state.pipeline)
+}
+
+fn refresh_dictionary_prompt(
+    store: &Store,
+    pipeline: &Arc<Mutex<PipelineOrchestrator>>,
+) -> Result<(), String> {
+    refresh_whisper_prompt(store, pipeline)
+}
+
 fn refresh_dictionary_prompt_state(state: &AppState) -> Result<(), String> {
-    refresh_dictionary_prompt(&state.store, &state.pipeline)
+    refresh_whisper_prompt_state(state)
 }
 
 pub(crate) fn apply_learned_correction(
@@ -169,6 +206,10 @@ pub(crate) fn apply_learned_correction(
 
 fn emit_dictionary_updated(app: &AppHandle) {
     let _ = app.emit("dictionary-updated", ());
+}
+
+fn emit_snippets_updated(app: &AppHandle) {
+    let _ = app.emit("snippets-updated", ());
 }
 
 fn send_dictionary_notification(app: &AppHandle, words: &[String]) {
@@ -398,9 +439,7 @@ fn remove_dictionary_word(
     }
 
     if let Err(err) = refresh_dictionary_prompt_state(&state) {
-        let _ = state
-            .store
-            .add_word(&entry.word, entry.source);
+        let _ = state.store.add_word(&entry.word, entry.source);
         return Err(err);
     }
 
@@ -416,6 +455,107 @@ fn learn_from_correction(
     corrected: String,
 ) -> Result<Vec<String>, String> {
     apply_learned_correction(&app, &state.store, &state.pipeline, &original, &corrected)
+}
+
+#[tauri::command]
+fn list_snippets(state: State<'_, AppState>) -> Result<Vec<SnippetPayload>, String> {
+    state
+        .store
+        .list_snippets()
+        .map(|snippets| snippets.into_iter().map(snippet_to_payload).collect())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn add_snippet(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    trigger: String,
+    content: String,
+) -> Result<bool, String> {
+    let normalized_trigger = normalize_trigger(&trigger);
+    if normalized_trigger.is_empty() {
+        return Err("Le déclencheur ne peut pas être vide.".into());
+    }
+    if !is_valid_trigger(&normalized_trigger) {
+        return Err("Le déclencheur doit contenir au moins 2 caractères.".into());
+    }
+    if !is_valid_snippet_content(&content) {
+        return Err("Le texte du snippet ne peut pas être vide.".into());
+    }
+
+    let inserted = state
+        .store
+        .add_snippet(&normalized_trigger, &content)
+        .map_err(|e| e.to_string())?;
+
+    if inserted {
+        if let Err(err) = refresh_whisper_prompt_state(&state) {
+            let _ = state.store.remove_snippet_by_trigger(&normalized_trigger);
+            return Err(err);
+        }
+        emit_snippets_updated(&app);
+    }
+
+    Ok(inserted)
+}
+
+#[tauri::command]
+fn remove_snippet(app: AppHandle, state: State<'_, AppState>, id: i64) -> Result<(), String> {
+    let entry = state
+        .store
+        .get_snippet_by_id(id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("Snippet introuvable (id {id})."))?;
+
+    let removed = state.store.remove_snippet(id).map_err(|e| e.to_string())?;
+    if !removed {
+        return Err(format!("Snippet introuvable (id {id})."));
+    }
+
+    if let Err(err) = refresh_whisper_prompt_state(&state) {
+        let _ = state.store.add_snippet(&entry.trigger, &entry.content);
+        return Err(err);
+    }
+
+    emit_snippets_updated(&app);
+    Ok(())
+}
+
+#[tauri::command]
+fn import_snippets(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    json: String,
+) -> Result<usize, String> {
+    let entries: Vec<SnippetImport> =
+        serde_json::from_str(&json).map_err(|err| format!("JSON invalide : {err}"))?;
+    if entries.is_empty() {
+        return Err("Le fichier ne contient aucun snippet.".into());
+    }
+
+    let count = state
+        .store
+        .import_snippets(&entries)
+        .map_err(|e| e.to_string())?;
+    if count == 0 {
+        return Err(
+            "Aucun snippet valide importé (déclencheur ≥ 2 caractères, texte non vide).".into(),
+        );
+    }
+
+    refresh_whisper_prompt_state(&state)?;
+    emit_snippets_updated(&app);
+    Ok(count)
+}
+
+#[tauri::command]
+fn export_snippets(state: State<'_, AppState>) -> Result<String, String> {
+    let entries = state
+        .store
+        .export_snippet_imports()
+        .map_err(|e| e.to_string())?;
+    serde_json::to_string_pretty(&entries).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -641,11 +781,8 @@ pub fn run() {
         pipeline.lock().set_correction_handler(handler);
     }
 
-    if let Ok(words) = store.list_words() {
-        let prompt_words: Vec<String> = words.into_iter().map(|entry| entry.word).collect();
-        pipeline
-            .lock()
-            .set_dictionary_prompt(build_initial_prompt(&prompt_words));
+    if let Err(err) = refresh_whisper_prompt(&store, &pipeline) {
+        eprintln!("failed to load whisper prompt and snippets cache: {err}");
     }
 
     let whisper_engine = Arc::new(Mutex::new(None));
@@ -738,7 +875,12 @@ pub fn run() {
             list_dictionary_words,
             add_dictionary_word,
             remove_dictionary_word,
-            learn_from_correction
+            learn_from_correction,
+            list_snippets,
+            add_snippet,
+            remove_snippet,
+            import_snippets,
+            export_snippets
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
