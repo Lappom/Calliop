@@ -2,6 +2,7 @@ pub mod audio;
 pub mod hotkey;
 pub mod inject;
 pub mod llm;
+pub mod observe;
 pub mod pipeline;
 pub mod store;
 pub mod stt;
@@ -29,7 +30,7 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tauri_plugin_notification::NotificationExt;
 
 /// Returns registered core module names (Phase 0 wiring check).
-pub fn registered_modules() -> [&'static str; 7] {
+pub fn registered_modules() -> [&'static str; 8] {
     [
         audio::module_name(),
         stt::module_name(),
@@ -37,6 +38,7 @@ pub fn registered_modules() -> [&'static str; 7] {
         inject::module_name(),
         hotkey::module_name(),
         store::module_name(),
+        observe::module_name(),
         pipeline::module_name(),
     ]
 }
@@ -90,6 +92,7 @@ pub(crate) fn spawn_llm_recovery_if_needed(app: AppHandle) {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SettingsPayload {
     auto_edit: bool,
+    auto_learn: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -112,12 +115,50 @@ fn dictionary_word_to_payload(word: DictionaryWord) -> DictionaryWordPayload {
     }
 }
 
-fn refresh_dictionary_prompt(state: &AppState) -> Result<(), String> {
-    let words = state.store.list_words().map_err(|e| e.to_string())?;
+fn refresh_dictionary_prompt(
+    store: &Store,
+    pipeline: &Arc<Mutex<PipelineOrchestrator>>,
+) -> Result<(), String> {
+    let words = store.list_words().map_err(|e| e.to_string())?;
     let prompt_words: Vec<String> = words.into_iter().map(|entry| entry.word).collect();
     let prompt = build_initial_prompt(&prompt_words);
-    state.pipeline.lock().set_dictionary_prompt(prompt);
+    pipeline.lock().set_dictionary_prompt(prompt);
     Ok(())
+}
+
+fn refresh_dictionary_prompt_state(state: &AppState) -> Result<(), String> {
+    refresh_dictionary_prompt(&state.store, &state.pipeline)
+}
+
+pub(crate) fn apply_learned_correction(
+    app: &AppHandle,
+    store: &Store,
+    pipeline: &Arc<Mutex<PipelineOrchestrator>>,
+    original: &str,
+    corrected: &str,
+) -> Result<Vec<String>, String> {
+    let candidates = extract_correction_words(original, corrected);
+    if candidates.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut added = Vec::new();
+    for word in candidates {
+        let inserted = store
+            .add_word(&word, DictionarySource::Learned)
+            .map_err(|e| e.to_string())?;
+        if inserted {
+            added.push(word);
+        }
+    }
+
+    if !added.is_empty() {
+        refresh_dictionary_prompt(store, pipeline)?;
+        send_dictionary_notification(app, &added);
+        emit_dictionary_updated(app);
+    }
+
+    Ok(added)
 }
 
 fn emit_dictionary_updated(app: &AppHandle) {
@@ -168,6 +209,7 @@ fn get_settings(state: State<'_, AppState>) -> Result<SettingsPayload, String> {
     let settings = state.store.load_settings().map_err(|e| e.to_string())?;
     Ok(SettingsPayload {
         auto_edit: settings.auto_edit,
+        auto_learn: settings.auto_learn,
     })
 }
 
@@ -179,10 +221,13 @@ async fn set_settings(
 ) -> Result<(), String> {
     let previous = state.store.load_settings().map_err(|e| e.to_string())?;
 
+    state.pipeline.lock().set_auto_learn(settings.auto_learn);
+
     if settings.auto_edit {
         state.pipeline.lock().set_auto_edit(true);
 
         if let Err(err) = ensure_llm_model(app, state.clone()).await {
+            state.pipeline.lock().set_auto_learn(previous.auto_learn);
             state.pipeline.lock().set_auto_edit(previous.auto_edit);
             shutdown_llm_engine(&state);
             return Err(err);
@@ -190,9 +235,13 @@ async fn set_settings(
 
         if let Err(err) = state
             .store
-            .save_settings(&AppSettings { auto_edit: true })
+            .save_settings(&AppSettings {
+                auto_edit: true,
+                auto_learn: settings.auto_learn,
+            })
             .map_err(|e| e.to_string())
         {
+            state.pipeline.lock().set_auto_learn(previous.auto_learn);
             state.pipeline.lock().set_auto_edit(previous.auto_edit);
             shutdown_llm_engine(&state);
             return Err(err);
@@ -200,7 +249,10 @@ async fn set_settings(
     } else {
         state
             .store
-            .save_settings(&AppSettings { auto_edit: false })
+            .save_settings(&AppSettings {
+                auto_edit: false,
+                auto_learn: settings.auto_learn,
+            })
             .map_err(|e| e.to_string())?;
         state.pipeline.lock().set_auto_edit(false);
         shutdown_llm_engine(&state);
@@ -302,7 +354,7 @@ fn add_dictionary_word(
         .map_err(|e| e.to_string())?;
 
     if inserted {
-        refresh_dictionary_prompt(&state)?;
+        refresh_dictionary_prompt_state(&state)?;
         emit_dictionary_updated(&app);
     }
 
@@ -321,7 +373,7 @@ fn remove_dictionary_word(
         return Err(format!("Mot introuvable (id {id})."));
     }
 
-    refresh_dictionary_prompt(&state)?;
+    refresh_dictionary_prompt_state(&state)?;
     emit_dictionary_updated(&app);
     Ok(())
 }
@@ -333,29 +385,7 @@ fn learn_from_correction(
     original: String,
     corrected: String,
 ) -> Result<Vec<String>, String> {
-    let candidates = extract_correction_words(&original, &corrected);
-    if candidates.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let mut added = Vec::new();
-    for word in candidates {
-        let inserted = state
-            .store
-            .add_word(&word, DictionarySource::Learned)
-            .map_err(|e| e.to_string())?;
-        if inserted {
-            added.push(word);
-        }
-    }
-
-    if !added.is_empty() {
-        refresh_dictionary_prompt(&state)?;
-        send_dictionary_notification(&app, &added);
-        emit_dictionary_updated(&app);
-    }
-
-    Ok(added)
+    apply_learned_correction(&app, &state.store, &state.pipeline, &original, &corrected)
 }
 
 #[tauri::command]
@@ -563,6 +593,21 @@ pub fn run() {
         .load_settings()
         .expect("failed to load initial settings");
     pipeline.lock().set_auto_edit(initial_settings.auto_edit);
+    pipeline.lock().set_auto_learn(initial_settings.auto_learn);
+
+    {
+        let store = Arc::clone(&store);
+        let pipeline_arc = Arc::clone(&pipeline);
+        let handler = Arc::new(move |app: &AppHandle, original: &str, corrected: &str| {
+            if let Err(err) =
+                apply_learned_correction(app, &store, &pipeline_arc, original, corrected)
+            {
+                eprintln!("auto-learn correction failed: {err}");
+            }
+        });
+        pipeline.lock().set_correction_handler(handler);
+    }
+
     if let Ok(words) = store.list_words() {
         let prompt_words: Vec<String> = words.into_iter().map(|entry| entry.word).collect();
         pipeline
@@ -679,7 +724,7 @@ mod integration_tests {
     fn all_modules_are_wired() {
         assert_eq!(
             registered_modules(),
-            ["audio", "stt", "llm", "inject", "hotkey", "store", "pipeline",]
+            ["audio", "stt", "llm", "inject", "hotkey", "store", "observe", "pipeline",]
         );
     }
 }

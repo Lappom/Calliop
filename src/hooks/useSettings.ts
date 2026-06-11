@@ -4,10 +4,12 @@ import { useCallback, useEffect, useState } from "react";
 
 export interface AppSettings {
   autoEdit: boolean;
+  autoLearn: boolean;
 }
 
 interface SettingsPayload {
   auto_edit: boolean;
+  auto_learn: boolean;
 }
 
 interface LlmModelDownloadProgress {
@@ -18,15 +20,24 @@ interface LlmModelDownloadProgress {
 }
 
 function toPayload(settings: AppSettings): SettingsPayload {
-  return { auto_edit: settings.autoEdit };
+  return {
+    auto_edit: settings.autoEdit,
+    auto_learn: settings.autoLearn,
+  };
 }
 
 function fromPayload(payload: SettingsPayload): AppSettings {
-  return { autoEdit: payload.auto_edit };
+  return {
+    autoEdit: payload.auto_edit,
+    autoLearn: payload.auto_learn,
+  };
 }
 
 export function useSettings() {
-  const [settings, setSettings] = useState<AppSettings>({ autoEdit: false });
+  const [settings, setSettings] = useState<AppSettings>({
+    autoEdit: false,
+    autoLearn: true,
+  });
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -105,9 +116,16 @@ export function useSettings() {
 
   const setAutoEdit = useCallback(
     async (enabled: boolean) => {
-      await saveSettings({ autoEdit: enabled });
+      await saveSettings({ ...settings, autoEdit: enabled });
     },
-    [saveSettings],
+    [saveSettings, settings],
+  );
+
+  const setAutoLearn = useCallback(
+    async (enabled: boolean) => {
+      await saveSettings({ ...settings, autoLearn: enabled });
+    },
+    [saveSettings, settings],
   );
 
   return {
@@ -118,6 +136,7 @@ export function useSettings() {
     llmReady,
     llmProgress,
     setAutoEdit,
+    setAutoLearn,
     saveSettings,
   };
 }

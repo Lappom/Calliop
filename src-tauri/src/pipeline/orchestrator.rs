@@ -11,6 +11,7 @@ use thiserror::Error;
 use crate::audio::{AudioCapture, VadSegmenter};
 use crate::inject::{InjectError, TextInjector};
 use crate::llm::LlamaEngine;
+use crate::observe::CorrectionHandler;
 use crate::stt::{SttError, WhisperEngine};
 
 /// Maximum time to wait for LLM cleanup (Qwen3 1.7B on CPU can take tens of seconds).
@@ -107,6 +108,9 @@ pub struct PipelineOrchestrator {
     failed_segments: Arc<Mutex<Vec<Vec<f32>>>>,
     streaming_stt_ms: Arc<AtomicU64>,
     dictionary_prompt: Arc<RwLock<Option<String>>>,
+    auto_learn: Arc<AtomicBool>,
+    observer_generation: Arc<AtomicU64>,
+    correction_handler: Option<CorrectionHandler>,
 }
 
 impl PipelineOrchestrator {
@@ -124,6 +128,9 @@ impl PipelineOrchestrator {
             failed_segments: Arc::new(Mutex::new(Vec::new())),
             streaming_stt_ms: Arc::new(AtomicU64::new(0)),
             dictionary_prompt: Arc::new(RwLock::new(None)),
+            auto_learn: Arc::new(AtomicBool::new(true)),
+            observer_generation: Arc::new(AtomicU64::new(0)),
+            correction_handler: None,
         })
     }
 
@@ -153,6 +160,18 @@ impl PipelineOrchestrator {
 
     pub fn auto_edit_enabled(&self) -> bool {
         self.auto_edit.load(Ordering::SeqCst)
+    }
+
+    pub fn set_auto_learn(&mut self, enabled: bool) {
+        self.auto_learn.store(enabled, Ordering::SeqCst);
+    }
+
+    pub fn auto_learn_enabled(&self) -> bool {
+        self.auto_learn.load(Ordering::SeqCst)
+    }
+
+    pub fn set_correction_handler(&mut self, handler: CorrectionHandler) {
+        self.correction_handler = Some(handler);
     }
 
     pub fn is_llm_loaded(&self) -> bool {
@@ -191,6 +210,8 @@ impl PipelineOrchestrator {
         if self.whisper.lock().is_none() {
             return Err(PipelineError::ModelNotLoaded);
         }
+
+        self.observer_generation.fetch_add(1, Ordering::SeqCst);
 
         self.segment_transcripts.lock().clear();
         self.failed_segments.lock().clear();
@@ -354,6 +375,7 @@ impl PipelineOrchestrator {
         let inject_start = Instant::now();
         if !text_to_inject.is_empty() {
             self.injector.inject(&text_to_inject)?;
+            self.maybe_spawn_correction_watcher(app, &text_to_inject);
         }
         let inject_ms = inject_start.elapsed().as_millis() as u64;
         let total_ms = stop_instant.elapsed().as_millis() as u64;
@@ -371,6 +393,25 @@ impl PipelineOrchestrator {
         hide_overlay(app);
         self.set_state(app, PipelineState::Idle, Some(text_to_inject));
         Ok(())
+    }
+
+    fn maybe_spawn_correction_watcher(&self, app: &AppHandle, injected_text: &str) {
+        if !self.auto_learn.load(Ordering::SeqCst) {
+            return;
+        }
+
+        let Some(handler) = self.correction_handler.clone() else {
+            return;
+        };
+
+        let watch_generation = self.observer_generation.load(Ordering::SeqCst);
+        crate::observe::spawn_correction_watcher(
+            app.clone(),
+            injected_text.to_string(),
+            Arc::clone(&self.observer_generation),
+            watch_generation,
+            handler,
+        );
     }
 
     pub(crate) fn set_state(

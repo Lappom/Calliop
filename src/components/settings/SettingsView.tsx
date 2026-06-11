@@ -33,6 +33,7 @@ export function SettingsView() {
     errorMessage,
     llmProgress,
     setAutoEdit,
+    setAutoLearn,
   } = useSettings();
   const {
     words,
@@ -118,6 +119,27 @@ export function SettingsView() {
               label="Téléchargement du modèle LLM (Qwen3 1.7B Instruct)"
             />
           )}
+
+          <label className="flex cursor-pointer items-center justify-between gap-4">
+            <span className="text-body-md text-ink">
+              Apprentissage automatique des corrections
+            </span>
+            <input
+              type="checkbox"
+              checked={settings.autoLearn}
+              disabled={!loaded || saving}
+              onChange={(e) => {
+                void setAutoLearn(e.target.checked);
+              }}
+              className="size-4 rounded-sm border border-hairline-strong bg-surface-card accent-accent-blue disabled:opacity-50"
+            />
+          </label>
+
+          <p className="text-caption text-ash">
+            {settings.autoLearn
+              ? "Détecte les corrections dans l'application cible (Notepad, navigateur…) et enrichit le dictionnaire localement."
+              : "Désactivé : seules les corrections manuelles dans Calliop ou l'ajout manuel au dictionnaire sont prises en compte."}
+          </p>
 
           {errorMessage && (
             <p className="text-body-sm text-accent-red">{errorMessage}</p>

@@ -9,7 +9,7 @@ pub use dictionary::{
     extract_correction_words, is_valid_dictionary_word, normalize_word, DictionarySource,
     DictionaryWord,
 };
-pub use settings::{AppSettings, KEY_AUTO_EDIT};
+pub use settings::{AppSettings, KEY_AUTO_EDIT, KEY_AUTO_LEARN};
 
 pub fn module_name() -> &'static str {
     "store"
