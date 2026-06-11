@@ -10,7 +10,11 @@ $env:PATH = "$cmakeBin;$env:PATH"
 
 Push-Location $srcTauri
 try {
-    cargo build --release -p calliop-llm-worker
+    if ($IsWindows -or $env:OS -match "Windows") {
+        cargo build --release -p calliop-llm-worker --features gpu
+    } else {
+        cargo build --release -p calliop-llm-worker
+    }
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
     $triple = & rustc --print host-tuple

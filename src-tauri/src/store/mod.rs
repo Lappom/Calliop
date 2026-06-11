@@ -20,7 +20,10 @@ pub use history::{
     count_words, dictation_wpm, wpm_vs_typing_percent, AppUsageEntry, DictationEntry, Insights,
     LatencySnapshot, NewDictation, DEFAULT_LIST_LIMIT, TYPING_SPEED_BASELINE_WPM,
 };
-pub use settings::{AppSettings, KEY_AUTO_EDIT, KEY_AUTO_LEARN, KEY_STT_LANGUAGE};
+pub use settings::{
+    AppSettings, InferenceBackend, KEY_AUTO_EDIT, KEY_AUTO_LEARN, KEY_HOTKEY,
+    KEY_INFERENCE_BACKEND, KEY_LLM_MODEL, KEY_ONBOARDING_DONE, KEY_STT_LANGUAGE, KEY_WHISPER_MODEL,
+};
 pub use snippets::{
     is_valid_snippet_content, is_valid_trigger, normalize_trigger, Snippet, SnippetImport,
 };

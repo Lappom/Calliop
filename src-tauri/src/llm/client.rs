@@ -5,7 +5,8 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 use calliop_prompt::ToneProfile;
 use serde::{Deserialize, Serialize};
 
-use super::model::model_path;
+use std::path::Path;
+
 use super::LlmError;
 
 #[derive(Debug, Serialize)]
@@ -31,8 +32,7 @@ pub struct WorkerClient {
 }
 
 impl WorkerClient {
-    pub fn spawn() -> Result<Self, LlmError> {
-        let model_path = model_path();
+    pub fn spawn(model_path: &Path, n_gpu_layers: u32) -> Result<Self, LlmError> {
         if !model_path.exists() {
             return Err(LlmError::Worker(format!(
                 "model not found at {}",
@@ -44,7 +44,9 @@ impl WorkerClient {
         let mut child = Command::new(&worker_exe)
             .arg("--serve")
             .arg("--model-path")
-            .arg(&model_path)
+            .arg(model_path)
+            .arg("--ngl")
+            .arg(n_gpu_layers.to_string())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())

@@ -1,10 +1,13 @@
 import { useState } from "react";
+import { useOnboarding } from "../../hooks/useOnboarding";
 import { BadgePill } from "../ui/BadgePill";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { CodeWindow } from "../ui/CodeWindow";
 import { SectionGlow } from "../layout/SectionGlow";
 import { StatusDot } from "../ui/StatusDot";
+import { ProgressBar } from "../ui/ProgressBar";
+import { Kbd } from "../ui/Kbd";
 
 const STEPS = [
   { id: 1, label: "Bienvenue" },
@@ -13,14 +16,41 @@ const STEPS = [
   { id: 4, label: "Terminé" },
 ];
 
-export function OnboardingView() {
+interface OnboardingViewProps {
+  onComplete: () => void;
+}
+
+function formatHotkey(hotkey: string): string {
+  return hotkey.replace(/Space/g, "Espace");
+}
+
+export function OnboardingView({ onComplete }: OnboardingViewProps) {
   const [step, setStep] = useState(1);
+  const {
+    modelProgress,
+    modelReady,
+    audioLevel,
+    micProbing,
+    dictationText,
+    pipelineState,
+    hotkey,
+    startMicProbe,
+    stopMicProbe,
+    runDictationTest,
+    completeOnboarding,
+  } = useOnboarding();
 
   const isFirst = step === 1;
   const isLast = step === STEPS.length;
+  const hotkeyParts = hotkey.split("+").map((p) => p.trim());
+
+  const handleFinish = async () => {
+    await completeOnboarding();
+    onComplete();
+  };
 
   return (
-    <div className="flex flex-col gap-8">
+    <div className="flex min-h-screen flex-col gap-8 bg-canvas p-8">
       <div className="flex flex-wrap gap-2">
         {STEPS.map((s) => (
           <BadgePill key={s.id} active={s.id === step}>
@@ -36,9 +66,20 @@ export function OnboardingView() {
               <h1 className="text-display-serif mb-4 text-4xl text-ink">
                 Bienvenue sur Calliop
               </h1>
-              <p className="text-subtitle text-charcoal">
+              <p className="text-subtitle mb-4 text-charcoal">
                 Dictez dans n&apos;importe quelle application, sans cloud.
               </p>
+              {modelProgress !== null && !modelReady && (
+                <ProgressBar
+                  value={modelProgress}
+                  label="Téléchargement du modèle Whisper…"
+                />
+              )}
+              {modelReady && (
+                <p className="text-body-sm text-accent-green">
+                  Modèle de transcription prêt.
+                </p>
+              )}
             </>
           )}
 
@@ -47,11 +88,31 @@ export function OnboardingView() {
               <h2 className="text-heading-md mb-4 text-ink">
                 Autoriser le microphone
               </h2>
-              <p className="text-body-md text-body">
-                Calliop a besoin d&apos;accéder à votre micro pour capturer la
-                voix. Windows affichera une demande de permission au premier
-                enregistrement.
+              <p className="text-body-md mb-4 text-body">
+                Calliop a besoin d&apos;accéder à votre micro. Cliquez sur
+                « Tester le micro » — Windows affichera une demande de
+                permission au premier enregistrement.
               </p>
+              <div className="mb-4 h-2 overflow-hidden rounded-full bg-surface-elevated">
+                <div
+                  className="h-full bg-accent-blue transition-all duration-75"
+                  style={{
+                    width: `${Math.min(100, Math.round(audioLevel * 100))}%`,
+                  }}
+                />
+              </div>
+              <Button
+                variant="primary"
+                onClick={() => {
+                  if (micProbing) {
+                    void stopMicProbe();
+                  } else {
+                    void startMicProbe();
+                  }
+                }}
+              >
+                {micProbing ? "Arrêter le test" : "Tester le micro"}
+              </Button>
             </>
           )}
 
@@ -61,11 +122,22 @@ export function OnboardingView() {
                 Testez une dictée
               </h2>
               <p className="text-body-sm mb-4 text-charcoal">
-                Dites « Bonjour, ceci est un test » dans le champ ci-dessous.
+                Cliquez sur « Démarrer la dictée », puis dites « Bonjour, ceci
+                est un test ».
               </p>
               <CodeWindow showTrafficLights={false}>
-                Bonjour, ceci est un test
+                {dictationText || "En attente de votre voix…"}
               </CodeWindow>
+              <div className="mt-4 flex items-center gap-3">
+                <Button variant="primary" onClick={() => void runDictationTest()}>
+                  {pipelineState === "recording"
+                    ? "Arrêter la dictée"
+                    : "Démarrer la dictée"}
+                </Button>
+                <span className="text-caption text-ash">
+                  État : {pipelineState}
+                </span>
+              </div>
             </>
           )}
 
@@ -78,7 +150,14 @@ export function OnboardingView() {
                 </h2>
               </div>
               <p className="text-body-md text-body">
-                Utilisez Alt + Espace partout où vous pouvez taper du texte.
+                Utilisez{" "}
+                {hotkeyParts.map((part, index) => (
+                  <span key={`${part}-${index}`}>
+                    {index > 0 && " + "}
+                    <Kbd>{part === "Space" ? "Espace" : part}</Kbd>
+                  </span>
+                ))}{" "}
+                ({formatHotkey(hotkey)}) partout où vous pouvez taper du texte.
               </p>
             </>
           )}
@@ -96,13 +175,14 @@ export function OnboardingView() {
         {!isLast ? (
           <Button
             variant="primary"
+            disabled={step === 1 && !modelReady}
             onClick={() => setStep((s) => Math.min(STEPS.length, s + 1))}
           >
             Continuer
           </Button>
         ) : (
-          <Button variant="primary" onClick={() => setStep(1)}>
-            Recommencer
+          <Button variant="primary" onClick={() => void handleFinish()}>
+            Commencer
           </Button>
         )}
       </div>

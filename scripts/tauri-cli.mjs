@@ -22,17 +22,25 @@ function prepareLlmSidecar() {
   return spawnSync("bash", [prepScript], { stdio: "inherit", cwd: repoRoot });
 }
 
+function gpuFeatureArgs() {
+  return process.platform === "win32" ? ["--features", "gpu"] : [];
+}
+
 function runDevWithSidecar(extraArgs) {
   const prep = prepareLlmSidecar();
   if ((prep.status ?? 1) !== 0) {
     return prep;
   }
 
-  return spawnSync("pnpm", ["exec", "tauri", "dev", ...extraArgs], {
-    stdio: "inherit",
-    cwd: repoRoot,
-    shell: true,
-  });
+  return spawnSync(
+    "pnpm",
+    ["exec", "tauri", "dev", ...gpuFeatureArgs(), ...extraArgs],
+    {
+      stdio: "inherit",
+      cwd: repoRoot,
+      shell: true,
+    },
+  );
 }
 
 if (args[0] === "dev") {
@@ -47,7 +55,11 @@ if (args[0] === "build") {
   }
 }
 
-const result = spawnSync("pnpm", ["exec", "tauri", ...args], {
+const tauriArgs =
+  args[0] === "build"
+    ? ["build", ...gpuFeatureArgs(), ...args.slice(1)]
+    : args;
+const result = spawnSync("pnpm", ["exec", "tauri", ...tauriArgs], {
   stdio: "inherit",
   cwd: repoRoot,
   shell: true,
