@@ -88,7 +88,9 @@ pub fn build_cleanup_user_message(raw: &str) -> Result<String, PromptError> {
     if raw.is_empty() {
         return Err(PromptError::EmptyInput);
     }
-    Ok(format!("/no_think\nTranscription brute à nettoyer :\n{raw}"))
+    Ok(format!(
+        "/no_think\nTranscription brute à nettoyer :\n{raw}"
+    ))
 }
 
 pub fn validate_cleanup_output(raw: &str, cleaned: &str) -> Result<String, PromptError> {
@@ -160,10 +162,7 @@ const ORAL_WRAP_COMMANDS: &[(&str, &str, &str)] = &[
 
 fn interpret_oral_wrap_commands(text: &str) -> String {
     let mut result = text.to_string();
-    loop {
-        let Some((phrase, open, close)) = find_next_wrap_command(&result) else {
-            break;
-        };
+    while let Some((phrase, open, close)) = find_next_wrap_command(&result) {
         let Some((before, after)) = split_first_phrase_ci(&result, phrase) else {
             break;
         };
@@ -208,7 +207,11 @@ fn find_next_wrap_command(text: &str) -> Option<(&'static str, &'static str, &'s
         .iter()
         .copied()
         .filter_map(|entry| find_phrase_range_ci(text, entry.0).map(|_| entry))
-        .min_by_key(|(phrase, _, _)| find_phrase_range_ci(text, phrase).map(|(start, _)| start).unwrap_or(usize::MAX))
+        .min_by_key(|(phrase, _, _)| {
+            find_phrase_range_ci(text, phrase)
+                .map(|(start, _)| start)
+                .unwrap_or(usize::MAX)
+        })
 }
 
 fn split_first_phrase_ci(text: &str, phrase: &str) -> Option<(String, String)> {
@@ -367,14 +370,11 @@ fn normalize_punctuation_spacing(text: &str) -> String {
 
     while index < chars.len() {
         let ch = chars[index];
-        if matches!(ch, ',' | ';' | ':' | '.' | '!' | '?' | '…')
-            && out.ends_with(' ')
-        {
+        if matches!(ch, ',' | ';' | ':' | '.' | '!' | '?' | '…') && out.ends_with(' ') {
             out.pop();
         }
 
-        if matches!(ch, ')' | '»' | '!' | '?' | '.' | ',' | ';' | ':' | '…')
-            && out.ends_with(' ')
+        if matches!(ch, ')' | '»' | '!' | '?' | '.' | ',' | ';' | ':' | '…') && out.ends_with(' ')
         {
             out.pop();
         }
@@ -389,7 +389,10 @@ fn normalize_punctuation_spacing(text: &str) -> String {
             && index + 1 < chars.len()
             && chars[index + 1] != ' '
             && chars[index + 1] != '\n'
-            && !matches!(chars[index + 1], ')' | '»' | '!' | '?' | '.' | ',' | ';' | ':' | '…')
+            && !matches!(
+                chars[index + 1],
+                ')' | '»' | '!' | '?' | '.' | ',' | ';' | ':' | '…'
+            )
         {
             out.push(' ');
         }
@@ -450,15 +453,15 @@ mod tests {
 
     #[test]
     fn converts_spoken_comma_and_question_mark() {
-        let out = interpret_oral_punctuation(
-            "Bonjour virgule comment allez-vous point d'interrogation",
-        );
+        let out =
+            interpret_oral_punctuation("Bonjour virgule comment allez-vous point d'interrogation");
         assert_eq!(out, "Bonjour, comment allez-vous?");
     }
 
     #[test]
     fn converts_spoken_exclamation_and_semicolon() {
-        let out = interpret_oral_punctuation("Attention point virgule c'est urgent point d'exclamation");
+        let out =
+            interpret_oral_punctuation("Attention point virgule c'est urgent point d'exclamation");
         assert_eq!(out, "Attention; c'est urgent!");
     }
 

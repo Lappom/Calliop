@@ -26,6 +26,10 @@ pub struct Store {
 }
 
 impl Store {
+    pub(crate) fn connection(&self) -> &Mutex<Connection> {
+        &self.conn
+    }
+
     pub fn open() -> Result<Self, StoreError> {
         let path = db_path();
         if let Some(parent) = path.parent() {
@@ -33,13 +37,7 @@ impl Store {
         }
 
         let conn = Connection::open(path)?;
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS settings (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL
-            )",
-            [],
-        )?;
+        init_schema(&conn)?;
 
         Ok(Self {
             conn: Mutex::new(conn),
@@ -79,6 +77,26 @@ impl Store {
         )?;
         Ok(())
     }
+}
+
+pub(crate) fn init_schema(conn: &Connection) -> Result<(), StoreError> {
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )",
+        [],
+    )?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS dictionary (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            word TEXT NOT NULL UNIQUE COLLATE NOCASE,
+            source TEXT NOT NULL DEFAULT 'manual',
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )",
+        [],
+    )?;
+    Ok(())
 }
 
 fn parse_bool(value: &str) -> Option<bool> {

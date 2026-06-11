@@ -24,7 +24,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let engine = WhisperEngine::new(&model_path)?;
-    let text = engine.transcribe(&samples)?;
+    let text = engine.transcribe(&samples, None)?;
     println!("Transcription: {text}");
     Ok(())
 }

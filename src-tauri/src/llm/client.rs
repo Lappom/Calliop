@@ -176,10 +176,7 @@ fn resolve_worker_exe() -> Result<PathBuf, LlmError> {
     }
 
     for basename in [worker_exe_basename(), worker_exe_legacy_basename()] {
-        let built = manifest_dir
-            .join("target")
-            .join(profile)
-            .join(&basename);
+        let built = manifest_dir.join("target").join(profile).join(&basename);
         if built.exists() {
             return Ok(built);
         }

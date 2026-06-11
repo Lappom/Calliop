@@ -2,6 +2,7 @@ pub mod audio;
 pub mod hotkey;
 pub mod inject;
 pub mod llm;
+pub mod observe;
 pub mod pipeline;
 pub mod store;
 pub mod stt;
@@ -15,7 +16,11 @@ use pipeline::{
     spawn_start, spawn_stop, spawn_toggle, PipelineOrchestrator, PipelineState, PipelineStateEvent,
 };
 use serde::{Deserialize, Serialize};
-use store::{AppSettings, Store};
+use store::{
+    extract_correction_words, is_valid_dictionary_word, normalize_word, AppSettings,
+    DictionarySource, DictionaryWord, Store,
+};
+use stt::build_initial_prompt;
 use tauri::{
     menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -23,9 +28,10 @@ use tauri::{
 };
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+use tauri_plugin_notification::NotificationExt;
 
 /// Returns registered core module names (Phase 0 wiring check).
-pub fn registered_modules() -> [&'static str; 7] {
+pub fn registered_modules() -> [&'static str; 8] {
     [
         audio::module_name(),
         stt::module_name(),
@@ -33,6 +39,7 @@ pub fn registered_modules() -> [&'static str; 7] {
         inject::module_name(),
         hotkey::module_name(),
         store::module_name(),
+        observe::module_name(),
         pipeline::module_name(),
     ]
 }
@@ -86,6 +93,105 @@ pub(crate) fn spawn_llm_recovery_if_needed(app: AppHandle) {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SettingsPayload {
     auto_edit: bool,
+    auto_learn: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct DictionaryWordPayload {
+    id: i64,
+    word: String,
+    source: String,
+    created_at: String,
+}
+
+fn dictionary_word_to_payload(word: DictionaryWord) -> DictionaryWordPayload {
+    DictionaryWordPayload {
+        id: word.id,
+        word: word.word,
+        source: match word.source {
+            DictionarySource::Manual => "manual".into(),
+            DictionarySource::Learned => "learned".into(),
+        },
+        created_at: word.created_at,
+    }
+}
+
+fn refresh_dictionary_prompt(
+    store: &Store,
+    pipeline: &Arc<Mutex<PipelineOrchestrator>>,
+) -> Result<(), String> {
+    let words = store.list_words().map_err(|e| e.to_string())?;
+    let prompt_words: Vec<String> = words.into_iter().map(|entry| entry.word).collect();
+    let prompt = build_initial_prompt(&prompt_words);
+    pipeline.lock().set_dictionary_prompt(prompt);
+    Ok(())
+}
+
+fn refresh_dictionary_prompt_state(state: &AppState) -> Result<(), String> {
+    refresh_dictionary_prompt(&state.store, &state.pipeline)
+}
+
+pub(crate) fn apply_learned_correction(
+    app: &AppHandle,
+    store: &Store,
+    pipeline: &Arc<Mutex<PipelineOrchestrator>>,
+    original: &str,
+    corrected: &str,
+) -> Result<Vec<String>, String> {
+    let candidates = extract_correction_words(original, corrected);
+    if candidates.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut added = Vec::new();
+    for word in candidates {
+        let inserted = store
+            .add_word(&word, DictionarySource::Learned)
+            .map_err(|e| e.to_string())?;
+        if inserted {
+            added.push(word);
+        }
+    }
+
+    if !added.is_empty() {
+        if let Err(err) = refresh_dictionary_prompt(store, pipeline) {
+            for word in &added {
+                let _ = store.remove_word_by_normalized(word);
+            }
+            return Err(err);
+        }
+        send_dictionary_notification(app, &added);
+        emit_dictionary_updated(app);
+    }
+
+    Ok(added)
+}
+
+fn emit_dictionary_updated(app: &AppHandle) {
+    let _ = app.emit("dictionary-updated", ());
+}
+
+fn send_dictionary_notification(app: &AppHandle, words: &[String]) {
+    if words.is_empty() {
+        return;
+    }
+
+    let body = if words.len() == 1 {
+        format!("Mot ajouté au dictionnaire : {}", words[0])
+    } else {
+        format!(
+            "{} mots ajoutés au dictionnaire : {}",
+            words.len(),
+            words.join(", ")
+        )
+    };
+
+    let _ = app
+        .notification()
+        .builder()
+        .title("Calliop")
+        .body(body)
+        .show();
 }
 
 const MENU_OPEN: &str = "open";
@@ -109,6 +215,7 @@ fn get_settings(state: State<'_, AppState>) -> Result<SettingsPayload, String> {
     let settings = state.store.load_settings().map_err(|e| e.to_string())?;
     Ok(SettingsPayload {
         auto_edit: settings.auto_edit,
+        auto_learn: settings.auto_learn,
     })
 }
 
@@ -120,10 +227,13 @@ async fn set_settings(
 ) -> Result<(), String> {
     let previous = state.store.load_settings().map_err(|e| e.to_string())?;
 
+    state.pipeline.lock().set_auto_learn(settings.auto_learn);
+
     if settings.auto_edit {
         state.pipeline.lock().set_auto_edit(true);
 
         if let Err(err) = ensure_llm_model(app, state.clone()).await {
+            state.pipeline.lock().set_auto_learn(previous.auto_learn);
             state.pipeline.lock().set_auto_edit(previous.auto_edit);
             shutdown_llm_engine(&state);
             return Err(err);
@@ -133,20 +243,27 @@ async fn set_settings(
             .store
             .save_settings(&AppSettings {
                 auto_edit: true,
+                auto_learn: settings.auto_learn,
             })
             .map_err(|e| e.to_string())
         {
+            state.pipeline.lock().set_auto_learn(previous.auto_learn);
             state.pipeline.lock().set_auto_edit(previous.auto_edit);
             shutdown_llm_engine(&state);
             return Err(err);
         }
     } else {
-        state
+        if let Err(err) = state
             .store
             .save_settings(&AppSettings {
                 auto_edit: false,
+                auto_learn: settings.auto_learn,
             })
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())
+        {
+            state.pipeline.lock().set_auto_learn(previous.auto_learn);
+            return Err(err);
+        }
         state.pipeline.lock().set_auto_edit(false);
         shutdown_llm_engine(&state);
     }
@@ -219,6 +336,86 @@ async fn ensure_llm_model(app: AppHandle, state: State<'_, AppState>) -> Result<
     state.llm_ready.store(true, Ordering::SeqCst);
     let _ = app.emit("llm-ready", ());
     Ok(())
+}
+
+#[tauri::command]
+fn list_dictionary_words(state: State<'_, AppState>) -> Result<Vec<DictionaryWordPayload>, String> {
+    state
+        .store
+        .list_words()
+        .map(|words| words.into_iter().map(dictionary_word_to_payload).collect())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn add_dictionary_word(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    word: String,
+) -> Result<bool, String> {
+    let normalized = normalize_word(&word);
+    if normalized.is_empty() {
+        return Err("Le mot ne peut pas être vide.".into());
+    }
+    if !is_valid_dictionary_word(&normalized) {
+        return Err(
+            "Le mot doit contenir au moins 2 caractères et ne peut pas être uniquement numérique."
+                .into(),
+        );
+    }
+
+    let inserted = state
+        .store
+        .add_word(&normalized, DictionarySource::Manual)
+        .map_err(|e| e.to_string())?;
+
+    if inserted {
+        if let Err(err) = refresh_dictionary_prompt_state(&state) {
+            let _ = state.store.remove_word_by_normalized(&normalized);
+            return Err(err);
+        }
+        emit_dictionary_updated(&app);
+    }
+
+    Ok(inserted)
+}
+
+#[tauri::command]
+fn remove_dictionary_word(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: i64,
+) -> Result<(), String> {
+    let entry = state
+        .store
+        .get_word_by_id(id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("Mot introuvable (id {id})."))?;
+
+    let removed = state.store.remove_word(id).map_err(|e| e.to_string())?;
+    if !removed {
+        return Err(format!("Mot introuvable (id {id})."));
+    }
+
+    if let Err(err) = refresh_dictionary_prompt_state(&state) {
+        let _ = state
+            .store
+            .add_word(&entry.word, entry.source);
+        return Err(err);
+    }
+
+    emit_dictionary_updated(&app);
+    Ok(())
+}
+
+#[tauri::command]
+fn learn_from_correction(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    original: String,
+    corrected: String,
+) -> Result<Vec<String>, String> {
+    apply_learned_correction(&app, &state.store, &state.pipeline, &original, &corrected)
 }
 
 #[tauri::command]
@@ -426,6 +623,30 @@ pub fn run() {
         .load_settings()
         .expect("failed to load initial settings");
     pipeline.lock().set_auto_edit(initial_settings.auto_edit);
+    pipeline.lock().set_auto_learn(initial_settings.auto_learn);
+
+    {
+        let store = Arc::clone(&store);
+        let pipeline_arc = Arc::clone(&pipeline);
+        let handler = Arc::new(move |app: &AppHandle, original: &str, corrected: &str| {
+            if !pipeline_arc.lock().auto_learn_enabled() {
+                return;
+            }
+            if let Err(err) =
+                apply_learned_correction(app, &store, &pipeline_arc, original, corrected)
+            {
+                eprintln!("auto-learn correction failed: {err}");
+            }
+        });
+        pipeline.lock().set_correction_handler(handler);
+    }
+
+    if let Ok(words) = store.list_words() {
+        let prompt_words: Vec<String> = words.into_iter().map(|entry| entry.word).collect();
+        pipeline
+            .lock()
+            .set_dictionary_prompt(build_initial_prompt(&prompt_words));
+    }
 
     let whisper_engine = Arc::new(Mutex::new(None));
     let llm_engine = Arc::new(Mutex::new(None));
@@ -433,6 +654,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--minimized"]),
@@ -512,7 +734,11 @@ pub fn run() {
             get_settings,
             set_settings,
             is_autostart_enabled,
-            set_autostart_enabled
+            set_autostart_enabled,
+            list_dictionary_words,
+            add_dictionary_word,
+            remove_dictionary_word,
+            learn_from_correction
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
@@ -531,7 +757,7 @@ mod integration_tests {
     fn all_modules_are_wired() {
         assert_eq!(
             registered_modules(),
-            ["audio", "stt", "llm", "inject", "hotkey", "store", "pipeline",]
+            ["audio", "stt", "llm", "inject", "hotkey", "store", "observe", "pipeline",]
         );
     }
 }

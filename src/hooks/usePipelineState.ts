@@ -44,6 +44,7 @@ export const STATE_LABELS: Record<PipelineState, string> = {
 export function usePipelineState() {
   const [pipelineState, setPipelineState] = useState<PipelineState>("idle");
   const [lastTranscript, setLastTranscript] = useState<string | null>(null);
+  const [transcriptRevision, setTranscriptRevision] = useState(0);
   const [partialTranscript, setPartialTranscript] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [modelReady, setModelReady] = useState(false);
@@ -91,6 +92,7 @@ export function usePipelineState() {
         }
         if (event.payload.message && event.payload.state === "idle") {
           setLastTranscript(event.payload.message);
+          setTranscriptRevision((revision) => revision + 1);
           setPartialTranscript("");
         }
       }),
@@ -129,6 +131,7 @@ export function usePipelineState() {
   return {
     pipelineState,
     lastTranscript,
+    transcriptRevision,
     partialTranscript,
     errorMessage,
     modelReady,

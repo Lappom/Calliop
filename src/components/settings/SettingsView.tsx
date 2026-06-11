@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useDictionary } from "../../hooks/useDictionary";
 import { useSettings } from "../../hooks/useSettings";
 import { BadgePill } from "../ui/BadgePill";
 import { Button } from "../ui/Button";
@@ -7,10 +8,16 @@ import { Kbd } from "../ui/Kbd";
 import { ProgressBar } from "../ui/ProgressBar";
 import { TextInput } from "../ui/TextInput";
 
-type SettingsTab = "general" | "models" | "shortcuts" | "advanced";
+type SettingsTab =
+  | "general"
+  | "dictionary"
+  | "models"
+  | "shortcuts"
+  | "advanced";
 
 const tabs: { id: SettingsTab; label: string }[] = [
   { id: "general", label: "Général" },
+  { id: "dictionary", label: "Dictionnaire" },
   { id: "models", label: "Modèles" },
   { id: "shortcuts", label: "Raccourcis" },
   { id: "advanced", label: "Avancé" },
@@ -18,6 +25,7 @@ const tabs: { id: SettingsTab; label: string }[] = [
 
 export function SettingsView() {
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
+  const [newWord, setNewWord] = useState("");
   const {
     settings,
     loaded,
@@ -25,7 +33,16 @@ export function SettingsView() {
     errorMessage,
     llmProgress,
     setAutoEdit,
+    setAutoLearn,
   } = useSettings();
+  const {
+    words,
+    loaded: dictionaryLoaded,
+    busy: dictionaryBusy,
+    errorMessage: dictionaryError,
+    addWord,
+    removeWord,
+  } = useDictionary();
 
   return (
     <div className="flex flex-col gap-8">
@@ -103,8 +120,114 @@ export function SettingsView() {
             />
           )}
 
+          <label className="flex cursor-pointer items-center justify-between gap-4">
+            <span className="text-body-md text-ink">
+              Apprentissage automatique des corrections
+            </span>
+            <input
+              type="checkbox"
+              checked={settings.autoLearn}
+              disabled={!loaded || saving}
+              onChange={(e) => {
+                void setAutoLearn(e.target.checked);
+              }}
+              className="size-4 rounded-sm border border-hairline-strong bg-surface-card accent-accent-blue disabled:opacity-50"
+            />
+          </label>
+
+          <p className="text-caption text-ash">
+            {settings.autoLearn
+              ? "Détecte les corrections dans l'application cible (Notepad, navigateur…) et enrichit le dictionnaire localement."
+              : "Désactivé : seules les corrections manuelles dans Calliop ou l'ajout manuel au dictionnaire sont prises en compte."}
+          </p>
+
           {errorMessage && (
             <p className="text-body-sm text-accent-red">{errorMessage}</p>
+          )}
+        </Card>
+      )}
+
+      {activeTab === "dictionary" && (
+        <Card variant="bordered" className="space-y-6 p-6">
+          <div>
+            <p className="text-body-md mb-1 text-ink">Dictionnaire personnel</p>
+            <p className="text-caption text-ash">
+              Mots et noms propres injectés dans le prompt Whisper pour améliorer
+              la transcription.
+            </p>
+          </div>
+
+          <form
+            className="flex flex-wrap items-end gap-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void addWord(newWord).then((inserted) => {
+                if (inserted) {
+                  setNewWord("");
+                }
+              });
+            }}
+          >
+            <TextInput
+              label="Ajouter un mot"
+              value={newWord}
+              onChange={(event) => setNewWord(event.target.value)}
+              placeholder="Ex. Calliop, Kubernetes…"
+              disabled={!dictionaryLoaded || dictionaryBusy}
+              className="min-w-[220px] flex-1"
+            />
+            <Button
+              type="submit"
+              variant="primary"
+              disabled={!dictionaryLoaded || dictionaryBusy || !newWord.trim()}
+            >
+              Ajouter
+            </Button>
+          </form>
+
+          {!dictionaryLoaded && (
+            <p className="text-body-sm text-charcoal">Chargement…</p>
+          )}
+
+          {dictionaryLoaded && words.length === 0 && (
+            <p className="text-body-sm text-charcoal">
+              Aucun mot enregistré. Ajoutez des noms propres ou corrigez une
+              dictée depuis l&apos;accueil.
+            </p>
+          )}
+
+          {words.length > 0 && (
+            <ul className="divide-y divide-divider-soft rounded-md border border-hairline">
+              {words.map((entry) => (
+                <li
+                  key={entry.id}
+                  className="flex items-center justify-between gap-4 px-4 py-3"
+                >
+                  <div className="flex min-w-0 items-center gap-3">
+                    <span className="truncate text-body-md text-ink">
+                      {entry.word}
+                    </span>
+                    <BadgePill>
+                      {entry.source === "manual" ? "Manuel" : "Appris"}
+                    </BadgePill>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    disabled={dictionaryBusy}
+                    onClick={() => {
+                      void removeWord(entry.id);
+                    }}
+                  >
+                    Supprimer
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {dictionaryError && (
+            <p className="text-body-sm text-accent-red">{dictionaryError}</p>
           )}
         </Card>
       )}
