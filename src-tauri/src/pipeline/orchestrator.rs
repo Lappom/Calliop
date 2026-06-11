@@ -18,7 +18,17 @@ use crate::observe::CorrectionHandler;
 use crate::store::{AppContextRule, NewDictation, Snippet, Store};
 use crate::stt::{SttError, SttLanguage, WhisperEngine};
 
-use super::snippets::{apply_snippets, finalize_llm_with_snippets, shield_snippet_triggers};
+use super::snippets::{
+    apply_snippets, finalize_llm_with_snippets, shield_snippet_triggers, unshield_snippets,
+};
+
+fn prepare_display_transcript(raw: &str, snippets: &[Snippet]) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    post_process_transcript(&apply_snippets(trimmed, snippets))
+}
 
 /// Maximum time to wait for LLM cleanup (Qwen3 1.7B on CPU can take tens of seconds).
 const LLM_CLEANUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
@@ -347,6 +357,7 @@ impl PipelineOrchestrator {
         let session_stt_language = Arc::clone(&self.session_stt_language);
         let session_detected_language = Arc::clone(&self.session_detected_language);
         let pending_detection = Arc::clone(&self.pending_detection);
+        let snippets = Arc::clone(&self.snippets);
         let worker = thread::spawn(move || {
             streaming_worker(
                 app_worker,
@@ -361,6 +372,7 @@ impl PipelineOrchestrator {
                     session_stt_language,
                     session_detected_language,
                     pending_detection,
+                    snippets,
                 },
             );
         });
@@ -451,33 +463,30 @@ impl PipelineOrchestrator {
         }
 
         let stt_ms = streaming_stt_ms + fallback_stt_ms;
-        let full_text = {
-            let raw = transcripts.join(" ").trim().to_string();
-            if raw.is_empty() {
-                raw
-            } else {
-                post_process_transcript(&raw)
-            }
-        };
+        let raw = transcripts.join(" ").trim().to_string();
 
         // After STT the user may return to the target app; capture before LLM wait/inject.
         let (active_tone, active_window) = self.resolve_active_context();
 
         let auto_edit = self.auto_edit.load(Ordering::SeqCst);
-        if !full_text.is_empty() && auto_edit && self.llm.lock().is_none() {
+        if !raw.is_empty() && auto_edit && self.llm.lock().is_none() {
             wait_for_llm_engine(&self.llm, LLM_INJECT_WAIT);
         }
 
+        let snippets = self.snippets.read().clone();
+        let snippet_fallback = prepare_display_transcript(&raw, &snippets);
+
         let (text_to_inject, llm_ms, llm_invalidated) =
-            if !full_text.is_empty() && auto_edit && self.llm.lock().is_some() {
-                let snippets_at_shield = self.snippets.read().clone();
-                let (shielded_text, snippet_shields) =
-                    shield_snippet_triggers(&full_text, &snippets_at_shield);
+            if !raw.is_empty() && auto_edit && self.llm.lock().is_some() {
+                let snippets_at_shield = snippets.clone();
+                let (shielded_raw, snippet_shields) =
+                    shield_snippet_triggers(&raw, &snippets_at_shield);
+                let full_text = post_process_transcript(shielded_raw.trim());
                 let job = start_llm_cleanup(
                     Arc::clone(&self.llm),
                     Arc::clone(&self.llm_ready),
                     Arc::clone(&self.auto_edit),
-                    &shielded_text,
+                    &full_text,
                     active_tone,
                 );
                 match job.wait_for_inject(LLM_INJECT_WAIT) {
@@ -492,7 +501,7 @@ impl PipelineOrchestrator {
                                 finalize_llm_with_snippets(
                                     &text,
                                     &snippet_shields,
-                                    &full_text,
+                                    &snippet_fallback,
                                     &snippets,
                                 )
                             } else {
@@ -500,23 +509,28 @@ impl PipelineOrchestrator {
                                 if from_cleaned != text {
                                     from_cleaned
                                 } else {
-                                    apply_snippets(&full_text, &snippets)
+                                    snippet_fallback.clone()
                                 }
                             }
                         } else {
-                            apply_snippets(&full_text, &snippets)
+                            snippet_fallback.clone()
                         };
                         (text, llm_ms, invalidated)
                     }
                     LlmCleanupWait::Pending(job) => {
                         job.finalize_in_background(app.clone());
-                        let snippets = self.snippets.read().clone();
-                        (apply_snippets(&full_text, &snippets), 0, false)
+                        let text = if snippet_shields.is_empty() {
+                            full_text
+                        } else {
+                            unshield_snippets(&full_text, &snippet_shields)
+                        };
+                        (text, 0, false)
                     }
                 }
+            } else if raw.is_empty() {
+                (String::new(), 0, false)
             } else {
-                let snippets = self.snippets.read().clone();
-                (apply_snippets(&full_text, &snippets), 0, false)
+                (snippet_fallback, 0, false)
             };
 
         if llm_invalidated && self.auto_edit.load(Ordering::SeqCst) {
@@ -851,6 +865,7 @@ struct StreamingSttContext {
     session_stt_language: Arc<RwLock<SttLanguage>>,
     session_detected_language: Arc<RwLock<Option<SttLanguage>>>,
     pending_detection: Arc<Mutex<Option<SttLanguage>>>,
+    snippets: Arc<RwLock<Vec<Snippet>>>,
 }
 
 fn streaming_worker(
@@ -940,11 +955,13 @@ fn transcribe_segment(
     }
 
     stt.transcripts.lock().push(text.text.clone());
+    let raw = stt.transcripts.lock().join(" ");
+    let display = prepare_display_transcript(&raw, &stt.snippets.read());
 
     let _ = app.emit(
         "partial-transcript",
         PartialTranscriptEvent {
-            text: text.text,
+            text: display,
             segment_index,
         },
     );

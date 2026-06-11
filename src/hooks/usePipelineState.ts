@@ -99,12 +99,7 @@ export function usePipelineState() {
         setErrorMessage(event.payload);
       }),
       listen<PartialTranscriptPayload>("partial-transcript", (event) => {
-        setPartialTranscript((current) => {
-          const next = current
-            ? `${current} ${event.payload.text}`
-            : event.payload.text;
-          return next.trim();
-        });
+        setPartialTranscript(event.payload.text.trim());
       }),
       listen("partial-transcript-reset", () => {
         setPartialTranscript("");

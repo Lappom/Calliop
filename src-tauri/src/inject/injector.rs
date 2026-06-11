@@ -1,11 +1,15 @@
+use std::sync::LazyLock;
 use std::thread;
 use std::time::Duration;
 
 use arboard::Clipboard;
+use parking_lot::Mutex;
 use enigo::{Direction, Enigo, Key, Keyboard, Settings};
 use thiserror::Error;
 
 const PASTE_DELAY_MS: u64 = 150;
+
+static INJECT_MUTEX: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
 #[derive(Debug, Error)]
 pub enum InjectError {
@@ -47,12 +51,14 @@ impl TextInjector {
     }
 
     pub fn save_clipboard() -> Result<SavedClipboard, InjectError> {
+        let _guard = INJECT_MUTEX.lock();
         let mut clipboard = Self::open_clipboard()?;
         let text = clipboard.get_text().ok();
         Ok(SavedClipboard::from_text(text))
     }
 
     pub fn copy_to_clipboard(text: &str) -> Result<(), InjectError> {
+        let _guard = INJECT_MUTEX.lock();
         let mut clipboard = Self::open_clipboard()?;
         clipboard
             .set_text(text)
@@ -60,11 +66,27 @@ impl TextInjector {
     }
 
     pub fn inject(&self, text: &str) -> Result<(), InjectError> {
-        let saved = Self::save_clipboard()?;
-        self.inject_with_saved(text, &saved)
+        let _guard = INJECT_MUTEX.lock();
+        let saved = Self::save_clipboard_inner()?;
+        self.inject_with_saved_inner(text, &saved)
     }
 
     pub fn inject_with_saved(&self, text: &str, saved: &SavedClipboard) -> Result<(), InjectError> {
+        let _guard = INJECT_MUTEX.lock();
+        self.inject_with_saved_inner(text, saved)
+    }
+
+    fn save_clipboard_inner() -> Result<SavedClipboard, InjectError> {
+        let mut clipboard = Self::open_clipboard()?;
+        let text = clipboard.get_text().ok();
+        Ok(SavedClipboard::from_text(text))
+    }
+
+    fn inject_with_saved_inner(
+        &self,
+        text: &str,
+        saved: &SavedClipboard,
+    ) -> Result<(), InjectError> {
         {
             let mut clipboard = Self::open_clipboard()?;
             clipboard

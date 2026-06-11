@@ -239,7 +239,7 @@ const STT_ORAL_MISHEARING_FIXES: &[(&str, &str)] = &[
     ("signe egale", "signe égal"),
 ];
 
-/// Replaces « a base » with « arobase » unless it starts the idiom « a base de ».
+/// Replaces « a base » with « arobase » only in email/path dictation context.
 fn fix_misheard_arobase_phrase(text: &str, misheard: &str, replacement: &str) -> String {
     let misheard_chars: Vec<char> = misheard.chars().collect();
     let misheard_lower: Vec<char> = misheard.to_lowercase().chars().collect();
@@ -256,12 +256,10 @@ fn fix_misheard_arobase_phrase(text: &str, misheard: &str, replacement: &str) ->
             ))
         {
             let after = index + misheard_chars.len();
-            let rest: String = text_chars[after..].iter().collect();
-            let rest_trimmed = rest.trim_start();
-            if rest_trimmed.to_lowercase().starts_with("de ") {
-                out.push_str(&text_chars[index..after].iter().collect::<String>());
-            } else {
+            if is_arobase_mishearing_context(&text_chars, index, after) {
                 out.push_str(replacement);
+            } else {
+                out.push_str(&text_chars[index..after].iter().collect::<String>());
             }
             index = after;
         } else {
@@ -273,12 +271,41 @@ fn fix_misheard_arobase_phrase(text: &str, misheard: &str, replacement: &str) ->
     out
 }
 
+fn is_arobase_mishearing_context(text_chars: &[char], phrase_start: usize, phrase_end: usize) -> bool {
+    if !has_identifier_token_before(text_chars, phrase_start) {
+        return false;
+    }
+    let rest: String = text_chars[phrase_end..].iter().collect();
+    let rest_lower = rest.trim_start().to_lowercase();
+    if rest_lower.starts_with("de ") {
+        return false;
+    }
+    rest_lower.contains(" point ")
+        || rest_lower.contains(" slash ")
+        || rest_lower.contains(" barre oblique ")
+}
+
+fn has_identifier_token_before(text_chars: &[char], index: usize) -> bool {
+    let mut cursor = index;
+    while cursor > 0 && text_chars[cursor - 1].is_whitespace() {
+        cursor -= 1;
+    }
+    if cursor == 0 {
+        return false;
+    }
+    while cursor > 0 && is_identifier_char(text_chars[cursor - 1]) {
+        cursor -= 1;
+    }
+    cursor < index
+}
+
 /// Converts spoken French punctuation commands still present in text (e.g. « virgule » → `,`).
 pub fn interpret_oral_punctuation(text: &str) -> String {
     let mut result = interpret_oral_wrap_commands(text);
     for (phrase, replacement) in ORAL_PUNCTUATION_PHRASES {
         result = replace_phrase_ci(&result, phrase, replacement);
     }
+    result = replace_spoken_at(&result);
     result = replace_spoken_point(&result);
     result = normalize_punctuation_spacing(&result);
     result = collapse_spaced_dots_in_identifiers(&result);
@@ -409,8 +436,6 @@ const ORAL_PUNCTUATION_PHRASES: &[(&str, &str)] = &[
     ("signe plus", "+"),
     ("signe moins", "-"),
     ("barre oblique", "/"),
-    ("égale", "="),
-    ("egale", "="),
     ("virgule", ","),
     ("apostrophe", "'"),
     ("esperluette", "&"),
@@ -418,7 +443,6 @@ const ORAL_PUNCTUATION_PHRASES: &[(&str, &str)] = &[
     ("tiret", "-"),
     ("arobase", "@"),
     ("slash", "/"),
-    ("at", "@"),
     ("dièse", "#"),
     ("diese", "#"),
     ("hashtag", "#"),
@@ -448,6 +472,39 @@ fn replace_phrase_ci(text: &str, phrase: &str, replacement: &str) -> String {
     }
 
     out
+}
+
+fn replace_spoken_at(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::new();
+    let mut index = 0;
+
+    while index < chars.len() {
+        if matches_phrase_ci(&chars, index, &['a', 't'])
+            && !is_word_char(at_char(&chars, index.wrapping_sub(1)))
+            && !is_word_char(at_char(&chars, index + 2))
+            && is_at_symbol_context(&chars, index + 2)
+        {
+            out.push('@');
+            index += 2;
+        } else {
+            out.push(chars[index]);
+            index += 1;
+        }
+    }
+
+    out
+}
+
+fn is_at_symbol_context(chars: &[char], after_index: usize) -> bool {
+    if after_index >= chars.len() {
+        return false;
+    }
+    let rest: String = chars[after_index..].iter().collect();
+    let rest_lower = rest.to_lowercase();
+    rest_lower.contains(" point ")
+        || rest_lower.contains(" slash ")
+        || rest_lower.contains(" barre oblique ")
 }
 
 fn replace_spoken_point(text: &str) -> String {
@@ -519,12 +576,17 @@ fn collapse_around_symbol(text: &str, symbol: char) -> String {
 
     while index < chars.len() {
         if chars[index] == symbol {
-            while out.ends_with(' ') {
-                out.pop();
-            }
-            out.push(symbol);
-            index += 1;
-            while index < chars.len() && chars[index] == ' ' {
+            if should_collapse_around_symbol(&out, &chars, index, symbol) {
+                while out.ends_with(' ') {
+                    out.pop();
+                }
+                out.push(symbol);
+                index += 1;
+                while index < chars.len() && chars[index] == ' ' {
+                    index += 1;
+                }
+            } else {
+                out.push(symbol);
                 index += 1;
             }
         } else {
@@ -534,6 +596,30 @@ fn collapse_around_symbol(text: &str, symbol: char) -> String {
     }
 
     out
+}
+
+fn leading_non_space_char(chars: &[char], mut index: usize) -> Option<char> {
+    while index < chars.len() && chars[index].is_whitespace() {
+        index += 1;
+    }
+    chars.get(index).copied()
+}
+
+fn should_collapse_around_symbol(
+    out: &str,
+    chars: &[char],
+    index: usize,
+    symbol: char,
+) -> bool {
+    let prev = out.chars().rev().find(|ch| !ch.is_whitespace());
+    let next = leading_non_space_char(chars, index + 1);
+    let prev_ok = prev.is_some_and(|ch| is_identifier_char(ch) || ch == symbol);
+    let next_ok = match next {
+        Some(ch) if is_identifier_char(ch) || ch == symbol => true,
+        None => prev == Some(symbol),
+        _ => false,
+    };
+    prev_ok && next_ok
 }
 
 fn is_identifier_char(ch: char) -> bool {
@@ -760,6 +846,40 @@ mod tests {
 
         let out = interpret_oral_punctuation("ouvre src slash lib slash main point rs");
         assert_eq!(out, "ouvre src/lib/main.rs");
+    }
+
+    #[test]
+    fn preserves_english_at_preposition_outside_email_context() {
+        let out = interpret_oral_punctuation("look at this");
+        assert_eq!(out, "look at this");
+    }
+
+    #[test]
+    fn preserves_french_egale_verb() {
+        let out = interpret_oral_punctuation("deux plus deux egale quatre");
+        assert_eq!(out, "deux plus deux egale quatre");
+    }
+
+    #[test]
+    fn converts_signe_egal_phrase() {
+        let out = interpret_oral_punctuation("résultat signe egal dix");
+        assert!(out.contains('='));
+        assert!(!out.to_lowercase().contains("signe"));
+    }
+
+    #[test]
+    fn preserves_a_base_outside_email_context() {
+        let out = normalize_stt_oral_mishearings("recette à base de riz");
+        assert_eq!(out, "recette à base de riz");
+
+        let out = normalize_stt_oral_mishearings("je suis à base");
+        assert_eq!(out, "je suis à base");
+    }
+
+    #[test]
+    fn does_not_collapse_symbols_without_identifier_neighbors() {
+        let out = interpret_oral_punctuation("arobase gmail");
+        assert_eq!(out, "@ gmail");
     }
 
     #[test]
