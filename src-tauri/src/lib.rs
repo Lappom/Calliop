@@ -20,7 +20,8 @@ use dictionary_notify::{DictionaryNotifier, DictionaryUpdatedPayload};
 use inject::TextInjector;
 use parking_lot::Mutex;
 use pipeline::{
-    spawn_start, spawn_stop, spawn_toggle, PipelineOrchestrator, PipelineState, PipelineStateEvent,
+    spawn_start, spawn_stop, spawn_toggle, CorrectionRule, PipelineOrchestrator, PipelineState,
+    PipelineStateEvent,
 };
 use serde::{Deserialize, Serialize};
 use store::{
@@ -327,6 +328,7 @@ struct DictionaryWordPayload {
     id: i64,
     word: String,
     source: String,
+    misspelling: Option<String>,
     created_at: String,
 }
 
@@ -338,6 +340,7 @@ fn dictionary_word_to_payload(word: DictionaryWord) -> DictionaryWordPayload {
             DictionarySource::Manual => "manual".into(),
             DictionarySource::Learned => "learned".into(),
         },
+        misspelling: word.misspelling,
         created_at: word.created_at,
     }
 }
@@ -459,6 +462,20 @@ fn refresh_app_context_rules(
 ) -> Result<(), String> {
     let rules = store.list_app_context_rules().map_err(|e| e.to_string())?;
     pipeline.lock().set_app_context_rules(rules);
+    Ok(())
+}
+
+fn refresh_correction_rules(
+    store: &Store,
+    pipeline: &Arc<Mutex<PipelineOrchestrator>>,
+) -> Result<(), String> {
+    let rules = store
+        .list_correction_rules()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(CorrectionRule::from)
+        .collect();
+    pipeline.lock().set_correction_rules(rules);
     Ok(())
 }
 
@@ -841,6 +858,7 @@ fn add_dictionary_word(
     app: AppHandle,
     state: State<'_, AppState>,
     word: String,
+    misspelling: Option<String>,
 ) -> Result<bool, String> {
     let normalized = normalize_word(&word);
     if normalized.is_empty() {
@@ -848,18 +866,46 @@ fn add_dictionary_word(
     }
     if !is_valid_dictionary_word(&normalized) {
         return Err(
-            "Le mot doit contenir au moins 2 caractères et ne peut pas être uniquement numérique."
+            "Le mot ne peut pas être vide et ne peut pas être uniquement numérique."
                 .into(),
         );
     }
 
+    let normalized_misspelling = misspelling
+        .as_deref()
+        .map(normalize_word)
+        .filter(|value| !value.is_empty());
+    if let Some(ref incorrect) = normalized_misspelling {
+        if !is_valid_dictionary_word(incorrect) {
+            return Err(
+                "La version incorrecte ne peut pas être vide et ne peut pas être uniquement numérique."
+                    .into(),
+            );
+        }
+        if normalized.eq_ignore_ascii_case(incorrect) {
+            return Err("La version incorrecte doit être différente du mot correct.".into());
+        }
+    }
+
     let inserted = state
         .store
-        .add_word(&normalized, DictionarySource::Manual)
+        .add_word(
+            &normalized,
+            DictionarySource::Manual,
+            normalized_misspelling.as_deref(),
+        )
         .map_err(|e| e.to_string())?;
+
+    if !inserted && normalized_misspelling.is_some() {
+        return Err("Ce mot est déjà dans le dictionnaire.".into());
+    }
 
     if inserted {
         if let Err(err) = apply_dictionary_additions(&state, std::slice::from_ref(&normalized)) {
+            let _ = state.store.remove_word_by_normalized(&normalized);
+            return Err(err);
+        }
+        if let Err(err) = refresh_correction_rules(&state.store, &state.pipeline) {
             let _ = state.store.remove_word_by_normalized(&normalized);
             return Err(err);
         }
@@ -889,7 +935,7 @@ fn update_dictionary_word(
     }
     if !is_valid_dictionary_word(&normalized) {
         return Err(
-            "Le mot doit contenir au moins 2 caractères et ne peut pas être uniquement numérique."
+            "Le mot ne peut pas être vide et ne peut pas être uniquement numérique."
                 .into(),
         );
     }
@@ -945,7 +991,16 @@ fn remove_dictionary_word(
     }
 
     if let Err(err) = refresh_whisper_prompt_full(&state) {
-        let _ = state.store.add_word(&entry.word, entry.source);
+        let _ = state
+            .store
+            .add_word(&entry.word, entry.source, entry.misspelling.as_deref());
+        return Err(err);
+    }
+
+    if let Err(err) = refresh_correction_rules(&state.store, &state.pipeline) {
+        let _ = state
+            .store
+            .add_word(&entry.word, entry.source, entry.misspelling.as_deref());
         return Err(err);
     }
 
@@ -1219,17 +1274,11 @@ fn search_dictations(
 
 #[tauri::command]
 fn count_dictations(state: State<'_, AppState>) -> Result<i64, String> {
-    state
-        .store
-        .count_dictations()
-        .map_err(|e| e.to_string())
+    state.store.count_dictations().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn count_search_dictations(
-    state: State<'_, AppState>,
-    query: String,
-) -> Result<i64, String> {
+fn count_search_dictations(state: State<'_, AppState>, query: String) -> Result<i64, String> {
     state
         .store
         .count_search_dictations(&query)
@@ -1749,6 +1798,9 @@ pub fn run() {
     if let Err(err) = refresh_whisper_prompt_with_cache(&store, &pipeline, &prompt_cache) {
         eprintln!("failed to load whisper prompt and snippets cache: {err}");
         ensure_pipeline_snippets_loaded(&store, &pipeline);
+    }
+    if let Err(err) = refresh_correction_rules(&store, &pipeline) {
+        eprintln!("failed to load dictionary correction rules cache: {err}");
     }
     pipeline.lock().set_history_store(Arc::clone(&store));
 

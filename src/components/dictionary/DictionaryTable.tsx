@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Pencil, Trash2 } from "lucide-react";
+import { ArrowRight, Pencil, Trash2 } from "lucide-react";
 import type { DictionaryWord } from "../../hooks/useDictionary";
 import { DictionarySourceBadge } from "./DictionarySourceBadge";
 import { formatDictionaryDate } from "./dictionaryUtils";
@@ -76,10 +76,27 @@ export function DictionaryTable({
                 className="group border-b border-divider-soft transition-colors last:border-b-0 hover:bg-surface-elevated/50"
               >
                 <td className="min-w-0 px-4 py-3.5">
-                  <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
-                    <span className="truncate font-[family-name:var(--font-body)] text-body-md text-ink">
-                      {entry.word}
-                    </span>
+                  <div className="flex min-w-0 flex-col gap-2">
+                    {entry.misspelling ? (
+                      <div className="flex min-w-0 flex-wrap items-center gap-2">
+                        <span className="truncate font-[family-name:var(--font-body)] text-body-md text-charcoal">
+                          {entry.misspelling}
+                        </span>
+                        <ArrowRight
+                          size={14}
+                          strokeWidth={1.75}
+                          className="shrink-0 text-ash"
+                          aria-hidden
+                        />
+                        <span className="truncate font-[family-name:var(--font-body)] text-body-md text-ink">
+                          {entry.word}
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="truncate font-[family-name:var(--font-body)] text-body-md text-ink">
+                        {entry.word}
+                      </span>
+                    )}
                     <DictionarySourceBadge
                       source={entry.source}
                       className="sm:hidden"

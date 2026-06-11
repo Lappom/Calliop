@@ -85,7 +85,12 @@ impl Store {
         Ok(changed > 0)
     }
 
-    pub fn update_snippet(&self, id: i64, trigger: &str, content: &str) -> Result<bool, StoreError> {
+    pub fn update_snippet(
+        &self,
+        id: i64,
+        trigger: &str,
+        content: &str,
+    ) -> Result<bool, StoreError> {
         let normalized_trigger = normalize_trigger(trigger);
         let trimmed_content = content.trim();
         if !is_valid_trigger(&normalized_trigger) || !is_valid_snippet_content(trimmed_content) {

@@ -56,7 +56,13 @@ export function filterDictionaryWords(
     if (!normalized) {
       return true;
     }
-    return entry.word.toLocaleLowerCase("fr-FR").includes(normalized);
+    const wordMatch = entry.word
+      .toLocaleLowerCase("fr-FR")
+      .includes(normalized);
+    const misspellingMatch = entry.misspelling
+      ?.toLocaleLowerCase("fr-FR")
+      .includes(normalized);
+    return wordMatch || Boolean(misspellingMatch);
   });
 }
 

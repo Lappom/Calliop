@@ -35,14 +35,21 @@ pub struct DictionaryWord {
     pub id: i64,
     pub word: String,
     pub source: DictionarySource,
+    pub misspelling: Option<String>,
     pub created_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DictionaryCorrectionRule {
+    pub incorrect: String,
+    pub replacement: String,
 }
 
 impl Store {
     pub fn list_words(&self) -> Result<Vec<DictionaryWord>, StoreError> {
         let conn = self.connection().lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, word, source, created_at
+            "SELECT id, word, source, misspelling, created_at
              FROM dictionary
              ORDER BY word COLLATE NOCASE ASC",
         )?;
@@ -83,7 +90,7 @@ impl Store {
                 continue;
             }
             let changed = tx.execute(
-                "INSERT INTO dictionary (word, source) VALUES (?1, ?2)
+                "INSERT INTO dictionary (word, source, misspelling) VALUES (?1, ?2, NULL)
                  ON CONFLICT(word) DO NOTHING",
                 params![normalized, source.as_str()],
             )?;
@@ -106,21 +113,61 @@ impl Store {
             id: row.get(0)?,
             word: row.get(1)?,
             source,
-            created_at: row.get(3)?,
+            misspelling: row.get(3)?,
+            created_at: row.get(4)?,
         })
     }
 
-    pub fn add_word(&self, word: &str, source: DictionarySource) -> Result<bool, StoreError> {
+    pub fn list_correction_rules(&self) -> Result<Vec<DictionaryCorrectionRule>, StoreError> {
+        let conn = self.connection().lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT misspelling, word
+             FROM dictionary
+             WHERE misspelling IS NOT NULL AND trim(misspelling) != ''
+             ORDER BY length(misspelling) DESC",
+        )?;
+
+        let rows = stmt.query_map([], |row| {
+            Ok(DictionaryCorrectionRule {
+                incorrect: row.get(0)?,
+                replacement: row.get(1)?,
+            })
+        })?;
+
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StoreError::from)
+    }
+
+    pub fn add_word(
+        &self,
+        word: &str,
+        source: DictionarySource,
+        misspelling: Option<&str>,
+    ) -> Result<bool, StoreError> {
         let normalized = normalize_word(word);
         if !is_valid_dictionary_word(&normalized) {
             return Ok(false);
         }
 
+        let stored_misspelling = match (source, misspelling) {
+            (DictionarySource::Manual, Some(value)) => {
+                let normalized_misspelling = normalize_word(value);
+                if !is_valid_dictionary_word(&normalized_misspelling) {
+                    return Ok(false);
+                }
+                if normalized.eq_ignore_ascii_case(&normalized_misspelling) {
+                    return Ok(false);
+                }
+                Some(normalized_misspelling)
+            }
+            _ => None,
+        };
+
         let conn = self.connection().lock().expect("store mutex poisoned");
         let changed = conn.execute(
-            "INSERT INTO dictionary (word, source) VALUES (?1, ?2)
+            "INSERT INTO dictionary (word, source, misspelling) VALUES (?1, ?2, ?3)
              ON CONFLICT(word) DO NOTHING",
-            params![normalized, source.as_str()],
+            params![normalized, source.as_str(), stored_misspelling],
         )?;
 
         Ok(changed > 0)
@@ -129,23 +176,14 @@ impl Store {
     pub fn get_word_by_id(&self, id: i64) -> Result<Option<DictionaryWord>, StoreError> {
         let conn = self.connection().lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, word, source, created_at
+            "SELECT id, word, source, misspelling, created_at
              FROM dictionary
              WHERE id = ?1",
         )?;
 
         let mut rows = stmt.query(params![id])?;
         if let Some(row) = rows.next()? {
-            let source_raw: String = row.get(2)?;
-            let source = DictionarySource::parse(&source_raw).ok_or_else(|| {
-                rusqlite::Error::InvalidColumnType(2, "source".into(), rusqlite::types::Type::Text)
-            })?;
-            return Ok(Some(DictionaryWord {
-                id: row.get(0)?,
-                word: row.get(1)?,
-                source,
-                created_at: row.get(3)?,
-            }));
+            return Ok(Some(Self::map_dictionary_row(row)?));
         }
 
         Ok(None)
@@ -200,9 +238,10 @@ pub fn normalize_word(word: &str) -> String {
 
 pub fn is_valid_dictionary_word(word: &str) -> bool {
     let trimmed = word.trim();
-    if trimmed.chars().count() < 2 {
+    if trimmed.is_empty() {
         return false;
     }
+    // Allow single-character replacements (e.g. "@") but reject pure numbers.
     !trimmed.chars().all(|c| c.is_ascii_digit())
 }
 
@@ -383,6 +422,7 @@ mod tests {
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 word TEXT NOT NULL UNIQUE COLLATE NOCASE,
                 source TEXT NOT NULL DEFAULT 'manual',
+                misspelling TEXT,
                 created_at TEXT NOT NULL DEFAULT (datetime('now'))
             )",
             [],
@@ -396,9 +436,11 @@ mod tests {
         let store = test_store();
         assert!(store.list_words().unwrap().is_empty());
 
-        assert!(store.add_word("Calliop", DictionarySource::Manual).unwrap());
+        assert!(store
+            .add_word("Calliop", DictionarySource::Manual, None)
+            .unwrap());
         assert!(!store
-            .add_word("calliop", DictionarySource::Learned)
+            .add_word("calliop", DictionarySource::Learned, None)
             .unwrap());
 
         let words = store.list_words().unwrap();
@@ -411,10 +453,24 @@ mod tests {
     }
 
     #[test]
-    fn rejects_short_and_numeric_words() {
+    fn rejects_empty_and_numeric_words() {
         let store = test_store();
-        assert!(!store.add_word("a", DictionarySource::Manual).unwrap());
-        assert!(!store.add_word("42", DictionarySource::Manual).unwrap());
+        assert!(!store.add_word("", DictionarySource::Manual, None).unwrap());
+        assert!(!store
+            .add_word("42", DictionarySource::Manual, None)
+            .unwrap());
+    }
+
+    #[test]
+    fn accepts_single_symbol_and_dotted_misspelling() {
+        let store = test_store();
+        assert!(store
+            .add_word("@", DictionarySource::Manual, Some("Arro.Baz."))
+            .unwrap());
+
+        let words = store.list_words().unwrap();
+        assert_eq!(words[0].word, "@");
+        assert_eq!(words[0].misspelling.as_deref(), Some("Arro.Baz."));
     }
 
     #[test]
@@ -466,7 +522,9 @@ mod tests {
     #[test]
     fn update_word_changes_spelling() {
         let store = test_store();
-        assert!(store.add_word("Calliop", DictionarySource::Manual).unwrap());
+        assert!(store
+            .add_word("Calliop", DictionarySource::Manual, None)
+            .unwrap());
         let id = store.list_words().unwrap()[0].id;
 
         assert!(store.update_word(id, "Calliope").unwrap());
@@ -478,8 +536,12 @@ mod tests {
     #[test]
     fn update_word_rejects_duplicate() {
         let store = test_store();
-        store.add_word("Alpha", DictionarySource::Manual).unwrap();
-        store.add_word("Beta", DictionarySource::Manual).unwrap();
+        store
+            .add_word("Alpha", DictionarySource::Manual, None)
+            .unwrap();
+        store
+            .add_word("Beta", DictionarySource::Manual, None)
+            .unwrap();
         let beta_id = store
             .list_words()
             .unwrap()
@@ -492,11 +554,55 @@ mod tests {
     }
 
     #[test]
+    fn manual_word_stores_misspelling_rule() {
+        let store = test_store();
+        assert!(store
+            .add_word("Calliop", DictionarySource::Manual, Some("Caliope"))
+            .unwrap());
+
+        let words = store.list_words().unwrap();
+        assert_eq!(words.len(), 1);
+        assert_eq!(words[0].misspelling.as_deref(), Some("Caliope"));
+
+        let rules = store.list_correction_rules().unwrap();
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].incorrect, "Caliope");
+        assert_eq!(rules[0].replacement, "Calliop");
+    }
+
+    #[test]
+    fn rejects_misspelling_equal_to_word() {
+        let store = test_store();
+        assert!(!store
+            .add_word("Calliop", DictionarySource::Manual, Some("Calliop"))
+            .unwrap());
+        assert!(!store
+            .add_word("Calliop", DictionarySource::Manual, Some("calliop"))
+            .unwrap());
+    }
+
+    #[test]
+    fn learned_words_ignore_misspelling() {
+        let store = test_store();
+        assert!(store
+            .add_word("Calliop", DictionarySource::Learned, Some("Caliope"))
+            .unwrap());
+
+        let words = store.list_words().unwrap();
+        assert!(words[0].misspelling.is_none());
+        assert!(store.list_correction_rules().unwrap().is_empty());
+    }
+
+    #[test]
     fn list_words_for_prompt_returns_recent_first() {
         let store = test_store();
-        store.add_word("Older", DictionarySource::Manual).unwrap();
+        store
+            .add_word("Older", DictionarySource::Manual, None)
+            .unwrap();
         std::thread::sleep(std::time::Duration::from_millis(5));
-        store.add_word("Newer", DictionarySource::Manual).unwrap();
+        store
+            .add_word("Newer", DictionarySource::Manual, None)
+            .unwrap();
 
         let words = store.list_words_for_prompt(10).unwrap();
         assert_eq!(words.first().map(String::as_str), Some("Newer"));

@@ -18,6 +18,7 @@ Hotkey (toggle ON / push-to-talk hold)
   -> partial-transcript events -> Overlay
 Hotkey OFF / release (toggle or PTT)
   -> flush VAD tail + concat segments
+  -> apply_corrections (dictionary misspelling rules, manual words only)
   -> get_active_window + resolve_tone (app_context/, SQLite rules cache)
   -> optional LlamaEngine cleanup (sidecar, tone-aware system prompt, 4s wait, KV-cached system prefix, fallback post-processed)
   -> apply_snippets (deterministic trigger expansion, verbatim + auto-edit)
@@ -56,9 +57,10 @@ Hotkey OFF / release (toggle or PTT)
 
 - Frontend (React) handles overlay, settings, onboarding — no heavy ML in the webview.
 - Rust core exposes commands for start/stop dictation, settings read/write, history queries.
-- Commands: `get_settings`, `set_settings`, `get_models_status`, `delete_model`, `get_inference_info`, `set_hotkey`, `is_onboarding_done`, `set_onboarding_done`, `start_mic_probe`, `stop_mic_probe`, `get_stt_language`, `cycle_dictation_language`, `ensure_model`, `ensure_llm_model`, `list_dictionary_words`, `add_dictionary_word`, `remove_dictionary_word`, `learn_from_correction`, `list_snippets`, `add_snippet`, `remove_snippet`, `import_snippets`, `export_snippets`, `get_active_window`, `list_app_context_rules`, `add_app_context_rule`, `remove_app_context_rule`, `list_dictations`, `search_dictations`, `copy_dictation`, `reinject_dictation`, `get_insights`, `is_autostart_enabled`, `set_autostart_enabled`
+- Commands: `get_settings`, `set_settings`, `get_models_status`, `delete_model`, `get_inference_info`, `set_hotkey`, `is_onboarding_done`, `set_onboarding_done`, `start_mic_probe`, `stop_mic_probe`, `get_stt_language`, `cycle_dictation_language`, `ensure_model`, `ensure_llm_model`, `list_dictionary_words`, `add_dictionary_word(word, misspelling?)`, `remove_dictionary_word`, `learn_from_correction`, `list_snippets`, `add_snippet`, `remove_snippet`, `import_snippets`, `export_snippets`, `get_active_window`, `list_app_context_rules`, `add_app_context_rule`, `remove_app_context_rule`, `list_dictations`, `search_dictations`, `copy_dictation`, `reinject_dictation`, `get_insights`, `is_autostart_enabled`, `set_autostart_enabled`
 - Events: `pipeline-state`, `partial-transcript`, `audio-level`, `latency-metrics`, `stt-language-changed`, `model-download-progress`, `model-ready`, `llm-model-download-progress`, `llm-ready`, `dictionary-updated`, `snippets-updated`, `app-context-updated`, `history-updated`
 - Dictionary words and snippet triggers are cached as a Whisper `initial_prompt` string (`Arc<RwLock<Option<Arc<str>>>>` in pipeline); refreshed on CRUD and on startup.
+- Manual dictionary entries may store an optional `misspelling`; active rules are cached in `correction_rules` (`Arc<RwLock<Vec<CorrectionRule>>>`) and applied via `pipeline/corrections.rs` after STT, before snippets/LLM.
 - Snippet triggers are expanded deterministically in `pipeline/snippets.rs` after LLM cleanup (or on raw transcript in verbatim mode), before injection.
 - `auto_learn` (default on): after inject, `observe/` polls the focused control via UIA for ~60s; stabilized corrections call `apply_learned_correction` (same path as in-app `learn_from_correction`).
 

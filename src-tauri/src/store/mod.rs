@@ -13,8 +13,8 @@ pub use app_context::{
 };
 pub use db::{db_path, Store, StoreError};
 pub use dictionary::{
-    extract_correction_words, is_valid_dictionary_word, normalize_word, DictionarySource,
-    DictionaryWord,
+    extract_correction_words, is_valid_dictionary_word, normalize_word, DictionaryCorrectionRule,
+    DictionarySource, DictionaryWord,
 };
 pub use history::{
     count_words, dictation_wpm, wpm_vs_typing_percent, AppUsageEntry, DictationEntry, Insights,

@@ -18,6 +18,7 @@ use crate::observe::CorrectionHandler;
 use crate::store::{AppContextRule, NewDictation, Snippet, Store};
 use crate::stt::{SttError, SttLanguage, WhisperEngine};
 
+use super::corrections::{apply_corrections, CorrectionRule};
 use super::snippets::{
     apply_snippets, finalize_llm_with_snippets, shield_snippet_triggers, unshield_snippets,
 };
@@ -156,6 +157,7 @@ pub struct PipelineOrchestrator {
     streaming_stt_ms: Arc<AtomicU64>,
     dictionary_prompt: Arc<RwLock<Option<Arc<str>>>>,
     snippets: Arc<RwLock<Vec<Snippet>>>,
+    correction_rules: Arc<RwLock<Vec<CorrectionRule>>>,
     app_context_rules: Arc<RwLock<Vec<AppContextRule>>>,
     auto_learn: Arc<AtomicBool>,
     observer_generation: Arc<AtomicU64>,
@@ -183,6 +185,7 @@ impl PipelineOrchestrator {
             streaming_stt_ms: Arc::new(AtomicU64::new(0)),
             dictionary_prompt: Arc::new(RwLock::new(None)),
             snippets: Arc::new(RwLock::new(Vec::new())),
+            correction_rules: Arc::new(RwLock::new(Vec::new())),
             app_context_rules: Arc::new(RwLock::new(Vec::new())),
             auto_learn: Arc::new(AtomicBool::new(true)),
             observer_generation: Arc::new(AtomicU64::new(0)),
@@ -209,6 +212,10 @@ impl PipelineOrchestrator {
 
     pub fn set_snippets(&mut self, snippets: Vec<Snippet>) {
         *self.snippets.write() = snippets;
+    }
+
+    pub fn set_correction_rules(&mut self, rules: Vec<CorrectionRule>) {
+        *self.correction_rules.write() = rules;
     }
 
     pub fn set_app_context_rules(&mut self, rules: Vec<AppContextRule>) {
@@ -484,7 +491,11 @@ impl PipelineOrchestrator {
         }
 
         let stt_ms = streaming_stt_ms + fallback_stt_ms;
-        let raw = join_transcript_segments(&transcripts).trim().to_string();
+        let raw = {
+            let joined = join_transcript_segments(&transcripts).trim().to_string();
+            let rules = self.correction_rules.read().clone();
+            apply_corrections(&joined, &rules)
+        };
         let stt_wait_ms = stop_instant.elapsed().as_millis() as u64;
 
         // After STT the user may return to the target app; capture before LLM wait/inject.

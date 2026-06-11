@@ -103,10 +103,12 @@ pub(crate) fn init_schema(conn: &Connection) -> Result<(), StoreError> {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             word TEXT NOT NULL UNIQUE COLLATE NOCASE,
             source TEXT NOT NULL DEFAULT 'manual',
+            misspelling TEXT,
             created_at TEXT NOT NULL DEFAULT (datetime('now'))
         )",
         [],
     )?;
+    migrate_dictionary_misspelling(conn)?;
     conn.execute(
         "CREATE TABLE IF NOT EXISTS snippets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -164,6 +166,20 @@ pub(crate) fn init_schema(conn: &Connection) -> Result<(), StoreError> {
             INSERT INTO dictations_fts(rowid, text) VALUES (new.id, new.text);
         END;",
     )?;
+    Ok(())
+}
+
+fn migrate_dictionary_misspelling(conn: &Connection) -> Result<(), StoreError> {
+    let mut stmt = conn.prepare("PRAGMA table_info(dictionary)")?;
+    let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
+    let has_misspelling = columns
+        .collect::<Result<Vec<_>, _>>()?
+        .iter()
+        .any(|name| name == "misspelling");
+
+    if !has_misspelling {
+        conn.execute("ALTER TABLE dictionary ADD COLUMN misspelling TEXT", [])?;
+    }
     Ok(())
 }
 

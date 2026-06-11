@@ -1,8 +1,10 @@
 //! Pipeline orchestration across capture, STT, LLM, and injection (Phase 1+).
 
+mod corrections;
 mod orchestrator;
 mod snippets;
 
+pub use corrections::{apply_corrections, CorrectionRule};
 pub use orchestrator::{
     hide_overlay, show_overlay, spawn_start, spawn_stop, spawn_toggle, AudioLevelEvent,
     LatencyMetricsEvent, PartialTranscriptEvent, PipelineError, PipelineOrchestrator,

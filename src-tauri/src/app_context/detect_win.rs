@@ -133,9 +133,7 @@ fn read_process_info(hwnd: HWND) -> Option<(String, Option<String>)> {
 }
 
 fn is_calliop_window(window: &ActiveWindow) -> bool {
-    if window
-        .exe_name
-        .eq_ignore_ascii_case("calliop.exe")
+    if window.exe_name.eq_ignore_ascii_case("calliop.exe")
         || window.exe_name.eq_ignore_ascii_case("calliop")
     {
         return true;

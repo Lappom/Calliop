@@ -8,6 +8,7 @@ export interface DictionaryWord {
   id: number;
   word: string;
   source: DictionarySource;
+  misspelling?: string | null;
   created_at: string;
 }
 
@@ -59,16 +60,25 @@ export function useDictionary() {
   }, [loadWords]);
 
   const addWord = useCallback(
-    async (word: string) => {
+    async (word: string, misspelling?: string) => {
       const trimmed = word.trim();
       if (!trimmed) {
         return false;
       }
 
+      const trimmedMisspelling = misspelling?.trim();
+      const payloadMisspelling =
+        trimmedMisspelling && trimmedMisspelling.length > 0
+          ? trimmedMisspelling
+          : undefined;
+
       setBusy(true);
       setErrorMessage(null);
       try {
-        const inserted = await invoke<boolean>("add_dictionary_word", { word: trimmed });
+        const inserted = await invoke<boolean>("add_dictionary_word", {
+          word: trimmed,
+          misspelling: payloadMisspelling ?? null,
+        });
         if (inserted) {
           await loadWords();
         } else {

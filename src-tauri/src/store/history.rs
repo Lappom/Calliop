@@ -563,7 +563,7 @@ mod tests {
             })
             .unwrap();
         store
-            .add_word("Calliope", DictionarySource::Learned)
+            .add_word("Calliope", DictionarySource::Learned, None)
             .unwrap();
 
         let insights = store.get_insights().unwrap();

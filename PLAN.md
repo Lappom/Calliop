@@ -176,6 +176,7 @@ Application desktop qui permet de **dicter dans n'importe quelle application** a
 - [x] Injection dans `initial_prompt` Whisper
 - [x] Apprentissage auto des corrections utilisateur
 - [x] Notifications sur les corrections utilisateur
+- [x] Règle de correction de faute (mot manuel → remplace la version incorrecte)
 
 #### 3c — Snippets vocaux
 - [x] Définition trigger → texte complet

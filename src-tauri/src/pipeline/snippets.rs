@@ -162,7 +162,7 @@ pub fn apply_snippets(text: &str, snippets: &[Snippet]) -> String {
     result
 }
 
-fn find_first_match(text: &str, trigger: &str) -> Option<(usize, usize, Option<char>)> {
+pub(crate) fn find_first_match(text: &str, trigger: &str) -> Option<(usize, usize, Option<char>)> {
     let trigger_norm = normalize_for_match(trigger);
     if trigger_norm.is_empty() {
         return None;
@@ -264,7 +264,7 @@ fn is_word_char(ch: char) -> bool {
     ch.is_alphanumeric() || ch == '\'' || ch == '’'
 }
 
-fn normalize_for_match(value: &str) -> String {
+pub(crate) fn normalize_for_match(value: &str) -> String {
     value
         .split_whitespace()
         .map(|part| part.chars().map(fold_char).collect::<String>())
