@@ -1,4 +1,4 @@
-type GlowColor = "green" | "blue" | "red" | "orange";
+export type GlowColor = "green" | "blue" | "red" | "orange";
 
 const glowStyles: Record<GlowColor, string> = {
   green:
