@@ -16,6 +16,7 @@ import {
 interface MainViewProps {
   pipelineState: PipelineState;
   lastTranscript: string | null;
+  transcriptRevision: number;
   partialTranscript: string;
   errorMessage: string | null;
   modelReady: boolean;
@@ -26,6 +27,7 @@ interface MainViewProps {
 export function MainView({
   pipelineState,
   lastTranscript,
+  transcriptRevision,
   partialTranscript,
   errorMessage,
   modelReady,
@@ -45,7 +47,7 @@ export function MainView({
     learnedWords,
     errorMessage: correctionError,
     hasChanges,
-  } = useTranscriptCorrection(lastTranscript);
+  } = useTranscriptCorrection(lastTranscript, transcriptRevision);
 
   return (
     <>

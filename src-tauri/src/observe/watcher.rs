@@ -49,7 +49,9 @@ fn run_correction_watcher(
         return Ok(());
     }
 
-    let baseline = read_focused_text().ok_or_else(|| "focused control not readable".to_string())?;
+    let Some(baseline) = read_focused_text() else {
+        return Ok(());
+    };
 
     if !baseline.contains(injected_text.trim()) {
         let normalized_baseline = baseline.split_whitespace().collect::<Vec<_>>().join(" ");

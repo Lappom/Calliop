@@ -211,8 +211,6 @@ impl PipelineOrchestrator {
             return Err(PipelineError::ModelNotLoaded);
         }
 
-        self.observer_generation.fetch_add(1, Ordering::SeqCst);
-
         self.segment_transcripts.lock().clear();
         self.failed_segments.lock().clear();
         self.streaming_stt_ms.store(0, Ordering::SeqCst);
@@ -225,6 +223,8 @@ impl PipelineOrchestrator {
         let (level_tx, level_rx) = std::sync::mpsc::channel();
         self.audio
             .start_with_streaming(Some(chunk_tx), Some(level_tx))?;
+
+        self.observer_generation.fetch_add(1, Ordering::SeqCst);
 
         let stop_flag = Arc::new(AtomicBool::new(false));
         let worker_stop = Arc::clone(&stop_flag);

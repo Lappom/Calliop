@@ -1,12 +1,32 @@
 //! Windows UI Automation text reader for the focused control.
 
 use uiautomation::controls::ControlType;
+use uiautomation::core::UIElement;
 use uiautomation::patterns::{UITextPattern, UIValuePattern};
 use uiautomation::UIAutomation;
+
+fn focused_in_own_process(element: &UIElement) -> bool {
+    let own_pid = std::process::id() as i32;
+    let mut current = element.clone();
+    for _ in 0..8 {
+        if current.get_process_id().ok() == Some(own_pid) {
+            return true;
+        }
+        if let Ok(parent) = current.get_cached_parent() {
+            current = parent;
+        } else {
+            break;
+        }
+    }
+    false
+}
 
 pub fn read_focused_text() -> Option<String> {
     let automation = UIAutomation::new().ok()?;
     let element = automation.get_focused_element().ok()?;
+    if focused_in_own_process(&element) {
+        return None;
+    }
 
     if let Ok(value_pattern) = element.get_pattern::<UIValuePattern>() {
         if let Ok(value) = value_pattern.get_value() {

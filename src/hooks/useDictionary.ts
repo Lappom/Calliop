@@ -62,6 +62,8 @@ export function useDictionary() {
         const inserted = await invoke<boolean>("add_dictionary_word", { word: trimmed });
         if (inserted) {
           await loadWords();
+        } else {
+          setErrorMessage("Ce mot est déjà dans le dictionnaire.");
         }
         return inserted;
       } catch (err) {

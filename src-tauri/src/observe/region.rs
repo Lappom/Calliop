@@ -17,7 +17,7 @@ pub fn find_injection_bounds(document: &str, injected: &str) -> Option<(usize, u
     let normalized_doc = normalize_whitespace(document);
     let normalized_injected = normalize_whitespace(injected);
 
-    if let Some(start) = normalized_doc.find(&normalized_injected) {
+    if let Some(start) = normalized_doc.rfind(&normalized_injected) {
         return map_normalized_span_to_original(
             document,
             &normalized_doc,
@@ -27,7 +27,7 @@ pub fn find_injection_bounds(document: &str, injected: &str) -> Option<(usize, u
     }
 
     document
-        .find(injected)
+        .rfind(injected)
         .map(|start| (start, start + injected.len()))
 }
 
@@ -172,6 +172,14 @@ mod tests {
         let doc = "Hello world Calliop test";
         let bounds = find_injection_bounds(doc, "Calliop").expect("bounds");
         assert_eq!(bounds, (12, 19));
+    }
+
+    #[test]
+    fn find_injection_bounds_prefers_last_occurrence() {
+        let doc = "Calliop is great. I love Calliop!";
+        let bounds = find_injection_bounds(doc, "Calliop").expect("bounds");
+        assert_eq!(&doc[bounds.0..bounds.1], "Calliop");
+        assert_eq!(bounds.0, doc.rfind("Calliop").expect("last match"));
     }
 
     #[test]

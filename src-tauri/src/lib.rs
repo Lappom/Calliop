@@ -17,7 +17,8 @@ use pipeline::{
 };
 use serde::{Deserialize, Serialize};
 use store::{
-    extract_correction_words, normalize_word, AppSettings, DictionarySource, DictionaryWord, Store,
+    extract_correction_words, is_valid_dictionary_word, normalize_word, AppSettings,
+    DictionarySource, DictionaryWord, Store,
 };
 use stt::build_initial_prompt;
 use tauri::{
@@ -350,6 +351,12 @@ fn add_dictionary_word(
     let normalized = normalize_word(&word);
     if normalized.is_empty() {
         return Err("Le mot ne peut pas être vide.".into());
+    }
+    if !is_valid_dictionary_word(&normalized) {
+        return Err(
+            "Le mot doit contenir au moins 2 caractères et ne peut pas être uniquement numérique."
+                .into(),
+        );
     }
 
     let inserted = state
