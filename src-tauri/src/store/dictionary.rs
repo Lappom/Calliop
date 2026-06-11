@@ -203,6 +203,7 @@ fn should_learn_substitution(original: &str, corrected: &str) -> bool {
     true
 }
 
+#[allow(clippy::needless_range_loop)]
 fn word_edit_ops(original: &[(String, String)], corrected: &[(String, String)]) -> Vec<WordEditOp> {
     let original_keys: Vec<String> = original.iter().map(|(key, _)| key.clone()).collect();
     let n = original_keys.len();
