@@ -1,13 +1,13 @@
-import type { ComponentType, SVGProps } from "react";
-import type { AppView } from "../../lib/views";
+import type { LucideIcon } from "lucide-react";
 import {
-  IconContext,
-  IconDictionary,
-  IconHome,
-  IconInsight,
-  IconSettings,
-  IconSnippets,
-} from "../icons/NavIcons";
+  BarChart3,
+  BookOpen,
+  Braces,
+  Layers,
+  Mic,
+  Settings,
+} from "lucide-react";
+import type { AppView } from "../../lib/views";
 
 interface SidebarProps {
   currentView: AppView;
@@ -17,19 +17,25 @@ interface SidebarProps {
 interface NavItem {
   id: AppView;
   label: string;
-  icon: ComponentType<SVGProps<SVGSVGElement>>;
+  icon: LucideIcon;
 }
 
+const iconProps = {
+  size: 18,
+  strokeWidth: 1.5,
+  absoluteStrokeWidth: true,
+} as const;
+
 const primaryItems: NavItem[] = [
-  { id: "main", label: "Accueil", icon: IconHome },
-  { id: "dictionary", label: "Dictionnaire", icon: IconDictionary },
-  { id: "snippets", label: "Snippets", icon: IconSnippets },
-  { id: "context", label: "Contexte", icon: IconContext },
-  { id: "insight", label: "Insight", icon: IconInsight },
+  { id: "main", label: "Accueil", icon: Mic },
+  { id: "dictionary", label: "Dictionnaire", icon: BookOpen },
+  { id: "snippets", label: "Snippets", icon: Braces },
+  { id: "context", label: "Contexte", icon: Layers },
+  { id: "insight", label: "Insight", icon: BarChart3 },
 ];
 
 const bottomItems: NavItem[] = [
-  { id: "settings", label: "Paramètres", icon: IconSettings },
+  { id: "settings", label: "Paramètres", icon: Settings },
 ];
 
 function NavButton({
@@ -63,7 +69,14 @@ function NavButton({
           aria-hidden
         />
       )}
-      <Icon className="shrink-0 opacity-80 group-hover:opacity-100" />
+      <Icon
+        {...iconProps}
+        className={[
+          "shrink-0 transition-colors duration-150",
+          active ? "text-accent-blue" : "text-charcoal group-hover:text-ink",
+        ].join(" ")}
+        aria-hidden
+      />
       <span>{item.label}</span>
     </button>
   );
