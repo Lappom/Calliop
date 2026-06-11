@@ -15,8 +15,8 @@ use crate::stt::{SttError, WhisperEngine};
 
 /// Maximum time to wait for LLM cleanup (Qwen3 1.7B on CPU can take tens of seconds).
 const LLM_CLEANUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
-/// Wait for LLM before injecting; must match cleanup budget so cleaned text can land in the target app.
-const LLM_INJECT_WAIT: std::time::Duration = LLM_CLEANUP_TIMEOUT;
+/// Fast-path budget before injecting the raw transcript; LLM continues in background if slower.
+const LLM_INJECT_WAIT: std::time::Duration = std::time::Duration::from_secs(4);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -306,6 +306,7 @@ impl PipelineOrchestrator {
             let job = start_llm_cleanup(
                 Arc::clone(&self.llm),
                 Arc::clone(&self.llm_ready),
+                Arc::clone(&self.auto_edit),
                 &full_text,
             );
             match job.wait_for_inject(LLM_INJECT_WAIT) {
@@ -313,7 +314,14 @@ impl PipelineOrchestrator {
                     text,
                     llm_ms,
                     invalidated,
-                } => (text, llm_ms, invalidated),
+                } => {
+                    let text = if self.auto_edit.load(Ordering::SeqCst) {
+                        text
+                    } else {
+                        full_text.clone()
+                    };
+                    (text, llm_ms, invalidated)
+                }
                 LlmCleanupWait::Pending(job) => {
                     job.finalize_in_background(app.clone());
                     (full_text.clone(), 0, false)
@@ -323,7 +331,7 @@ impl PipelineOrchestrator {
             (full_text.clone(), 0, false)
         };
 
-        if llm_invalidated {
+        if llm_invalidated && self.auto_edit.load(Ordering::SeqCst) {
             let _ = app.emit("llm-unready", ());
             crate::spawn_llm_recovery_if_needed(app.clone());
         }
@@ -401,7 +409,14 @@ fn invalidate_llm_engine(llm: &Arc<Mutex<Option<LlamaEngine>>>, llm_ready: &Arc<
     llm_ready.store(false, Ordering::SeqCst);
 }
 
-fn restore_llm_engine(llm: &Arc<Mutex<Option<LlamaEngine>>>, engine: LlamaEngine) {
+fn restore_llm_engine(
+    llm: &Arc<Mutex<Option<LlamaEngine>>>,
+    auto_edit: &Arc<AtomicBool>,
+    engine: LlamaEngine,
+) {
+    if !auto_edit.load(Ordering::SeqCst) {
+        return;
+    }
     let mut guard = llm.lock();
     if guard.is_none() {
         *guard = Some(engine);
@@ -421,6 +436,7 @@ struct LlmCleanupJob {
     worker: thread::JoinHandle<()>,
     llm: Arc<Mutex<Option<LlamaEngine>>>,
     llm_ready: Arc<AtomicBool>,
+    auto_edit: Arc<AtomicBool>,
     raw: String,
     worker_pid: Option<u32>,
     start: Instant,
@@ -439,10 +455,15 @@ impl LlmCleanupJob {
     fn wait_for_inject(self, timeout: std::time::Duration) -> LlmCleanupWait {
         match self.rx.recv_timeout(timeout) {
             Ok(LlmCleanupOutcome::Success { cleaned, engine }) => {
-                restore_llm_engine(&self.llm, engine);
+                restore_llm_engine(&self.llm, &self.auto_edit, engine);
                 let _ = self.worker.join();
+                let text = if self.auto_edit.load(Ordering::SeqCst) {
+                    cleaned
+                } else {
+                    self.raw
+                };
                 LlmCleanupWait::Completed {
-                    text: cleaned,
+                    text,
                     llm_ms: self.start.elapsed().as_millis() as u64,
                     invalidated: false,
                 }
@@ -474,7 +495,7 @@ impl LlmCleanupJob {
             let remaining = LLM_CLEANUP_TIMEOUT.saturating_sub(self.start.elapsed());
             let invalidated = match self.rx.recv_timeout(remaining) {
                 Ok(LlmCleanupOutcome::Success { engine, .. }) => {
-                    restore_llm_engine(&self.llm, engine);
+                    restore_llm_engine(&self.llm, &self.auto_edit, engine);
                     false
                 }
                 Ok(LlmCleanupOutcome::Failed) => {
@@ -501,7 +522,7 @@ impl LlmCleanupJob {
                 }
             };
 
-            if invalidated {
+            if invalidated && self.auto_edit.load(Ordering::SeqCst) {
                 let _ = app.emit("llm-unready", ());
                 crate::spawn_llm_recovery_if_needed(app);
             }
@@ -512,6 +533,7 @@ impl LlmCleanupJob {
 fn start_llm_cleanup(
     llm: Arc<Mutex<Option<LlamaEngine>>>,
     llm_ready: Arc<AtomicBool>,
+    auto_edit: Arc<AtomicBool>,
     raw: &str,
 ) -> LlmCleanupJob {
     let raw = raw.to_string();
@@ -544,6 +566,7 @@ fn start_llm_cleanup(
         worker,
         llm,
         llm_ready,
+        auto_edit,
         raw,
         worker_pid,
         start,

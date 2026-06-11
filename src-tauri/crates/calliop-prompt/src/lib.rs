@@ -14,7 +14,9 @@ Ponctuation courante : « point » → . ; « virgule » → , ; « point-virgul
 « deux-points » / « deux points » → : ; « points de suspension » → … ; \
 « point d'interrogation » / « point interrogation » → ? ; \
 « point d'exclamation » / « point exclamation » → ! ; \
-« ouvrez les guillemets » / « fermez les guillemets » / « entre guillemets » → « » ; \
+« ouvrez les guillemets » / « fermez les guillemets » → « » ; \
+« entre guillemets » entoure le segment suivant avec « », par ex. \
+« bonjour entre guillemets » → « bonjour » ou « il dit bonjour entre guillemets » → il dit « bonjour » ; \
 « parenthèse ouvrante » / « parenthèse fermante » / « entre parenthèses » → ( ) \
 (ex. « Enzo entre parenthèses c'est mon prénom » → Enzo (c'est mon prénom)) ; \
 « à la ligne » / « retour à la ligne » → saut de ligne ; « nouveau paragraphe » → double saut de ligne ; \
@@ -140,12 +142,103 @@ fn strip_wrapping_quotes(text: &str) -> String {
 
 /// Converts spoken French punctuation commands still present in text (e.g. « virgule » → `,`).
 pub fn interpret_oral_punctuation(text: &str) -> String {
-    let mut result = text.to_string();
+    let mut result = interpret_oral_wrap_commands(text);
     for (phrase, replacement) in ORAL_PUNCTUATION_PHRASES {
         result = replace_phrase_ci(&result, phrase, replacement);
     }
     result = replace_spoken_point(&result);
     normalize_punctuation_spacing(&result)
+}
+
+const ORAL_WRAP_COMMANDS: &[(&str, &str, &str)] = &[
+    ("entre parenthèses", "(", ")"),
+    ("entre parenthese", "(", ")"),
+    ("entre parentheses", "(", ")"),
+    ("entre guillemets", "«", "»"),
+    ("entre guillemet", "«", "»"),
+];
+
+fn interpret_oral_wrap_commands(text: &str) -> String {
+    let mut result = text.to_string();
+    loop {
+        let Some((phrase, open, close)) = find_next_wrap_command(&result) else {
+            break;
+        };
+        let Some((before, after)) = split_first_phrase_ci(&result, phrase) else {
+            break;
+        };
+        let before = before.trim_end();
+        let after = after.trim_start();
+        let wrapped = if !after.is_empty() {
+            if before.is_empty() {
+                format!("{open}{after}{close}")
+            } else {
+                format!("{before} {open}{after}{close}")
+            }
+        } else if !before.is_empty() {
+            let (prefix, quoted) = quoted_segment_before_command(before);
+            if quoted.is_empty() {
+                format!("{open}{before}{close}")
+            } else if prefix.is_empty() {
+                format!("{open}{quoted}{close}")
+            } else {
+                format!("{prefix} {open}{quoted}{close}")
+            }
+        } else {
+            break;
+        };
+        result = wrapped;
+    }
+    result
+}
+
+fn quoted_segment_before_command(before: &str) -> (String, String) {
+    let trimmed = before.trim();
+    let Some(space) = trimmed.rfind(' ') else {
+        return (String::new(), trimmed.to_string());
+    };
+    (
+        trimmed[..space].trim_end().to_string(),
+        trimmed[space + 1..].trim_start().to_string(),
+    )
+}
+
+fn find_next_wrap_command(text: &str) -> Option<(&'static str, &'static str, &'static str)> {
+    ORAL_WRAP_COMMANDS
+        .iter()
+        .copied()
+        .filter_map(|entry| find_phrase_range_ci(text, entry.0).map(|_| entry))
+        .min_by_key(|(phrase, _, _)| find_phrase_range_ci(text, phrase).map(|(start, _)| start).unwrap_or(usize::MAX))
+}
+
+fn split_first_phrase_ci(text: &str, phrase: &str) -> Option<(String, String)> {
+    let (start, end) = find_phrase_range_ci(text, phrase)?;
+    Some((text[..start].to_string(), text[end..].to_string()))
+}
+
+fn find_phrase_range_ci(text: &str, phrase: &str) -> Option<(usize, usize)> {
+    let phrase_chars: Vec<char> = phrase.chars().collect();
+    let phrase_lower: Vec<char> = phrase.to_lowercase().chars().collect();
+    let text_chars: Vec<char> = text.chars().collect();
+
+    for (char_index, (byte_start, _)) in text.char_indices().enumerate() {
+        if matches_phrase_ci(&text_chars, char_index, &phrase_lower)
+            && !is_word_char(at_char(&text_chars, char_index.wrapping_sub(1)))
+            && !is_word_char(at_char(
+                &text_chars,
+                char_index.saturating_add(phrase_chars.len()),
+            ))
+        {
+            let byte_end = text
+                .char_indices()
+                .nth(char_index + phrase_chars.len())
+                .map(|(index, _)| index)
+                .unwrap_or(text.len());
+            return Some((byte_start, byte_end));
+        }
+    }
+
+    None
 }
 
 /// Longest phrases first so « point d'interrogation » wins over « point ».
@@ -386,11 +479,37 @@ mod tests {
     }
 
     #[test]
+    fn wraps_text_after_entre_guillemets() {
+        let out = interpret_oral_punctuation("il dit bonjour entre guillemets c'est bien");
+        assert_eq!(out, "il dit bonjour «c'est bien»");
+    }
+
+    #[test]
+    fn wraps_last_word_before_entre_guillemets() {
+        let out = interpret_oral_punctuation("il dit bonjour entre guillemets");
+        assert_eq!(out, "il dit «bonjour»");
+    }
+
+    #[test]
+    fn wraps_single_word_entre_guillemets() {
+        let out = interpret_oral_punctuation("citation entre guillemets");
+        assert_eq!(out, "«citation»");
+    }
+
+    #[test]
+    fn wraps_text_after_entre_parentheses() {
+        let out =
+            interpret_oral_punctuation("Je m'appelle Enzo entre parenthèses c'est mon prénom");
+        assert_eq!(out, "Je m'appelle Enzo (c'est mon prénom)");
+    }
+
+    #[test]
     fn system_prompt_covers_oral_punctuation_commands() {
         assert!(SYSTEM_PROMPT.contains("virgule"));
         assert!(SYSTEM_PROMPT.contains("point d'interrogation"));
         assert!(SYSTEM_PROMPT.contains("point d'exclamation"));
         assert!(SYSTEM_PROMPT.contains("entre parenthèses"));
+        assert!(SYSTEM_PROMPT.contains("entre guillemets"));
         assert!(SYSTEM_PROMPT.contains("ne doivent jamais"));
     }
 
