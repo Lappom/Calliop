@@ -47,7 +47,8 @@ fn prepare_partial_transcript(raw: &str, snippets: &[Snippet]) -> String {
 
 /// Maximum time to wait for LLM cleanup (Qwen3 1.7B on CPU can take tens of seconds).
 const LLM_CLEANUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
-/// Fast-path budget before injecting the raw transcript; LLM continues in background if slower.
+/// Max wait for LLM-polished text before falling back to post-processed injection.
+/// Typical Qwen3 1.7B CPU cleanup is ~3 s; keep headroom for variance.
 const LLM_INJECT_WAIT: std::time::Duration = std::time::Duration::from_secs(4);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -85,10 +86,17 @@ pub struct PartialTranscriptEvent {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct LatencyMetricsEvent {
+    /// Cumulative Whisper inference time (overlaps with recording when streaming).
     #[serde(rename = "sttMs")]
     pub stt_ms: u64,
+    /// Wall-clock STT drain after hotkey release until the transcript is ready.
+    #[serde(rename = "sttWaitMs")]
+    pub stt_wait_ms: u64,
     #[serde(rename = "llmMs")]
     pub llm_ms: u64,
+    /// Wall-clock time blocked waiting for LLM before injection (0 when fast-path used).
+    #[serde(rename = "llmBlockedMs")]
+    pub llm_blocked_ms: u64,
     #[serde(rename = "injectMs")]
     pub inject_ms: u64,
     #[serde(rename = "totalMs")]
@@ -422,6 +430,15 @@ impl PipelineOrchestrator {
         let audio_duration_ms =
             (samples.len() as u64).saturating_mul(1_000) / u64::from(TARGET_SAMPLE_RATE);
 
+        let context_rules = self.app_context_rules.read().clone();
+        let context_handle = thread::spawn(move || match get_active_window() {
+            Some(window) => {
+                let tone = resolve_tone(&window, &context_rules);
+                (tone, Some(window))
+            }
+            None => (ToneProfile::Default, None),
+        });
+
         if let Some(session) = self.streaming.take() {
             session.stop_flag.store(true, Ordering::SeqCst);
             if let Some(worker) = session.worker {
@@ -477,9 +494,11 @@ impl PipelineOrchestrator {
 
         let stt_ms = streaming_stt_ms + fallback_stt_ms;
         let raw = transcripts.join(" ").trim().to_string();
+        let stt_wait_ms = stop_instant.elapsed().as_millis() as u64;
 
-        // After STT the user may return to the target app; capture before LLM wait/inject.
-        let (active_tone, active_window) = self.resolve_active_context();
+        let (active_tone, active_window) = context_handle.join().map_err(|_| {
+            PipelineError::Background("failed to resolve active window context".into())
+        })?;
 
         let auto_edit = self.auto_edit.load(Ordering::SeqCst);
         if !raw.is_empty() && auto_edit && self.llm.lock().is_none() {
@@ -489,6 +508,7 @@ impl PipelineOrchestrator {
         let snippets = self.snippets.read().clone();
         let snippet_fallback = prepare_display_transcript(&raw, &snippets);
 
+        let mut llm_blocked_ms = 0_u64;
         let (text_to_inject, llm_ms, llm_invalidated) =
             if !raw.is_empty() && auto_edit && self.llm.lock().is_some() {
                 let snippets_snapshot = snippets.clone();
@@ -501,7 +521,8 @@ impl PipelineOrchestrator {
                     &full_text,
                     active_tone,
                 );
-                match job.wait_for_inject(LLM_INJECT_WAIT) {
+                let llm_wait_start = Instant::now();
+                let outcome = match job.wait_for_inject(LLM_INJECT_WAIT) {
                     LlmCleanupWait::Completed {
                         text,
                         llm_ms,
@@ -538,7 +559,9 @@ impl PipelineOrchestrator {
                         };
                         (text, 0, false)
                     }
-                }
+                };
+                llm_blocked_ms = llm_wait_start.elapsed().as_millis() as u64;
+                outcome
             } else if raw.is_empty() {
                 (String::new(), 0, false)
             } else {
@@ -563,7 +586,9 @@ impl PipelineOrchestrator {
             "latency-metrics",
             LatencyMetricsEvent {
                 stt_ms,
+                stt_wait_ms,
                 llm_ms,
+                llm_blocked_ms,
                 inject_ms,
                 total_ms,
             },

@@ -140,10 +140,15 @@ export function MainView({
                   Latence (debug)
                 </p>
                 <p className="text-body-sm m-0 font-mono text-ink">
-                  STT {latencyMetrics.sttMs} ms
-                  {latencyMetrics.llmMs > 0
-                    ? ` · LLM ${latencyMetrics.llmMs} ms`
-                    : ""}{" "}
+                  {latencyMetrics.sttWaitMs != null
+                    ? `STT attente ${latencyMetrics.sttWaitMs} ms (inférence ${latencyMetrics.sttMs} ms)`
+                    : `STT ${latencyMetrics.sttMs} ms`}
+                  {latencyMetrics.llmBlockedMs != null &&
+                  latencyMetrics.llmBlockedMs > 0
+                    ? ` · LLM bloqué ${latencyMetrics.llmBlockedMs} ms`
+                    : latencyMetrics.llmMs > 0
+                      ? ` · LLM ${latencyMetrics.llmMs} ms`
+                      : ""}{" "}
                   · injection {latencyMetrics.injectMs} ms · total{" "}
                   {latencyMetrics.totalMs} ms
                 </p>

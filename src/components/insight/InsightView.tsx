@@ -33,13 +33,22 @@ function MetricCard({
 }
 
 function formatLatencyDetail(
-  latency: { sttMs: number; llmMs: number; injectMs: number },
+  latency: {
+    sttMs: number;
+    sttWaitMs?: number;
+    llmMs: number;
+    llmBlockedMs?: number;
+    injectMs: number;
+  },
 ): string {
-  const parts = [
-    `STT ${latency.sttMs} ms`,
-    `injection ${latency.injectMs} ms`,
-  ];
-  if (latency.llmMs > 0) {
+  const sttLabel =
+    latency.sttWaitMs != null
+      ? `STT attente ${latency.sttWaitMs} ms (inférence ${latency.sttMs} ms)`
+      : `STT ${latency.sttMs} ms`;
+  const parts = [sttLabel, `injection ${latency.injectMs} ms`];
+  if (latency.llmBlockedMs != null && latency.llmBlockedMs > 0) {
+    parts.push(`LLM bloqué ${latency.llmBlockedMs} ms`);
+  } else if (latency.llmMs > 0) {
     parts.push(`LLM ${latency.llmMs} ms`);
   }
   return parts.join(" · ");
