@@ -1,0 +1,3 @@
+# Built by scripts/prepare-llm-sidecar.* — do not commit the triple-suffixed binaries.
+*
+!.gitignore

@@ -61,7 +61,12 @@ impl ResampleStreamState {
     }
 
     fn push_chunk(&mut self, chunk: &[f32]) {
-        append_interleaved(&mut self.mono, &mut self.pending_frame, chunk, self.channels);
+        append_interleaved(
+            &mut self.mono,
+            &mut self.pending_frame,
+            chunk,
+            self.channels,
+        );
     }
 
     fn drain_delta(&mut self) -> Vec<f32> {

@@ -166,15 +166,16 @@ Application desktop qui permet de **dicter dans n'importe quelle application** a
 **Objectif :** différenciation vs simple Whisper GUI.
 
 #### 3a — Auto-edits IA
-- [ ] Intégration llama.cpp (modèle 3B quantifié)
-- [ ] Prompt de nettoyage (fillers, ponctuation, reformulation)
-- [ ] Toggle on/off + mode « verbatim » (sans LLM)
-- [ ] Exécution async (ne bloque pas l'injection si LLM lent)
+- [x] Intégration llama.cpp (modèle 3B quantifié)
+- [x] Prompt de nettoyage (fillers, ponctuation, reformulation)
+- [x] Toggle on/off + mode « verbatim » (sans LLM)
+- [x] Exécution async (ne bloque pas l'injection si LLM lent)
 
 #### 3b — Dictionnaire personnel
 - [ ] CRUD mots / noms propres dans Settings
 - [ ] Injection dans `initial_prompt` Whisper
 - [ ] Apprentissage auto des corrections utilisateur
+- [ ] Notifications sur les corrections utilisateur
 
 #### 3c — Snippets vocaux
 - [ ] Définition trigger → texte complet
@@ -197,6 +198,19 @@ Application desktop qui permet de **dicter dans n'importe quelle application** a
 - [ ] Re-copie / réinjection
 
 **Critère de done :** dicter un message Slack poli, un commit message technique, un snippet « mon calendrier ».
+
+---
+
+### Phase 3.5 — Optimisation des performances
+
+**Objectif :** optimiser les performances du pipeline.
+
+- [ ] Optimiser le pipeline audio
+- [ ] Optimiser le pipeline de transcription
+- [ ] Optimiser le pipeline de post-traitement
+- [ ] Optimiser le pipeline de notification
+- [ ] Optimiser le pipeline de démarrage automatique
+
 
 ---
 

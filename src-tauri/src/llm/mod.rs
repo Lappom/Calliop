@@ -1,5 +1,29 @@
 //! Local LLM post-processing for auto-edits (Phase 3+).
 
+mod client;
+mod engine;
+mod model;
+mod prompt;
+
+pub use engine::{ensure_engine_ready, LlamaEngine};
+pub use model::{
+    ensure_llm_model_blocking, is_valid_model_file, model_download_urls, model_exists, model_path,
+    LlmModelDownloadProgress, LlmModelError, DEFAULT_MODEL_FILE, EXPECTED_MODEL_MIN_BYTES,
+};
+pub use prompt::{
+    build_cleanup_user_message, validate_cleanup_output, QWEN3_CHAT_TEMPLATE, SYSTEM_PROMPT,
+};
+
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum LlmError {
+    #[error("worker error: {0}")]
+    Worker(String),
+    #[error(transparent)]
+    Prompt(#[from] prompt::PromptError),
+}
+
 pub fn module_name() -> &'static str {
     "llm"
 }

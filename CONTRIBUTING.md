@@ -16,7 +16,7 @@ pnpm install
 pnpm tauri:dev
 ```
 
-Sur Windows, `tauri:dev` garantit que CMake 4.x est disponible (requis pour `whisper-rs`).
+Sur Windows, `tauri:dev` garantit que CMake 4.x est disponible et compile le sidecar LLM (`calliop-llm-worker`).
 
 ## Vérifications avant PR
 
@@ -37,6 +37,8 @@ Tests manuels par module (depuis `src-tauri/`) :
 cargo run --bin test-audio -- record 3s output.wav
 cargo run --bin test-stt -- output.wav
 cargo run --bin test-inject -- "Hello world"
+cargo run --bin test-llm -- "euh bonjour donc voilà"
+cargo build -p calliop-llm-worker
 ```
 
 ## Conventions

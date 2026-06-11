@@ -48,9 +48,6 @@ mod tests {
 
     #[test]
     fn long_release_after_idle_stops_push_to_talk() {
-        assert!(should_stop_ptt_on_release(
-            true,
-            Duration::from_millis(500)
-        ));
+        assert!(should_stop_ptt_on_release(true, Duration::from_millis(500)));
     }
 }

@@ -1,3 +1,7 @@
+[workspace]
+members = [".", "crates/calliop-llm-worker", "crates/calliop-prompt"]
+resolver = "2"
+
 [package]
 name = "calliop"
 version = "0.1.0"
@@ -31,6 +35,11 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 dirs = "6"
 parking_lot = "0.12"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+calliop-prompt = { path = "crates/calliop-prompt" }
+
+[features]
+default = []
 
 [[bin]]
 name = "calliop"
@@ -47,3 +56,7 @@ path = "src/bin/test-stt.rs"
 [[bin]]
 name = "test-inject"
 path = "src/bin/test-inject.rs"
+
+[[bin]]
+name = "test-llm"
+path = "src/bin/test-llm.rs"

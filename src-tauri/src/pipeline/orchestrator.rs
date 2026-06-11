@@ -10,7 +10,13 @@ use thiserror::Error;
 
 use crate::audio::{AudioCapture, VadSegmenter};
 use crate::inject::{InjectError, TextInjector};
+use crate::llm::LlamaEngine;
 use crate::stt::{SttError, WhisperEngine};
+
+/// Maximum time to wait for LLM cleanup (Qwen3 1.7B on CPU can take tens of seconds).
+const LLM_CLEANUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
+/// Fast-path budget before injecting the raw transcript; LLM continues in background if slower.
+const LLM_INJECT_WAIT: std::time::Duration = std::time::Duration::from_secs(4);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -49,6 +55,8 @@ pub struct PartialTranscriptEvent {
 pub struct LatencyMetricsEvent {
     #[serde(rename = "sttMs")]
     pub stt_ms: u64,
+    #[serde(rename = "llmMs")]
+    pub llm_ms: u64,
     #[serde(rename = "injectMs")]
     pub inject_ms: u64,
     #[serde(rename = "totalMs")]
@@ -70,6 +78,8 @@ pub enum PipelineError {
     Stt(#[from] SttError),
     #[error(transparent)]
     Inject(#[from] InjectError),
+    #[error(transparent)]
+    Llm(#[from] crate::llm::LlmError),
     #[error("whisper model not loaded")]
     ModelNotLoaded,
     #[error("pipeline busy ({0:?})")]
@@ -89,6 +99,9 @@ pub struct PipelineOrchestrator {
     audio: AudioCapture,
     injector: TextInjector,
     whisper: Arc<Mutex<Option<WhisperEngine>>>,
+    llm: Arc<Mutex<Option<LlamaEngine>>>,
+    llm_ready: Arc<AtomicBool>,
+    auto_edit: Arc<AtomicBool>,
     streaming: Option<StreamingSession>,
     segment_transcripts: Arc<Mutex<Vec<String>>>,
     failed_segments: Arc<Mutex<Vec<Vec<f32>>>>,
@@ -102,6 +115,9 @@ impl PipelineOrchestrator {
             audio: AudioCapture::new()?,
             injector: TextInjector::new()?,
             whisper: Arc::new(Mutex::new(None)),
+            llm: Arc::new(Mutex::new(None)),
+            llm_ready: Arc::new(AtomicBool::new(false)),
+            auto_edit: Arc::new(AtomicBool::new(false)),
             streaming: None,
             segment_transcripts: Arc::new(Mutex::new(Vec::new())),
             failed_segments: Arc::new(Mutex::new(Vec::new())),
@@ -115,6 +131,26 @@ impl PipelineOrchestrator {
 
     pub fn set_whisper_engine(&mut self, engine: Arc<Mutex<Option<WhisperEngine>>>) {
         self.whisper = engine;
+    }
+
+    pub fn set_llm_engine(&mut self, engine: Arc<Mutex<Option<LlamaEngine>>>) {
+        self.llm = engine;
+    }
+
+    pub fn set_llm_ready(&mut self, ready: Arc<AtomicBool>) {
+        self.llm_ready = ready;
+    }
+
+    pub fn set_auto_edit(&mut self, enabled: bool) {
+        self.auto_edit.store(enabled, Ordering::SeqCst);
+    }
+
+    pub fn auto_edit_enabled(&self) -> bool {
+        self.auto_edit.load(Ordering::SeqCst)
+    }
+
+    pub fn is_llm_loaded(&self) -> bool {
+        self.llm.lock().is_some()
     }
 
     pub fn is_model_loaded(&self) -> bool {
@@ -263,10 +299,52 @@ impl PipelineOrchestrator {
         let stt_ms = streaming_stt_ms + fallback_stt_ms;
         let full_text = transcripts.join(" ").trim().to_string();
 
+        let auto_edit = self.auto_edit.load(Ordering::SeqCst);
+        if !full_text.is_empty() && auto_edit && self.llm.lock().is_none() {
+            wait_for_llm_engine(&self.llm, LLM_INJECT_WAIT);
+        }
+
+        let (text_to_inject, llm_ms, llm_invalidated) = if !full_text.is_empty()
+            && auto_edit
+            && self.llm.lock().is_some()
+        {
+            let job = start_llm_cleanup(
+                Arc::clone(&self.llm),
+                Arc::clone(&self.llm_ready),
+                Arc::clone(&self.auto_edit),
+                &full_text,
+            );
+            match job.wait_for_inject(LLM_INJECT_WAIT) {
+                LlmCleanupWait::Completed {
+                    text,
+                    llm_ms,
+                    invalidated,
+                } => {
+                    let text = if self.auto_edit.load(Ordering::SeqCst) {
+                        text
+                    } else {
+                        full_text.clone()
+                    };
+                    (text, llm_ms, invalidated)
+                }
+                LlmCleanupWait::Pending(job) => {
+                    job.finalize_in_background(app.clone());
+                    (full_text.clone(), 0, false)
+                }
+            }
+        } else {
+            (full_text.clone(), 0, false)
+        };
+
+        if llm_invalidated && self.auto_edit.load(Ordering::SeqCst) {
+            let _ = app.emit("llm-unready", ());
+            crate::spawn_llm_recovery_if_needed(app.clone());
+        }
+
         self.set_state(app, PipelineState::Injecting, None);
         let inject_start = Instant::now();
-        if !full_text.is_empty() {
-            self.injector.inject(&full_text)?;
+        if !text_to_inject.is_empty() {
+            self.injector.inject(&text_to_inject)?;
         }
         let inject_ms = inject_start.elapsed().as_millis() as u64;
         let total_ms = stop_instant.elapsed().as_millis() as u64;
@@ -275,13 +353,14 @@ impl PipelineOrchestrator {
             "latency-metrics",
             LatencyMetricsEvent {
                 stt_ms,
+                llm_ms,
                 inject_ms,
                 total_ms,
             },
         );
 
         hide_overlay(app);
-        self.set_state(app, PipelineState::Idle, Some(full_text));
+        self.set_state(app, PipelineState::Idle, Some(text_to_inject));
         Ok(())
     }
 
@@ -327,6 +406,230 @@ impl PipelineOrchestrator {
         self.streaming_stt_ms.store(0, Ordering::SeqCst);
         let _ = app.emit("partial-transcript-reset", ());
         hide_overlay(app);
+    }
+}
+
+fn wait_for_llm_engine(llm: &Arc<Mutex<Option<LlamaEngine>>>, timeout: std::time::Duration) {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if llm.lock().is_some() {
+            return;
+        }
+        thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
+/// Clears the global LLM slot only if it is still vacant from this cleanup job, or still
+/// holds the same sidecar PID. Avoids wiping a newer engine installed while cleanup ran
+/// in the background.
+fn invalidate_llm_engine_from_cleanup(
+    llm: &Arc<Mutex<Option<LlamaEngine>>>,
+    llm_ready: &Arc<AtomicBool>,
+    cleanup_pid: Option<u32>,
+) -> bool {
+    let mut guard = llm.lock();
+    let should_invalidate = match guard.as_ref() {
+        None => true,
+        Some(engine) => cleanup_pid == Some(engine.pid()),
+    };
+    if should_invalidate {
+        *guard = None;
+        llm_ready.store(false, Ordering::SeqCst);
+    }
+    should_invalidate
+}
+
+fn restore_llm_engine(
+    llm: &Arc<Mutex<Option<LlamaEngine>>>,
+    auto_edit: &Arc<AtomicBool>,
+    engine: LlamaEngine,
+) {
+    if !auto_edit.load(Ordering::SeqCst) {
+        return;
+    }
+    let mut guard = llm.lock();
+    if guard.is_none() {
+        *guard = Some(engine);
+    }
+}
+
+enum LlmCleanupOutcome {
+    Success {
+        cleaned: String,
+        engine: LlamaEngine,
+    },
+    Failed,
+}
+
+struct LlmCleanupJob {
+    rx: std::sync::mpsc::Receiver<LlmCleanupOutcome>,
+    worker: thread::JoinHandle<()>,
+    llm: Arc<Mutex<Option<LlamaEngine>>>,
+    llm_ready: Arc<AtomicBool>,
+    auto_edit: Arc<AtomicBool>,
+    raw: String,
+    worker_pid: Option<u32>,
+    start: Instant,
+}
+
+enum LlmCleanupWait {
+    Completed {
+        text: String,
+        llm_ms: u64,
+        invalidated: bool,
+    },
+    Pending(LlmCleanupJob),
+}
+
+impl LlmCleanupJob {
+    fn wait_for_inject(self, timeout: std::time::Duration) -> LlmCleanupWait {
+        match self.rx.recv_timeout(timeout) {
+            Ok(LlmCleanupOutcome::Success { cleaned, engine }) => {
+                restore_llm_engine(&self.llm, &self.auto_edit, engine);
+                let _ = self.worker.join();
+                let text = if self.auto_edit.load(Ordering::SeqCst) {
+                    cleaned
+                } else {
+                    self.raw
+                };
+                LlmCleanupWait::Completed {
+                    text,
+                    llm_ms: self.start.elapsed().as_millis() as u64,
+                    invalidated: false,
+                }
+            }
+            Ok(LlmCleanupOutcome::Failed) => {
+                let _ = self.worker.join();
+                let invalidated = invalidate_llm_engine_from_cleanup(
+                    &self.llm,
+                    &self.llm_ready,
+                    self.worker_pid,
+                );
+                LlmCleanupWait::Completed {
+                    text: self.raw,
+                    llm_ms: self.start.elapsed().as_millis() as u64,
+                    invalidated,
+                }
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => LlmCleanupWait::Pending(self),
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                let _ = self.worker.join();
+                let invalidated = invalidate_llm_engine_from_cleanup(
+                    &self.llm,
+                    &self.llm_ready,
+                    self.worker_pid,
+                );
+                LlmCleanupWait::Completed {
+                    text: self.raw,
+                    llm_ms: self.start.elapsed().as_millis() as u64,
+                    invalidated,
+                }
+            }
+        }
+    }
+
+    fn finalize_in_background(self, app: AppHandle) {
+        thread::spawn(move || {
+            let remaining = LLM_CLEANUP_TIMEOUT.saturating_sub(self.start.elapsed());
+            let invalidated = match self.rx.recv_timeout(remaining) {
+                Ok(LlmCleanupOutcome::Success { engine, .. }) => {
+                    restore_llm_engine(&self.llm, &self.auto_edit, engine);
+                    false
+                }
+                Ok(LlmCleanupOutcome::Failed) => invalidate_llm_engine_from_cleanup(
+                    &self.llm,
+                    &self.llm_ready,
+                    self.worker_pid,
+                ),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    eprintln!(
+                        "llm cleanup timed out after {:?}, raw transcript already injected",
+                        LLM_CLEANUP_TIMEOUT
+                    );
+                    if let Some(pid) = self.worker_pid {
+                        force_kill_sidecar(pid);
+                    }
+                    let _ = self.worker.join();
+                    invalidate_llm_engine_from_cleanup(
+                        &self.llm,
+                        &self.llm_ready,
+                        self.worker_pid,
+                    )
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    eprintln!("llm cleanup worker disconnected, raw transcript already injected");
+                    let _ = self.worker.join();
+                    invalidate_llm_engine_from_cleanup(
+                        &self.llm,
+                        &self.llm_ready,
+                        self.worker_pid,
+                    )
+                }
+            };
+
+            if invalidated && self.auto_edit.load(Ordering::SeqCst) {
+                let _ = app.emit("llm-unready", ());
+                crate::spawn_llm_recovery_if_needed(app);
+            }
+        });
+    }
+}
+
+fn start_llm_cleanup(
+    llm: Arc<Mutex<Option<LlamaEngine>>>,
+    llm_ready: Arc<AtomicBool>,
+    auto_edit: Arc<AtomicBool>,
+    raw: &str,
+) -> LlmCleanupJob {
+    let raw = raw.to_string();
+    let start = Instant::now();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let raw_for_worker = raw.clone();
+    let llm_for_worker = Arc::clone(&llm);
+    let worker_pid = llm.lock().as_ref().map(LlamaEngine::pid);
+
+    let worker = thread::spawn(move || {
+        let engine = llm_for_worker.lock().take();
+        let outcome = match engine {
+            Some(mut engine) => match engine.cleanup(&raw_for_worker) {
+                Ok(cleaned) => LlmCleanupOutcome::Success { cleaned, engine },
+                Err(err) => {
+                    eprintln!("llm cleanup failed, using raw transcript: {err}");
+                    LlmCleanupOutcome::Failed
+                }
+            },
+            None => {
+                eprintln!("llm cleanup failed: llm engine not loaded");
+                LlmCleanupOutcome::Failed
+            }
+        };
+        let _ = tx.send(outcome);
+    });
+
+    LlmCleanupJob {
+        rx,
+        worker,
+        llm,
+        llm_ready,
+        auto_edit,
+        raw,
+        worker_pid,
+        start,
+    }
+}
+
+fn force_kill_sidecar(pid: u32) {
+    #[cfg(windows)]
+    {
+        let _ = std::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/F", "/T"])
+            .output();
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = std::process::Command::new("kill")
+            .args(["-9", &pid.to_string()])
+            .output();
     }
 }
 
