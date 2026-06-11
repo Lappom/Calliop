@@ -55,10 +55,14 @@ jobs:
             libwebkit2gtk-4.1-dev \
             libayatana-appindicator3-dev \
             librsvg2-dev \
+            libxdo-dev \
             patchelf \
             cmake \
             clang \
             libclang-dev
+
+      - name: Prepare LLM sidecar
+        run: bash ../scripts/prepare-llm-sidecar.sh
 
       - name: Check formatting
         run: cargo fmt --check
@@ -80,6 +84,7 @@ jobs:
     runs-on: ${{ matrix.platform }}
     env:
       MACOSX_DEPLOYMENT_TARGET: "10.15"
+      CMAKE_OSX_DEPLOYMENT_TARGET: "10.15"
     steps:
       - uses: actions/checkout@v4
 
@@ -116,7 +121,7 @@ jobs:
         uses: humbletim/setup-vulkan-sdk@v1.2.1
         with:
           vulkan-query-version: 1.3.290.0
-          vulkan-components: Vulkan-Headers, Vulkan-Loader, Glslang
+          vulkan-components: Vulkan-Headers, Vulkan-Loader, SPIRV-Tools, Glslang
           vulkan-use-cache: true
 
       - name: Prepare LLM sidecar (Windows)
@@ -137,10 +142,14 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Set macOS C++ deployment target
+        if: matrix.platform == 'macos-latest'
+        run: echo "CXXFLAGS=-mmacosx-version-min=10.15" >> "$GITHUB_ENV"
+
       - name: Build Tauri app (Windows GPU)
         if: matrix.platform == 'windows-latest'
-        run: pnpm tauri build --features gpu
+        run: pnpm tauri build --features gpu --config '{"bundle":{"createUpdaterArtifacts":false}}'
 
       - name: Build Tauri app
         if: matrix.platform != 'windows-latest'
-        run: pnpm tauri build
+        run: pnpm tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}'
