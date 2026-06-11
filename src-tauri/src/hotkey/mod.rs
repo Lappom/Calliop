@@ -3,7 +3,7 @@
 mod shortcut;
 
 pub use shortcut::{
-    default_shortcut, should_stop_ptt_on_release, shortcut_label, DEFAULT_HOTKEY_ID,
+    default_shortcut, shortcut_label, should_stop_ptt_on_release, DEFAULT_HOTKEY_ID,
     PTT_RELEASE_THRESHOLD,
 };
 

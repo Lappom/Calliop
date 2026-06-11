@@ -28,6 +28,7 @@ export interface PartialTranscriptPayload {
 
 export interface LatencyMetricsPayload {
   sttMs: number;
+  llmMs: number;
   injectMs: number;
   totalMs: number;
 }

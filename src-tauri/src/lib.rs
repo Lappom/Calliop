@@ -14,6 +14,8 @@ use parking_lot::Mutex;
 use pipeline::{
     spawn_start, spawn_stop, spawn_toggle, PipelineOrchestrator, PipelineState, PipelineStateEvent,
 };
+use serde::{Deserialize, Serialize};
+use store::{AppSettings, Store};
 use tauri::{
     menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -49,8 +51,41 @@ struct TrayHandles {
 struct AppState {
     pipeline: Arc<Mutex<PipelineOrchestrator>>,
     whisper_engine: Arc<Mutex<Option<stt::WhisperEngine>>>,
+    llm_engine: Arc<Mutex<Option<llm::LlamaEngine>>>,
+    store: Arc<Store>,
     model_ready: AtomicBool,
+    llm_ready: Arc<AtomicBool>,
+    llm_init: Arc<tokio::sync::Mutex<()>>,
     hotkey_press: Mutex<HotkeyPressState>,
+}
+
+fn llm_engine_is_live(state: &AppState) -> bool {
+    state.llm_ready.load(Ordering::SeqCst) && state.llm_engine.lock().is_some()
+}
+
+fn shutdown_llm_engine(state: &AppState) {
+    state.llm_ready.store(false, Ordering::SeqCst);
+    *state.llm_engine.lock() = None;
+}
+
+pub(crate) fn spawn_llm_recovery_if_needed(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        let state = app.state::<AppState>();
+        if !state.pipeline.lock().auto_edit_enabled() {
+            return;
+        }
+        if llm_engine_is_live(&state) {
+            return;
+        }
+        if let Err(err) = ensure_llm_model(app.clone(), state).await {
+            eprintln!("llm recovery after invalidation failed: {err}");
+        }
+    });
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SettingsPayload {
+    auto_edit: bool,
 }
 
 const MENU_OPEN: &str = "open";
@@ -66,6 +101,123 @@ fn get_pipeline_state(state: State<'_, AppState>) -> String {
 #[tauri::command]
 fn toggle_dictation(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     spawn_toggle(app.clone(), state.pipeline.clone());
+    Ok(())
+}
+
+#[tauri::command]
+fn get_settings(state: State<'_, AppState>) -> Result<SettingsPayload, String> {
+    let settings = state.store.load_settings().map_err(|e| e.to_string())?;
+    Ok(SettingsPayload {
+        auto_edit: settings.auto_edit,
+    })
+}
+
+#[tauri::command]
+async fn set_settings(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    settings: SettingsPayload,
+) -> Result<(), String> {
+    let previous = state.store.load_settings().map_err(|e| e.to_string())?;
+
+    if settings.auto_edit {
+        state.pipeline.lock().set_auto_edit(true);
+
+        if let Err(err) = ensure_llm_model(app, state.clone()).await {
+            state.pipeline.lock().set_auto_edit(previous.auto_edit);
+            shutdown_llm_engine(&state);
+            return Err(err);
+        }
+
+        if let Err(err) = state
+            .store
+            .save_settings(&AppSettings {
+                auto_edit: true,
+            })
+            .map_err(|e| e.to_string())
+        {
+            state.pipeline.lock().set_auto_edit(previous.auto_edit);
+            shutdown_llm_engine(&state);
+            return Err(err);
+        }
+    } else {
+        state
+            .store
+            .save_settings(&AppSettings {
+                auto_edit: false,
+            })
+            .map_err(|e| e.to_string())?;
+        state.pipeline.lock().set_auto_edit(false);
+        shutdown_llm_engine(&state);
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn ensure_llm_model(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    if !state.pipeline.lock().auto_edit_enabled() {
+        return Ok(());
+    }
+
+    if llm_engine_is_live(&state) {
+        return Ok(());
+    }
+
+    if state.llm_ready.load(Ordering::SeqCst) {
+        state.llm_ready.store(false, Ordering::SeqCst);
+    }
+
+    let _init_guard = state.llm_init.lock().await;
+
+    if !state.pipeline.lock().auto_edit_enabled() {
+        return Ok(());
+    }
+
+    if llm_engine_is_live(&state) {
+        return Ok(());
+    }
+
+    shutdown_llm_engine(&state);
+
+    let app_for_download = app.clone();
+    let _model_path = tauri::async_runtime::spawn_blocking(move || {
+        llm::ensure_llm_model_blocking(Some(&app_for_download))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
+
+    if !state.pipeline.lock().auto_edit_enabled() {
+        return Ok(());
+    }
+
+    let engine = tauri::async_runtime::spawn_blocking(|| {
+        let mut engine = llm::LlamaEngine::start()?;
+        if let Err(err) = engine.cleanup("bonjour") {
+            eprintln!("llm warmup failed (non-fatal): {err}");
+        }
+        Ok(engine)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e: llm::LlmError| e.to_string())?;
+
+    if !state.pipeline.lock().auto_edit_enabled() {
+        return Ok(());
+    }
+
+    {
+        *state.llm_engine.lock() = Some(engine);
+    }
+    {
+        let mut pipeline = state.pipeline.lock();
+        pipeline.set_llm_engine(Arc::clone(&state.llm_engine));
+        pipeline.set_llm_ready(Arc::clone(&state.llm_ready));
+    }
+
+    state.llm_ready.store(true, Ordering::SeqCst);
+    let _ = app.emit("llm-ready", ());
     Ok(())
 }
 
@@ -106,8 +258,9 @@ async fn ensure_model(app: AppHandle, state: State<'_, AppState>) -> Result<(), 
         .map_err(|e| e.to_string())?;
 
     {
-        let mut whisper = state.whisper_engine.lock();
-        *whisper = Some(engine);
+        *state.whisper_engine.lock() = Some(engine);
+    }
+    {
         let mut pipeline = state.pipeline.lock();
         pipeline.set_whisper_engine(Arc::clone(&state.whisper_engine));
     }
@@ -268,6 +421,15 @@ pub fn run() {
     let pipeline = Arc::new(Mutex::new(
         PipelineOrchestrator::new().expect("failed to initialize pipeline orchestrator"),
     ));
+    let store = Arc::new(Store::open().expect("failed to open settings store"));
+    let initial_settings = store
+        .load_settings()
+        .expect("failed to load initial settings");
+    pipeline.lock().set_auto_edit(initial_settings.auto_edit);
+
+    let whisper_engine = Arc::new(Mutex::new(None));
+    let llm_engine = Arc::new(Mutex::new(None));
+    let llm_ready = Arc::new(AtomicBool::new(false));
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -284,8 +446,12 @@ pub fn run() {
         )
         .manage(AppState {
             pipeline: pipeline.clone(),
-            whisper_engine: Arc::new(Mutex::new(None)),
+            whisper_engine: whisper_engine.clone(),
+            llm_engine: llm_engine.clone(),
+            store,
             model_ready: AtomicBool::new(false),
+            llm_ready: llm_ready.clone(),
+            llm_init: Arc::new(tokio::sync::Mutex::new(())),
             hotkey_press: Mutex::new(HotkeyPressState {
                 press_start: None,
                 was_idle_on_press: false,
@@ -326,22 +492,34 @@ pub fn run() {
                 }
             });
 
+            if initial_settings.auto_edit {
+                let app_handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let state = app_handle.state::<AppState>();
+                    if let Err(err) = ensure_llm_model(app_handle.clone(), state).await {
+                        eprintln!("llm model initialization failed: {err}");
+                    }
+                });
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             get_pipeline_state,
             toggle_dictation,
             ensure_model,
+            ensure_llm_model,
+            get_settings,
+            set_settings,
             is_autostart_enabled,
             set_autostart_enabled
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
-        .run(|app, event| match event {
-            RunEvent::Ready => {
+        .run(|app, event| {
+            if let RunEvent::Ready = event {
                 sync_autostart_menu(app);
             }
-            _ => {}
         });
 }
 

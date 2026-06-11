@@ -10,8 +10,8 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src",
-    "tauri": "tauri",
-    "tauri:dev": "powershell -ExecutionPolicy Bypass -File ./scripts/dev.ps1"
+    "tauri": "node ./scripts/tauri-cli.mjs",
+    "tauri:dev": "node ./scripts/tauri-cli.mjs dev"
   },
   "dependencies": {
     "@fontsource/geist": "^5.2.9",
