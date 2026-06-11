@@ -305,6 +305,8 @@ impl PipelineOrchestrator {
 
     fn finish_dictation(&mut self, app: &AppHandle) -> Result<(), PipelineError> {
         let stop_instant = Instant::now();
+        // Capture tone while the dictation target app is still foreground.
+        let active_tone = self.resolve_active_tone();
 
         let samples = self.audio.stop()?;
 
@@ -369,13 +371,12 @@ impl PipelineOrchestrator {
                 let snippets_at_shield = self.snippets.read().clone();
                 let (shielded_text, snippet_shields) =
                     shield_snippet_triggers(&full_text, &snippets_at_shield);
-                let tone = self.resolve_active_tone();
                 let job = start_llm_cleanup(
                     Arc::clone(&self.llm),
                     Arc::clone(&self.llm_ready),
                     Arc::clone(&self.auto_edit),
                     &shielded_text,
-                    tone,
+                    active_tone,
                 );
                 match job.wait_for_inject(LLM_INJECT_WAIT) {
                     LlmCleanupWait::Completed {

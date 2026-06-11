@@ -20,9 +20,10 @@ pub fn get_active_window() -> Option<ActiveWindow> {
     }
 
     let title = read_window_title(hwnd)?;
+    let process_id = window_process_id(hwnd);
     let (exe_name, exe_path) =
         read_process_info(hwnd).unwrap_or((String::new(), None));
-    if is_own_process(&exe_path) {
+    if is_own_process(&exe_path, process_id) {
         return None;
     }
 
@@ -48,7 +49,7 @@ fn read_window_title(hwnd: HWND) -> Option<String> {
     Some(String::from_utf16_lossy(&buffer))
 }
 
-fn read_process_info(hwnd: HWND) -> Option<(String, Option<String>)> {
+fn window_process_id(hwnd: HWND) -> Option<u32> {
     let mut process_id = 0_u32;
     unsafe {
         windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId(
@@ -56,9 +57,11 @@ fn read_process_info(hwnd: HWND) -> Option<(String, Option<String>)> {
             Some(&mut process_id),
         );
     }
-    if process_id == 0 {
-        return None;
-    }
+    (process_id != 0).then_some(process_id)
+}
+
+fn read_process_info(hwnd: HWND) -> Option<(String, Option<String>)> {
+    let process_id = window_process_id(hwnd)?;
 
     let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, process_id).ok()? };
 
@@ -91,20 +94,16 @@ fn read_process_info(hwnd: HWND) -> Option<(String, Option<String>)> {
     result
 }
 
-fn is_own_process(exe_path: &Option<String>) -> bool {
+fn is_own_process(exe_path: &Option<String>, process_id: Option<u32>) -> bool {
+    if process_id == Some(std::process::id()) {
+        return true;
+    }
     let Some(path) = exe_path else {
         return false;
     };
-    let own_pid = std::process::id();
-    let own_exe = std::env::current_exe().ok();
-    if let Some(own_exe) = own_exe {
-        if own_exe.to_string_lossy().eq_ignore_ascii_case(path) {
-            return true;
-        }
-    }
-    // Fallback: same PID check via path basename when current_exe matches process name only.
-    let _ = own_pid;
-    false
+    std::env::current_exe()
+        .ok()
+        .is_some_and(|own_exe| own_exe.to_string_lossy().eq_ignore_ascii_case(path))
 }
 
 #[cfg(test)]
@@ -113,5 +112,18 @@ mod tests {
     fn get_active_window_smoke() {
         // May return None in headless CI; should not panic.
         let _ = super::get_active_window();
+    }
+
+    #[test]
+    fn is_own_process_matches_current_pid() {
+        assert!(super::is_own_process(
+            &None,
+            Some(std::process::id())
+        ));
+    }
+
+    #[test]
+    fn is_own_process_without_pid_or_path_is_false() {
+        assert!(!super::is_own_process(&None, None));
     }
 }
