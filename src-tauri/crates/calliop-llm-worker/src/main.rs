@@ -18,7 +18,7 @@ use llama_cpp_2::sampling::LlamaSampler;
 use serde::{Deserialize, Serialize};
 
 const CLEANUP_CONTEXT_TOKENS: u32 = 2048;
-const CLEANUP_MAX_OUTPUT_TOKENS: i32 = 256;
+const CLEANUP_MAX_OUTPUT_TOKENS: i32 = 128;
 const DEFAULT_SEED: u32 = 42;
 
 fn resolve_chat_template(model: &LlamaModel) -> Result<LlamaChatTemplate, String> {
@@ -87,7 +87,7 @@ impl InferenceEngine {
             .map_err(|err| err.to_string())?;
         let tokens = self
             .model
-            .str_to_token(&prompt, AddBos::Always)
+            .str_to_token(&prompt, AddBos::Never)
             .map_err(|err| err.to_string())?;
 
         let ctx_size = NonZeroU32::new(CLEANUP_CONTEXT_TOKENS).expect("non-zero context");
@@ -143,7 +143,14 @@ impl InferenceEngine {
             generated += 1;
         }
 
-        validate_cleanup_output(raw, &output).map_err(|err| err.to_string())
+        validate_cleanup_output(raw, &output).map_err(|err| {
+            if output.trim().is_empty() {
+                eprintln!("llm cleanup produced no tokens before validation");
+            } else {
+                eprintln!("llm cleanup raw output before validation: {output:?}");
+            }
+            err.to_string()
+        })
     }
 }
 

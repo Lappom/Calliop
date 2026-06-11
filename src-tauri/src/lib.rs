@@ -162,10 +162,16 @@ async fn ensure_llm_model(app: AppHandle, state: State<'_, AppState>) -> Result<
     .map_err(|e| e.to_string())?
     .map_err(|e| e.to_string())?;
 
-    let engine = tauri::async_runtime::spawn_blocking(llm::LlamaEngine::start)
+    let engine = tauri::async_runtime::spawn_blocking(|| {
+        let mut engine = llm::LlamaEngine::start()?;
+        if let Err(err) = engine.cleanup("bonjour") {
+            eprintln!("llm warmup failed (non-fatal): {err}");
+        }
+        Ok(engine)
+    })
         .await
         .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())?;
+        .map_err(|e: llm::LlmError| e.to_string())?;
 
     {
         let mut llm = state.llm_engine.lock();

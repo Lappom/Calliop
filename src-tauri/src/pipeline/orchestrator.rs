@@ -13,10 +13,10 @@ use crate::inject::{InjectError, TextInjector};
 use crate::llm::LlamaEngine;
 use crate::stt::{SttError, WhisperEngine};
 
-/// Maximum time to wait for LLM cleanup before force-killing the sidecar.
-const LLM_CLEANUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(4);
-/// Max wait before injecting raw transcript while LLM cleanup continues in background.
-const LLM_INJECT_WAIT: std::time::Duration = std::time::Duration::from_millis(500);
+/// Maximum time to wait for LLM cleanup (Qwen3 1.7B on CPU can take tens of seconds).
+const LLM_CLEANUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
+/// Wait for LLM before injecting; must match cleanup budget so cleaned text can land in the target app.
+const LLM_INJECT_WAIT: std::time::Duration = LLM_CLEANUP_TIMEOUT;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
