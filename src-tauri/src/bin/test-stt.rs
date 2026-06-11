@@ -2,7 +2,7 @@ use std::env;
 use std::fs::File;
 
 use calliop_lib::audio::TARGET_SAMPLE_RATE;
-use calliop_lib::stt::{ensure_model_blocking, WhisperEngine};
+use calliop_lib::stt::{ensure_model_blocking, WhisperEngine, WhisperModel};
 use hound::WavReader;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -15,7 +15,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let input_path = &args[1];
     println!("Loading Whisper model (download on first run)...");
-    let model_path = ensure_model_blocking(None)?;
+    let model_path = ensure_model_blocking(None, WhisperModel::default())?;
 
     let samples = read_wav(input_path)?;
     println!(

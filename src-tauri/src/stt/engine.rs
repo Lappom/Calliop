@@ -44,17 +44,24 @@ pub struct WhisperEngine {
 
 impl WhisperEngine {
     pub fn new(model_path: &Path) -> Result<Self, SttError> {
+        Self::new_with_gpu(model_path, true)
+    }
+
+    pub fn new_with_gpu(model_path: &Path, use_gpu: bool) -> Result<Self, SttError> {
         let path_str = model_path.to_str().ok_or_else(|| SttError::LoadModel {
             path: model_path.display().to_string(),
             message: "invalid UTF-8 path".into(),
         })?;
 
-        let context =
-            WhisperContext::new_with_params(path_str, WhisperContextParameters::default())
-                .map_err(|e| SttError::LoadModel {
-                    path: path_str.into(),
-                    message: e.to_string(),
-                })?;
+        let mut ctx_params = WhisperContextParameters::default();
+        ctx_params.use_gpu(use_gpu);
+
+        let context = WhisperContext::new_with_params(path_str, ctx_params).map_err(|e| {
+            SttError::LoadModel {
+                path: path_str.into(),
+                message: e.to_string(),
+            }
+        })?;
 
         let state = context
             .create_state()

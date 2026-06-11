@@ -21,8 +21,9 @@ function Test-CmakeUsable {
 
 # Check our persistent portable install first.
 if (Test-CmakeUsable $cmakeExe) {
-    Write-Host "CMake found: $cmakeExe"
-    return $cmakeExe
+    [Console]::Error.WriteLine("CMake found: $cmakeExe")
+    Write-Output $cmakeExe
+    exit 0
 }
 
 # Accept a system CMake on PATH only if it is a real install (not a temp extract).
@@ -31,8 +32,9 @@ if ($systemCmake -and (Test-CmakeUsable $systemCmake.Source)) {
     $src = $systemCmake.Source
     $isTemp = $src -match '\\Temp\\' -or $src -match '/Temp/'
     if (-not $isTemp) {
-        Write-Host "CMake found on PATH: $src"
-        return $src
+        [Console]::Error.WriteLine("CMake found on PATH: $src")
+        Write-Output $src
+        exit 0
     }
 }
 
@@ -63,5 +65,5 @@ if (-not (Test-CmakeUsable $cmakeExe)) {
     throw "CMake installation failed at $cmakeExe"
 }
 
-Write-Host "CMake installed: $cmakeExe"
-return $cmakeExe
+[Console]::Error.WriteLine("CMake installed: $cmakeExe")
+Write-Output $cmakeExe

@@ -1,7 +1,9 @@
+use std::path::Path;
+
 use calliop_prompt::ToneProfile;
 
 use super::client::WorkerClient;
-use super::model::ensure_llm_model_blocking;
+use super::model::{ensure_llm_model_blocking, LlmModel};
 use super::LlmError;
 
 pub struct LlamaEngine {
@@ -10,8 +12,17 @@ pub struct LlamaEngine {
 
 impl LlamaEngine {
     pub fn start() -> Result<Self, LlmError> {
+        let model = LlmModel::default();
+        let path = model.path();
+        Self::start_with_config(
+            &path,
+            crate::inference::gpu_layers(crate::store::InferenceBackend::Auto),
+        )
+    }
+
+    pub fn start_with_config(model_path: &Path, n_gpu_layers: u32) -> Result<Self, LlmError> {
         Ok(Self {
-            client: WorkerClient::spawn()?,
+            client: WorkerClient::spawn(model_path, n_gpu_layers)?,
         })
     }
 
@@ -30,9 +41,10 @@ impl Drop for LlamaEngine {
     }
 }
 
-pub fn ensure_engine_ready() -> Result<LlamaEngine, LlmError> {
-    ensure_llm_model_blocking(None).map_err(|err| LlmError::Worker(err.to_string()))?;
-    LlamaEngine::start()
+pub fn ensure_engine_ready(model: LlmModel, n_gpu_layers: u32) -> Result<LlamaEngine, LlmError> {
+    let path =
+        ensure_llm_model_blocking(None, model).map_err(|err| LlmError::Worker(err.to_string()))?;
+    LlamaEngine::start_with_config(&path, n_gpu_layers)
 }
 
 #[cfg(test)]
@@ -41,7 +53,7 @@ mod tests {
 
     #[test]
     fn start_requires_downloaded_model_or_worker() {
-        let path = super::super::model::model_path();
+        let path = super::super::model::LlmModel::default().path();
         if !path.exists() {
             return;
         }

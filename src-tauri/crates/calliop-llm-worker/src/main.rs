@@ -21,7 +21,7 @@ use llama_cpp_2::token::LlamaToken;
 use serde::{Deserialize, Serialize};
 
 const CLEANUP_CONTEXT_TOKENS: u32 = 2048;
-const CLEANUP_MAX_OUTPUT_TOKENS: i32 = 96;
+const CLEANUP_MAX_OUTPUT_TOKENS: i32 = 256;
 
 fn resolve_chat_template(model: &LlamaModel) -> Result<LlamaChatTemplate, String> {
     match model.chat_template(None) {
@@ -63,13 +63,14 @@ struct InferenceEngine {
 }
 
 impl InferenceEngine {
-    fn load(model_path: &Path) -> Result<Self, String> {
+    fn load(model_path: &Path, n_gpu_layers: u32) -> Result<Self, String> {
         let backend = LlamaBackend::init().map_err(|err| err.to_string())?;
         let n_threads = std::thread::available_parallelism()
             .map(|n| n.get() as i32)
             .unwrap_or(4)
             .min(8);
-        let model = LlamaModel::load_from_file(&backend, model_path, &LlamaModelParams::default())
+        let model_params = LlamaModelParams::default().with_n_gpu_layers(n_gpu_layers);
+        let model = LlamaModel::load_from_file(&backend, model_path, &model_params)
             .map_err(|err| err.to_string())?;
         let chat_template = resolve_chat_template(&model)?;
         let system_prompts = [
@@ -96,7 +97,7 @@ impl InferenceEngine {
         }
     }
 
-    fn new_session_context(&self) -> Result<(LlamaContext<'_>, LlamaBatch), String> {
+    fn new_session_context(&self) -> Result<(LlamaContext<'_>, LlamaBatch<'_>), String> {
         let ctx_size = NonZeroU32::new(CLEANUP_CONTEXT_TOKENS).expect("non-zero context");
         let ctx_params = LlamaContextParams::default()
             .with_n_ctx(Some(ctx_size))
@@ -266,15 +267,30 @@ fn parse_model_path(args: &[String]) -> Result<PathBuf, String> {
     Err("missing --model-path".into())
 }
 
+fn parse_n_gpu_layers(args: &[String]) -> u32 {
+    for (index, arg) in args.iter().enumerate() {
+        if arg == "--ngl" {
+            if let Some(value) = args.get(index + 1) {
+                return value.parse().unwrap_or(0);
+            }
+        }
+    }
+    if cfg!(feature = "gpu") {
+        99
+    } else {
+        0
+    }
+}
+
 fn parse_oneshot_text(args: &[String]) -> Result<String, String> {
     let mut text_parts = Vec::new();
     let mut index = 1;
     while index < args.len() {
         match args[index].as_str() {
             "--oneshot" | "--serve" => index += 1,
-            "--model-path" => {
+            "--model-path" | "--ngl" => {
                 if index + 1 >= args.len() {
-                    return Err("missing value for --model-path".into());
+                    return Err("missing value for flag".into());
                 }
                 index += 2;
             }
@@ -293,8 +309,8 @@ fn parse_oneshot_text(args: &[String]) -> Result<String, String> {
     }
 }
 
-fn serve(model_path: PathBuf) -> Result<(), String> {
-    let engine = InferenceEngine::load(&model_path)?;
+fn serve(model_path: PathBuf, n_gpu_layers: u32) -> Result<(), String> {
+    let engine = InferenceEngine::load(&model_path, n_gpu_layers)?;
     let (mut ctx, mut batch) = engine.new_session_context()?;
     let mut tone_cache = ToneKvCache::default();
     write_response(&WorkerResponse {
@@ -335,8 +351,8 @@ fn serve(model_path: PathBuf) -> Result<(), String> {
     Ok(())
 }
 
-fn oneshot(model_path: PathBuf, text: String) -> Result<(), String> {
-    let engine = InferenceEngine::load(&model_path)?;
+fn oneshot(model_path: PathBuf, n_gpu_layers: u32, text: String) -> Result<(), String> {
+    let engine = InferenceEngine::load(&model_path, n_gpu_layers)?;
     let (mut ctx, mut batch) = engine.new_session_context()?;
     let mut tone_cache = ToneKvCache::default();
     let cleaned = engine.cleanup_with_context(
@@ -352,8 +368,10 @@ fn oneshot(model_path: PathBuf, text: String) -> Result<(), String> {
 
 fn usage() -> ! {
     eprintln!("Usage:");
-    eprintln!("  calliop-llm-worker --serve --model-path <path>");
-    eprintln!("  calliop-llm-worker --oneshot --model-path <path> \"text to clean\"");
+    eprintln!("  calliop-llm-worker --serve --model-path <path> [--ngl <layers>]");
+    eprintln!(
+        "  calliop-llm-worker --oneshot --model-path <path> [--ngl <layers>] \"text to clean\""
+    );
     std::process::exit(1);
 }
 
@@ -371,11 +389,13 @@ fn main() {
         }
     };
 
+    let n_gpu_layers = parse_n_gpu_layers(&args);
+
     let result = if args.iter().any(|arg| arg == "--serve") {
-        serve(model_path)
+        serve(model_path, n_gpu_layers)
     } else if args.iter().any(|arg| arg == "--oneshot") {
         match parse_oneshot_text(&args) {
-            Ok(text) => oneshot(model_path, text),
+            Ok(text) => oneshot(model_path, n_gpu_layers, text),
             Err(err) => Err(err),
         }
     } else {

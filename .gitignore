@@ -29,3 +29,4 @@ dist-ssr
 
 # Rust
 src-tauri/target/
+ct/

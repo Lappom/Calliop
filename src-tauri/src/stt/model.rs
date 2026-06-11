@@ -1,22 +1,82 @@
 use std::path::{Path, PathBuf};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 use thiserror::Error;
 
 pub const DEFAULT_MODEL_FILE: &str = "ggml-small.bin";
 
-/// ggml-small.bin is ~466 MiB; reject truncated or HTML error-page downloads.
-pub const EXPECTED_MODEL_MIN_BYTES: u64 = 450_000_000;
-
-/// Ordered download sources. Hugging Face is primary until a Calliop mirror exists.
-pub fn model_download_urls() -> &'static [&'static str] {
-    &[
-        "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
-        // Future Calliop mirror (enable when the release asset is published).
-        // "https://github.com/calliop-app/calliop/releases/download/models-v0/ggml-small.bin",
-    ]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WhisperModel {
+    #[default]
+    Small,
+    DistilFrDec16,
 }
+
+impl WhisperModel {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_lowercase().as_str() {
+            "small" => Some(Self::Small),
+            // Legacy: medium replaced by distil-fr-dec16 (option 3 tier lineup).
+            "medium" | "distil-fr-dec16" => Some(Self::DistilFrDec16),
+            _ => None,
+        }
+    }
+
+    pub fn as_setting_value(self) -> &'static str {
+        match self {
+            Self::Small => "small",
+            Self::DistilFrDec16 => "distil-fr-dec16",
+        }
+    }
+
+    pub fn file_name(self) -> &'static str {
+        match self {
+            Self::Small => "ggml-small.bin",
+            Self::DistilFrDec16 => "whisper-distil-fr-dec16-q5_0.bin",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Small => "Rapide — Small (~466 Mo)",
+            Self::DistilFrDec16 => "Équilibré — Distil FR dec16 (~755 Mo)",
+        }
+    }
+
+    pub fn min_bytes(self) -> u64 {
+        match self {
+            Self::Small => 450_000_000,
+            Self::DistilFrDec16 => 750_000_000,
+        }
+    }
+
+    pub fn download_urls(self) -> &'static [&'static str] {
+        match self {
+            Self::Small => {
+                &["https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin"]
+            }
+            Self::DistilFrDec16 => &[
+                "https://huggingface.co/bofenghuang/whisper-large-v3-french-distil-dec16/resolve/main/ggml-model-q5_0.bin",
+            ],
+        }
+    }
+
+    pub fn path(self) -> PathBuf {
+        models_dir().join(self.file_name())
+    }
+
+    pub fn is_installed(self) -> bool {
+        is_valid_model_file(self, &self.path())
+    }
+
+    pub fn all() -> [Self; 2] {
+        [Self::Small, Self::DistilFrDec16]
+    }
+}
+
+pub const LEGACY_MEDIUM_MODEL_FILE: &str = "ggml-medium.bin";
 
 pub fn models_dir() -> PathBuf {
     dirs::data_dir()
@@ -25,16 +85,31 @@ pub fn models_dir() -> PathBuf {
         .join("models")
 }
 
-pub fn model_path() -> PathBuf {
-    models_dir().join(DEFAULT_MODEL_FILE)
+pub fn legacy_medium_model_path() -> PathBuf {
+    models_dir().join(LEGACY_MEDIUM_MODEL_FILE)
 }
 
-pub fn model_exists() -> bool {
-    model_path().exists()
+/// Remove orphaned Whisper medium weights after migration to distil-fr-dec16.
+pub fn remove_legacy_medium_model() -> std::io::Result<()> {
+    let path = legacy_medium_model_path();
+    if path.exists() {
+        std::fs::remove_file(path)
+    } else {
+        Ok(())
+    }
+}
+
+pub fn model_path(model: WhisperModel) -> PathBuf {
+    model.path()
+}
+
+pub fn model_exists(model: WhisperModel) -> bool {
+    model.is_installed()
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ModelDownloadProgress {
+    pub model_id: String,
     pub downloaded: u64,
     pub total: Option<u64>,
     pub percent: f32,
@@ -49,27 +124,27 @@ pub enum ModelError {
     Download { url: String, message: String },
     #[error("all download sources failed")]
     AllSourcesFailed,
-    #[error(
-        "downloaded model is too small ({size} bytes, expected >= {EXPECTED_MODEL_MIN_BYTES})"
-    )]
-    ModelTooSmall { size: u64 },
+    #[error("downloaded model is too small ({size} bytes, expected >= {min_bytes})")]
+    ModelTooSmall { size: u64, min_bytes: u64 },
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
 }
 
-pub fn is_valid_model_file(path: &Path) -> bool {
+pub fn is_valid_model_file(model: WhisperModel, path: &Path) -> bool {
     std::fs::metadata(path)
-        .map(|meta| meta.len() >= EXPECTED_MODEL_MIN_BYTES)
+        .map(|meta| meta.len() >= model.min_bytes())
         .unwrap_or(false)
 }
 
-pub fn ensure_model_blocking(app: Option<&AppHandle>) -> Result<PathBuf, ModelError> {
-    let path = model_path();
+pub fn ensure_model_blocking(
+    app: Option<&AppHandle>,
+    model: WhisperModel,
+) -> Result<PathBuf, ModelError> {
+    let path = model.path();
     if path.exists() {
-        if is_valid_model_file(&path) {
+        if is_valid_model_file(model, &path) {
             return Ok(path);
         }
-        // Corrupt or partial download from a previous run — remove and retry.
         let _ = std::fs::remove_file(&path);
     }
 
@@ -86,10 +161,14 @@ pub fn ensure_model_blocking(app: Option<&AppHandle>) -> Result<PathBuf, ModelEr
         message: e.to_string(),
     })?;
 
-    rt.block_on(download_model(app, &path))
+    rt.block_on(download_model(app, model, &path))
 }
 
-pub async fn download_model(app: Option<&AppHandle>, dest: &Path) -> Result<PathBuf, ModelError> {
+pub async fn download_model(
+    app: Option<&AppHandle>,
+    model: WhisperModel,
+    dest: &Path,
+) -> Result<PathBuf, ModelError> {
     let client = reqwest::Client::builder()
         .user_agent("Calliop/0.1")
         .build()
@@ -100,8 +179,8 @@ pub async fn download_model(app: Option<&AppHandle>, dest: &Path) -> Result<Path
 
     let mut last_error = None;
 
-    for url in model_download_urls() {
-        match try_download(&client, app, url, dest).await {
+    for url in model.download_urls() {
+        match try_download(&client, app, model, url, dest).await {
             Ok(()) => return Ok(dest.to_path_buf()),
             Err(err) => {
                 let _ = std::fs::remove_file(dest);
@@ -120,6 +199,7 @@ pub async fn download_model(app: Option<&AppHandle>, dest: &Path) -> Result<Path
 async fn try_download(
     client: &reqwest::Client,
     app: Option<&AppHandle>,
+    model: WhisperModel,
     url: &str,
     dest: &Path,
 ) -> Result<(), ModelError> {
@@ -159,6 +239,7 @@ async fn try_download(
             let _ = handle.emit(
                 "model-download-progress",
                 ModelDownloadProgress {
+                    model_id: model.as_setting_value().into(),
                     downloaded,
                     total,
                     percent,
@@ -171,8 +252,9 @@ async fn try_download(
     file.flush().await?;
 
     let size = std::fs::metadata(dest).map_err(ModelError::Io)?.len();
-    if size < EXPECTED_MODEL_MIN_BYTES {
-        return Err(ModelError::ModelTooSmall { size });
+    let min_bytes = model.min_bytes();
+    if size < min_bytes {
+        return Err(ModelError::ModelTooSmall { size, min_bytes });
     }
 
     Ok(())
@@ -184,8 +266,10 @@ mod tests {
 
     #[test]
     fn model_urls_use_huggingface_primary() {
-        let urls = model_download_urls();
-        assert!(urls[0].contains("huggingface.co"));
+        for model in WhisperModel::all() {
+            let urls = model.download_urls();
+            assert!(urls[0].contains("huggingface.co"));
+        }
     }
 
     #[test]
@@ -194,12 +278,36 @@ mod tests {
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("tiny.bin");
         std::fs::write(&path, vec![0u8; 1024]).unwrap();
-        assert!(!is_valid_model_file(&path));
+        assert!(!is_valid_model_file(WhisperModel::Small, &path));
         let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
     fn default_model_filename() {
-        assert!(model_path().ends_with(DEFAULT_MODEL_FILE));
+        assert!(model_path(WhisperModel::default()).ends_with(DEFAULT_MODEL_FILE));
+    }
+
+    #[test]
+    fn legacy_medium_path_uses_expected_filename() {
+        assert!(legacy_medium_model_path()
+            .ends_with(LEGACY_MEDIUM_MODEL_FILE));
+    }
+
+    #[test]
+    fn remove_legacy_medium_is_ok_when_file_absent() {
+        assert!(remove_legacy_medium_model().is_ok());
+    }
+
+    #[test]
+    fn parses_model_ids() {
+        assert_eq!(
+            WhisperModel::parse("medium"),
+            Some(WhisperModel::DistilFrDec16)
+        );
+        assert_eq!(
+            WhisperModel::parse("distil-fr-dec16"),
+            Some(WhisperModel::DistilFrDec16)
+        );
+        assert_eq!(WhisperModel::parse("unknown"), None);
     }
 }

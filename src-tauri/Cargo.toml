@@ -27,7 +27,7 @@ voice_activity_detector = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 cpal = "0.15"
-whisper-rs = "0.16"
+whisper-rs = { version = "0.16", default-features = true }
 arboard = "3.4"
 enigo = "0.3"
 thiserror = "2"
@@ -49,6 +49,7 @@ windows = { version = "0.58", features = [
 
 [features]
 default = []
+gpu = ["whisper-rs/vulkan"]
 
 [[bin]]
 name = "calliop"

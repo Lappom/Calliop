@@ -8,7 +8,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize};
 use thiserror::Error;
 
-use calliop_prompt::{post_process_transcript, ToneProfile};
+use calliop_prompt::{join_transcript_segments, post_process_transcript, ToneProfile};
 
 use crate::app_context::{get_active_window, resolve_tone, ActiveWindow};
 use crate::audio::{AudioCapture, VadSegmenter, TARGET_SAMPLE_RATE};
@@ -45,11 +45,8 @@ fn prepare_partial_transcript(raw: &str, snippets: &[Snippet]) -> String {
     apply_snippets(trimmed, snippets)
 }
 
-/// Maximum time to wait for LLM cleanup (Qwen3 1.7B on CPU can take tens of seconds).
+/// Maximum time to wait for LLM cleanup before inject or worker kill.
 const LLM_CLEANUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
-/// Max wait for LLM-polished text before falling back to post-processed injection.
-/// Typical Qwen3 1.7B CPU cleanup is ~3 s; keep headroom for variance.
-const LLM_INJECT_WAIT: std::time::Duration = std::time::Duration::from_secs(4);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -487,7 +484,7 @@ impl PipelineOrchestrator {
         }
 
         let stt_ms = streaming_stt_ms + fallback_stt_ms;
-        let raw = transcripts.join(" ").trim().to_string();
+        let raw = join_transcript_segments(&transcripts).trim().to_string();
         let stt_wait_ms = stop_instant.elapsed().as_millis() as u64;
 
         // After STT the user may return to the target app; capture before LLM wait/inject.
@@ -505,7 +502,7 @@ impl PipelineOrchestrator {
         };
 
         if !raw.is_empty() && auto_edit && self.llm.lock().is_none() {
-            wait_for_llm_engine(&self.llm, LLM_INJECT_WAIT);
+            wait_for_llm_engine(&self.llm, LLM_CLEANUP_TIMEOUT);
         }
 
         let mut llm_blocked_ms = 0_u64;
@@ -528,46 +525,33 @@ impl PipelineOrchestrator {
                         active_tone,
                     );
                     let llm_wait_start = Instant::now();
-                    let outcome = match job.wait_for_inject(LLM_INJECT_WAIT) {
-                        LlmCleanupWait::Completed {
-                            text,
-                            llm_ms,
-                            invalidated,
-                        } => {
-                            let snippets = self.snippets.read().clone();
-                            let text = if self.auto_edit.load(Ordering::SeqCst) {
-                                if snippets == snippets_snapshot {
-                                    finalize_llm_with_snippets(
-                                        &text,
-                                        &snippet_shields,
-                                        &snippet_fallback,
-                                        &snippets,
-                                    )
-                                } else {
-                                    let from_cleaned = apply_snippets(&text, &snippets);
-                                    if from_cleaned != text {
-                                        from_cleaned
-                                    } else {
-                                        snippet_fallback.clone()
-                                    }
-                                }
+                    let LlmCleanupWait::Completed {
+                        text,
+                        llm_ms,
+                        invalidated,
+                    } = job.wait_for_inject(LLM_CLEANUP_TIMEOUT);
+                    let snippets = self.snippets.read().clone();
+                    let text = if self.auto_edit.load(Ordering::SeqCst) {
+                        if snippets == snippets_snapshot {
+                            finalize_llm_with_snippets(
+                                &text,
+                                &snippet_shields,
+                                &snippet_fallback,
+                                &snippets,
+                            )
+                        } else {
+                            let from_cleaned = apply_snippets(&text, &snippets);
+                            if from_cleaned != text {
+                                from_cleaned
                             } else {
                                 snippet_fallback.clone()
-                            };
-                            (text, llm_ms, invalidated)
+                            }
                         }
-                        LlmCleanupWait::Pending(job) => {
-                            job.finalize_in_background(app.clone());
-                            let text = if snippet_shields.is_empty() {
-                                full_text
-                            } else {
-                                unshield_snippets(&full_text, &snippet_shields)
-                            };
-                            (text, 0, false)
-                        }
+                    } else {
+                        snippet_fallback.clone()
                     };
                     llm_blocked_ms = llm_wait_start.elapsed().as_millis() as u64;
-                    outcome
+                    (text, llm_ms, invalidated)
                 }
             } else if raw.is_empty() {
                 (String::new(), 0, false)
@@ -760,7 +744,6 @@ enum LlmCleanupWait {
         llm_ms: u64,
         invalidated: bool,
     },
-    Pending(LlmCleanupJob),
 }
 
 impl LlmCleanupJob {
@@ -790,7 +773,23 @@ impl LlmCleanupJob {
                     invalidated,
                 }
             }
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => LlmCleanupWait::Pending(self),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                eprintln!(
+                    "llm cleanup timed out after {:?}, using post-processed transcript",
+                    timeout
+                );
+                if let Some(pid) = self.worker_pid {
+                    force_kill_sidecar(pid);
+                }
+                let _ = self.worker.join();
+                let invalidated =
+                    invalidate_llm_engine_from_cleanup(&self.llm, &self.llm_ready, self.worker_pid);
+                LlmCleanupWait::Completed {
+                    text: self.raw,
+                    llm_ms: self.start.elapsed().as_millis() as u64,
+                    invalidated,
+                }
+            }
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                 let _ = self.worker.join();
                 let invalidated =
@@ -802,42 +801,6 @@ impl LlmCleanupJob {
                 }
             }
         }
-    }
-
-    fn finalize_in_background(self, app: AppHandle) {
-        thread::spawn(move || {
-            let remaining = LLM_CLEANUP_TIMEOUT.saturating_sub(self.start.elapsed());
-            let invalidated = match self.rx.recv_timeout(remaining) {
-                Ok(LlmCleanupOutcome::Success { engine, .. }) => {
-                    restore_llm_engine(&self.llm, &self.auto_edit, engine);
-                    false
-                }
-                Ok(LlmCleanupOutcome::Failed) => {
-                    invalidate_llm_engine_from_cleanup(&self.llm, &self.llm_ready, self.worker_pid)
-                }
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                    eprintln!(
-                        "llm cleanup timed out after {:?}, raw transcript already injected",
-                        LLM_CLEANUP_TIMEOUT
-                    );
-                    if let Some(pid) = self.worker_pid {
-                        force_kill_sidecar(pid);
-                    }
-                    let _ = self.worker.join();
-                    invalidate_llm_engine_from_cleanup(&self.llm, &self.llm_ready, self.worker_pid)
-                }
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                    eprintln!("llm cleanup worker disconnected, raw transcript already injected");
-                    let _ = self.worker.join();
-                    invalidate_llm_engine_from_cleanup(&self.llm, &self.llm_ready, self.worker_pid)
-                }
-            };
-
-            if invalidated && self.auto_edit.load(Ordering::SeqCst) {
-                let _ = app.emit("llm-unready", ());
-                crate::spawn_llm_recovery_if_needed(app);
-            }
-        });
     }
 }
 
@@ -1007,7 +970,7 @@ fn transcribe_segment(
     let raw = {
         let mut transcripts = stt.transcripts.lock();
         transcripts.push(text.text.clone());
-        transcripts.join(" ")
+        join_transcript_segments(transcripts.iter().map(String::as_str).collect::<Vec<_>>())
     };
     let display = prepare_partial_transcript(&raw, &stt.snippets.read());
 

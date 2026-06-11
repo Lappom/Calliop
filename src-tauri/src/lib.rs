@@ -2,6 +2,7 @@ pub mod app_context;
 pub mod audio;
 pub mod dictionary_notify;
 pub mod hotkey;
+pub mod inference;
 pub mod inject;
 pub mod llm;
 pub mod observe;
@@ -9,7 +10,7 @@ pub mod pipeline;
 pub mod store;
 pub mod stt;
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -25,23 +26,26 @@ use store::{
     extract_correction_words, is_valid_app_context_pattern, is_valid_dictionary_word,
     is_valid_snippet_content, is_valid_trigger, normalize_trigger, normalize_word,
     AppContextMatchType, AppContextRule, AppSettings, DictationEntry, DictionarySource,
-    DictionaryWord, Insights, NewAppContextRule, Snippet, SnippetImport, Store, DEFAULT_LIST_LIMIT,
+    DictionaryWord, InferenceBackend, Insights, NewAppContextRule, Snippet, SnippetImport, Store,
+    DEFAULT_LIST_LIMIT,
 };
-use stt::{SttLanguage, WhisperPromptCache, MAX_INITIAL_PROMPT_WORDS};
+use stt::{SttLanguage, WhisperModel, WhisperPromptCache, MAX_INITIAL_PROMPT_WORDS};
 use tauri::{
     menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, Manager, RunEvent, State, WindowEvent,
 };
 use tauri_plugin_autostart::ManagerExt;
+use tauri_plugin_global_shortcut::Shortcut;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
 /// Returns registered core module names (Phase 0 wiring check).
-pub fn registered_modules() -> [&'static str; 9] {
+pub fn registered_modules() -> [&'static str; 10] {
     [
         audio::module_name(),
         stt::module_name(),
         llm::module_name(),
+        inference::module_name(),
         inject::module_name(),
         hotkey::module_name(),
         store::module_name(),
@@ -66,6 +70,11 @@ struct TrayHandles {
     autostart_item: CheckMenuItem<tauri::Wry>,
 }
 
+struct MicProbeState {
+    capture: Mutex<Option<audio::AudioCapture>>,
+    level_task: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
+}
+
 struct AppState {
     pipeline: Arc<Mutex<PipelineOrchestrator>>,
     whisper_engine: Arc<Mutex<Option<stt::WhisperEngine>>>,
@@ -79,6 +88,9 @@ struct AppState {
     llm_init: Arc<tokio::sync::Mutex<()>>,
     hotkey_press: Mutex<HotkeyPressState>,
     deferred_llm_on_boot: AtomicBool,
+    current_hotkey: Mutex<Shortcut>,
+    hotkey_suspend_depth: AtomicU32,
+    mic_probe: MicProbeState,
 }
 
 fn llm_engine_is_live(state: &AppState) -> bool {
@@ -110,6 +122,195 @@ struct SettingsPayload {
     auto_edit: bool,
     auto_learn: bool,
     stt_language: String,
+    whisper_model: String,
+    llm_model: String,
+    hotkey: String,
+    inference_backend: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ModelStatusEntry {
+    id: String,
+    label: String,
+    installed: bool,
+    size_bytes: Option<u64>,
+    active: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ModelsStatusPayload {
+    whisper: Vec<ModelStatusEntry>,
+    llm: Vec<ModelStatusEntry>,
+}
+
+fn settings_to_payload(settings: &AppSettings) -> SettingsPayload {
+    SettingsPayload {
+        auto_edit: settings.auto_edit,
+        auto_learn: settings.auto_learn,
+        stt_language: settings.stt_language.clone(),
+        whisper_model: settings.whisper_model.clone(),
+        llm_model: settings.llm_model.clone(),
+        hotkey: settings.hotkey.clone(),
+        inference_backend: settings.inference_backend.clone(),
+    }
+}
+
+fn file_size_bytes(path: &std::path::Path) -> Option<u64> {
+    std::fs::metadata(path).ok().map(|meta| meta.len())
+}
+
+fn build_models_status(settings: &AppSettings) -> ModelsStatusPayload {
+    let active_whisper = settings.whisper_model();
+    let active_llm = settings.llm_model();
+
+    ModelsStatusPayload {
+        whisper: WhisperModel::all()
+            .into_iter()
+            .map(|model| {
+                let path = model.path();
+                ModelStatusEntry {
+                    id: model.as_setting_value().into(),
+                    label: model.label().into(),
+                    installed: model.is_installed(),
+                    size_bytes: if path.exists() {
+                        file_size_bytes(&path)
+                    } else {
+                        None
+                    },
+                    active: model == active_whisper,
+                }
+            })
+            .collect(),
+        llm: llm::LlmModel::all()
+            .into_iter()
+            .map(|model| {
+                let path = model.path();
+                ModelStatusEntry {
+                    id: model.as_setting_value().into(),
+                    label: model.label().into(),
+                    installed: model.is_installed(),
+                    size_bytes: if path.exists() {
+                        file_size_bytes(&path)
+                    } else {
+                        None
+                    },
+                    active: model == active_llm,
+                }
+            })
+            .collect(),
+    }
+}
+
+fn invalidate_whisper_engine(state: &AppState) {
+    state.model_ready.store(false, Ordering::SeqCst);
+    *state.whisper_engine.lock() = None;
+}
+
+struct SettingsRollbackContext {
+    hotkey_changed: bool,
+    stt_language_changed: bool,
+    whisper_invalidated: bool,
+}
+
+async fn rollback_settings(
+    app: &AppHandle,
+    state: &AppState,
+    previous: &AppSettings,
+    ctx: SettingsRollbackContext,
+) -> Result<(), String> {
+    let app_for_notify = app.clone();
+    state
+        .store
+        .save_settings(previous)
+        .map_err(|e| e.to_string())?;
+    if ctx.hotkey_changed {
+        let prev_shortcut = hotkey::parse_shortcut(&previous.hotkey).map_err(|e| e.to_string())?;
+        register_hotkey(&app_for_notify, prev_shortcut)?;
+    }
+    state
+        .pipeline
+        .lock()
+        .set_default_stt_language(previous.stt_language_mode());
+    state.pipeline.lock().set_auto_learn(previous.auto_learn);
+    state.pipeline.lock().set_auto_edit(previous.auto_edit);
+
+    if ctx.whisper_invalidated {
+        invalidate_whisper_engine(state);
+        ensure_model_inner(app, state).await?;
+    }
+
+    if previous.auto_edit {
+        shutdown_llm_engine(state);
+        ensure_llm_model_inner(app, state).await?;
+    } else {
+        shutdown_llm_engine(state);
+    }
+
+    if ctx.stt_language_changed {
+        state
+            .pipeline
+            .lock()
+            .notify_stt_language_changed(&app_for_notify);
+    }
+    Ok(())
+}
+
+fn unregister_current_hotkey(app: &AppHandle, state: &AppState) -> Result<(), String> {
+    let gs = app.global_shortcut();
+    let current = *state.current_hotkey.lock();
+    if gs.is_registered(current) {
+        gs.unregister(current).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+fn suspend_global_hotkey(app: &AppHandle, state: &AppState) -> Result<(), String> {
+    let prev = state.hotkey_suspend_depth.fetch_add(1, Ordering::SeqCst);
+    if prev == 0 {
+        unregister_current_hotkey(app, state)?;
+    }
+    Ok(())
+}
+
+fn resume_global_hotkey(app: &AppHandle, state: &AppState) -> Result<(), String> {
+    let mut current = state.hotkey_suspend_depth.load(Ordering::SeqCst);
+    loop {
+        if current == 0 {
+            return Ok(());
+        }
+        match state.hotkey_suspend_depth.compare_exchange_weak(
+            current,
+            current - 1,
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        ) {
+            Ok(_) => {
+                if current - 1 == 0 {
+                    let settings = state.store.load_settings().map_err(|e| e.to_string())?;
+                    let shortcut =
+                        hotkey::parse_shortcut(&settings.hotkey).map_err(|e| e.to_string())?;
+                    register_hotkey(app, shortcut)?;
+                }
+                return Ok(());
+            }
+            Err(actual) => current = actual,
+        }
+    }
+}
+
+fn is_mic_probe_active(state: &AppState) -> bool {
+    state.mic_probe.capture.lock().is_some()
+}
+
+fn register_hotkey(app: &AppHandle, shortcut: Shortcut) -> Result<(), String> {
+    let gs = app.global_shortcut();
+    let current = *app.state::<AppState>().current_hotkey.lock();
+    if gs.is_registered(current) {
+        gs.unregister(current).map_err(|e| e.to_string())?;
+    }
+    gs.register(shortcut).map_err(|e| e.to_string())?;
+    *app.state::<AppState>().current_hotkey.lock() = shortcut;
+    Ok(())
 }
 
 fn parse_stt_language(value: &str) -> Result<SttLanguage, String> {
@@ -306,6 +507,10 @@ fn get_pipeline_state(state: State<'_, AppState>) -> String {
 
 #[tauri::command]
 async fn toggle_dictation(app: AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    if is_mic_probe_active(&state) {
+        return Err("Arrêtez le test micro avant de dicter.".into());
+    }
     ensure_model_then_toggle(app).await;
     Ok(())
 }
@@ -313,11 +518,102 @@ async fn toggle_dictation(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 fn get_settings(state: State<'_, AppState>) -> Result<SettingsPayload, String> {
     let settings = state.store.load_settings().map_err(|e| e.to_string())?;
-    Ok(SettingsPayload {
-        auto_edit: settings.auto_edit,
-        auto_learn: settings.auto_learn,
-        stt_language: settings.stt_language,
-    })
+    Ok(settings_to_payload(&settings))
+}
+
+#[tauri::command]
+fn get_models_status(state: State<'_, AppState>) -> Result<ModelsStatusPayload, String> {
+    let settings = state.store.load_settings().map_err(|e| e.to_string())?;
+    Ok(build_models_status(&settings))
+}
+
+#[tauri::command]
+fn get_inference_info(state: State<'_, AppState>) -> Result<inference::InferenceInfo, String> {
+    let settings = state.store.load_settings().map_err(|e| e.to_string())?;
+    Ok(inference::get_inference_info(settings.inference_backend()))
+}
+
+#[tauri::command]
+fn is_onboarding_done(state: State<'_, AppState>) -> Result<bool, String> {
+    state.store.is_onboarding_done().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_onboarding_done(state: State<'_, AppState>, done: bool) -> Result<(), String> {
+    state
+        .store
+        .set_onboarding_done(done)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn delete_model(
+    state: State<'_, AppState>,
+    kind: String,
+    model_id: String,
+) -> Result<(), String> {
+    let settings = state.store.load_settings().map_err(|e| e.to_string())?;
+    let path = match kind.as_str() {
+        "whisper" => {
+            let model = WhisperModel::parse(&model_id)
+                .ok_or_else(|| format!("modèle Whisper inconnu: {model_id}"))?;
+            if model == settings.whisper_model() {
+                return Err("Impossible de supprimer le modèle Whisper actif.".into());
+            }
+            model.path()
+        }
+        "llm" => {
+            let model = llm::LlmModel::parse(&model_id)
+                .ok_or_else(|| format!("modèle LLM inconnu: {model_id}"))?;
+            if model == settings.llm_model() {
+                return Err("Impossible de supprimer le modèle LLM actif.".into());
+            }
+            model.path()
+        }
+        _ => return Err("Type de modèle invalide (whisper ou llm).".into()),
+    };
+
+    if path.exists() {
+        std::fs::remove_file(&path).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn set_hotkey(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    hotkey: String,
+) -> Result<(), String> {
+    let shortcut = hotkey::parse_shortcut(&hotkey).map_err(|e| e.to_string())?;
+    let previous = state.store.load_settings().map_err(|e| e.to_string())?;
+    let previous_hotkey = previous.hotkey.clone();
+
+    register_hotkey(&app, shortcut)?;
+
+    let mut next = previous.clone();
+    next.hotkey = hotkey::format_shortcut(&shortcut);
+    if let Err(err) = state.store.save_settings(&next).map_err(|e| e.to_string()) {
+        let rollback_shortcut =
+            hotkey::parse_shortcut(&previous_hotkey).map_err(|e| e.to_string())?;
+        let _ = register_hotkey(&app, rollback_shortcut);
+        return Err(err);
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+fn set_hotkey_capture_active(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    active: bool,
+) -> Result<(), String> {
+    if active {
+        suspend_global_hotkey(&app, &state)
+    } else {
+        resume_global_hotkey(&app, &state)
+    }
 }
 
 #[tauri::command]
@@ -347,58 +643,97 @@ async fn set_settings(
 ) -> Result<(), String> {
     let previous = state.store.load_settings().map_err(|e| e.to_string())?;
     let stt_language = parse_stt_language(&settings.stt_language)?;
+    let whisper_model = WhisperModel::parse(&settings.whisper_model)
+        .ok_or_else(|| format!("modèle Whisper inconnu: {}", settings.whisper_model))?;
+    let llm_model = llm::LlmModel::parse(&settings.llm_model)
+        .ok_or_else(|| format!("modèle LLM inconnu: {}", settings.llm_model))?;
+    let inference_backend = InferenceBackend::parse(&settings.inference_backend)
+        .ok_or_else(|| format!("backend invalide: {}", settings.inference_backend))?;
+
     let prev_stt = previous.stt_language.clone();
     let next_stt = settings.stt_language.clone();
     let app_for_notify = app.clone();
     let stt_language_changed = prev_stt != next_stt;
+    let whisper_changed = previous.whisper_model() != whisper_model;
+    let llm_changed = previous.llm_model() != llm_model;
+    let inference_changed = previous.inference_backend() != inference_backend;
 
-    let rollback = || {
-        state
-            .pipeline
-            .lock()
-            .set_default_stt_language(previous.stt_language_mode());
-        state.pipeline.lock().set_auto_learn(previous.auto_learn);
-        state.pipeline.lock().set_auto_edit(previous.auto_edit);
-        if !previous.auto_edit {
-            shutdown_llm_engine(&state);
-        }
-        if stt_language_changed {
-            state
-                .pipeline
-                .lock()
-                .notify_stt_language_changed(&app_for_notify);
-        }
+    let hotkey_shortcut =
+        hotkey::parse_shortcut(&settings.hotkey).map_err(|e| e.to_string())?;
+    let next_hotkey = hotkey::format_shortcut(&hotkey_shortcut);
+    let hotkey_changed = previous.hotkey != next_hotkey;
+
+    let next_settings = AppSettings {
+        auto_edit: settings.auto_edit,
+        auto_learn: settings.auto_learn,
+        stt_language: next_stt,
+        whisper_model: whisper_model.as_setting_value().into(),
+        llm_model: llm_model.as_setting_value().into(),
+        hotkey: next_hotkey,
+        inference_backend: inference_backend.as_setting_value().into(),
+    };
+
+    let mut rollback_ctx = SettingsRollbackContext {
+        hotkey_changed,
+        stt_language_changed,
+        whisper_invalidated: false,
     };
 
     state.pipeline.lock().set_auto_learn(settings.auto_learn);
     state.pipeline.lock().set_default_stt_language(stt_language);
 
-    if settings.auto_edit {
-        state.pipeline.lock().set_auto_edit(true);
-
-        if let Err(err) = ensure_llm_model(app, state.clone()).await {
-            rollback();
-            shutdown_llm_engine(&state);
-            return Err(err);
-        }
-    } else {
-        state.pipeline.lock().set_auto_edit(false);
-    }
-
     if let Err(err) = state
         .store
-        .save_settings(&AppSettings {
-            auto_edit: settings.auto_edit,
-            auto_learn: settings.auto_learn,
-            stt_language: next_stt,
-        })
+        .save_settings(&next_settings)
         .map_err(|e| e.to_string())
     {
-        rollback();
+        state
+            .pipeline
+            .lock()
+            .set_default_stt_language(previous.stt_language_mode());
+        state.pipeline.lock().set_auto_learn(previous.auto_learn);
         return Err(err);
     }
 
-    if !settings.auto_edit {
+    if hotkey_changed {
+        if let Err(err) = register_hotkey(&app, hotkey_shortcut) {
+            if let Err(rollback_err) =
+                rollback_settings(&app, &state, &previous, rollback_ctx).await
+            {
+                eprintln!("settings rollback failed: {rollback_err}");
+            }
+            return Err(err);
+        }
+    }
+
+    if whisper_changed || inference_changed {
+        invalidate_whisper_engine(&state);
+        rollback_ctx.whisper_invalidated = true;
+        if let Err(err) = ensure_model_inner(&app, &state).await {
+            if let Err(rollback_err) =
+                rollback_settings(&app, &state, &previous, rollback_ctx).await
+            {
+                eprintln!("settings rollback failed: {rollback_err}");
+            }
+            return Err(err);
+        }
+    }
+
+    if settings.auto_edit {
+        state.pipeline.lock().set_auto_edit(true);
+        if llm_changed || inference_changed || !llm_engine_is_live(&state) {
+            shutdown_llm_engine(&state);
+            if let Err(err) = ensure_llm_model_inner(&app, &state).await {
+                if let Err(rollback_err) =
+                    rollback_settings(&app, &state, &previous, rollback_ctx).await
+                {
+                    eprintln!("settings rollback failed: {rollback_err}");
+                }
+                return Err(err);
+            }
+        }
+    } else {
+        state.pipeline.lock().set_auto_edit(false);
         shutdown_llm_engine(&state);
     }
 
@@ -437,9 +772,13 @@ async fn ensure_llm_model_inner(app: &AppHandle, state: &AppState) -> Result<(),
 
     shutdown_llm_engine(state);
 
+    let settings = state.store.load_settings().map_err(|e| e.to_string())?;
+    let llm_model = settings.llm_model();
+    let n_gpu_layers = inference::gpu_layers(settings.inference_backend());
+
     let app_for_download = app.clone();
-    let _model_path = tauri::async_runtime::spawn_blocking(move || {
-        llm::ensure_llm_model_blocking(Some(&app_for_download))
+    let model_path = tauri::async_runtime::spawn_blocking(move || {
+        llm::ensure_llm_model_blocking(Some(&app_for_download), llm_model)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -449,8 +788,8 @@ async fn ensure_llm_model_inner(app: &AppHandle, state: &AppState) -> Result<(),
         return Ok(());
     }
 
-    let engine = tauri::async_runtime::spawn_blocking(|| {
-        let mut engine = llm::LlamaEngine::start()?;
+    let engine = tauri::async_runtime::spawn_blocking(move || {
+        let mut engine = llm::LlamaEngine::start_with_config(&model_path, n_gpu_layers)?;
         if let Err(err) = engine.cleanup("bonjour", ToneProfile::Default) {
             eprintln!("llm warmup failed (non-fatal): {err}");
         }
@@ -809,6 +1148,57 @@ fn is_autostart_enabled(app: AppHandle) -> Result<bool, String> {
 }
 
 #[tauri::command]
+async fn start_mic_probe(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let mut capture_slot = state.mic_probe.capture.lock();
+    if capture_slot.is_some() {
+        return Err("Le test micro est déjà en cours.".into());
+    }
+    if state.pipeline.lock().state() != PipelineState::Idle {
+        return Err("Une dictée est en cours. Arrêtez-la avant de tester le micro.".into());
+    }
+
+    drop(capture_slot);
+    suspend_global_hotkey(&app, &state)?;
+
+    let mut capture = audio::AudioCapture::new().map_err(|e| e.to_string())?;
+    let (level_tx, level_rx) = std::sync::mpsc::channel::<f32>();
+    if let Err(err) = capture.start_with_streaming(None, Some(level_tx)) {
+        let _ = resume_global_hotkey(&app, &state);
+        return Err(err.to_string());
+    }
+
+    let app_clone = app.clone();
+    let level_task = tauri::async_runtime::spawn(async move {
+        while let Ok(level) = level_rx.recv() {
+            let _ = app_clone.emit("audio-level", pipeline::AudioLevelEvent { level });
+        }
+    });
+
+    let mut capture_slot = state.mic_probe.capture.lock();
+    *state.mic_probe.level_task.lock() = Some(level_task);
+    *capture_slot = Some(capture);
+    Ok(())
+}
+
+#[tauri::command]
+async fn stop_mic_probe(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let mut capture_slot = state.mic_probe.capture.lock();
+    let was_active = capture_slot.is_some();
+    if let Some(mut capture) = capture_slot.take() {
+        let _ = capture.stop();
+    }
+    if let Some(handle) = state.mic_probe.level_task.lock().take() {
+        handle.abort();
+    }
+    drop(capture_slot);
+
+    if was_active {
+        resume_global_hotkey(&app, &state)?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
 fn set_autostart_enabled(app: AppHandle, enabled: bool) -> Result<(), String> {
     let autolaunch = app.autolaunch();
     if enabled {
@@ -822,6 +1212,7 @@ fn set_autostart_enabled(app: AppHandle, enabled: bool) -> Result<(), String> {
 
 async fn ensure_model_inner(app: &AppHandle, state: &AppState) -> Result<(), String> {
     if state.model_ready.load(Ordering::SeqCst) {
+        let _ = app.emit("model-ready", ());
         return Ok(());
     }
 
@@ -831,18 +1222,24 @@ async fn ensure_model_inner(app: &AppHandle, state: &AppState) -> Result<(), Str
         return Ok(());
     }
 
+    let settings = state.store.load_settings().map_err(|e| e.to_string())?;
+    let whisper_model = settings.whisper_model();
+    let use_gpu = inference::should_use_gpu(settings.inference_backend());
+
     let app_for_download = app.clone();
     let model_path = tauri::async_runtime::spawn_blocking(move || {
-        stt::ensure_model_blocking(Some(&app_for_download))
+        stt::ensure_model_blocking(Some(&app_for_download), whisper_model)
     })
     .await
     .map_err(|e| e.to_string())?
     .map_err(|e| e.to_string())?;
 
-    let engine = tauri::async_runtime::spawn_blocking(move || stt::WhisperEngine::new(&model_path))
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())?;
+    let engine = tauri::async_runtime::spawn_blocking(move || {
+        stt::WhisperEngine::new_with_gpu(&model_path, use_gpu)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
 
     {
         *state.whisper_engine.lock() = Some(engine);
@@ -927,10 +1324,8 @@ fn take_deferred_hotkey_start(state: &AppState) -> bool {
     if !press.deferred_start_pending {
         return false;
     }
-    let should_start = hotkey::should_start_after_deferred_load(
-        press.shortcut_down,
-        press.deferred_toggle_intent,
-    );
+    let should_start =
+        hotkey::should_start_after_deferred_load(press.shortcut_down, press.deferred_toggle_intent);
     press.deferred_start_pending = false;
     press.deferred_toggle_intent = false;
     should_start
@@ -938,6 +1333,9 @@ fn take_deferred_hotkey_start(state: &AppState) -> bool {
 
 async fn ensure_model_then_toggle(app: AppHandle) {
     let state = app.state::<AppState>();
+    if is_mic_probe_active(&state) {
+        return;
+    }
     if !state.model_ready.load(Ordering::SeqCst) {
         let _ = app.emit(
             "pipeline-state",
@@ -959,6 +1357,9 @@ async fn ensure_model_then_toggle(app: AppHandle) {
 
 fn handle_hotkey(app: &AppHandle, shortcut_state: ShortcutState) {
     let state = app.state::<AppState>();
+    if is_mic_probe_active(&state) {
+        return;
+    }
 
     match shortcut_state {
         ShortcutState::Pressed => {
@@ -1121,9 +1522,21 @@ pub fn run() {
         PipelineOrchestrator::new().expect("failed to initialize pipeline orchestrator"),
     ));
     let store = Arc::new(Store::open().expect("failed to open settings store"));
-    let initial_settings = store
+    let mut initial_settings = store
         .load_settings()
         .expect("failed to load initial settings");
+
+    if initial_settings.whisper_model == "medium" {
+        initial_settings.whisper_model = WhisperModel::DistilFrDec16.as_setting_value().into();
+        if let Err(err) = store.save_settings(&initial_settings) {
+            eprintln!("failed to migrate whisper_model from medium: {err}");
+        }
+    }
+
+    if let Err(err) = stt::remove_legacy_medium_model() {
+        eprintln!("failed to remove legacy whisper medium model: {err}");
+    }
+
     pipeline.lock().set_auto_edit(initial_settings.auto_edit);
     pipeline.lock().set_auto_learn(initial_settings.auto_learn);
     pipeline
@@ -1198,16 +1611,23 @@ pub fn run() {
                 deferred_toggle_intent: false,
             }),
             deferred_llm_on_boot: AtomicBool::new(start_minimized && initial_settings.auto_edit),
+            current_hotkey: Mutex::new(hotkey::default_shortcut()),
+            hotkey_suspend_depth: AtomicU32::new(0),
+            mic_probe: MicProbeState {
+                capture: Mutex::new(None),
+                level_task: Mutex::new(None),
+            },
         })
         .setup(move |app| {
             let _modules = registered_modules();
             build_tray(app.handle()).map_err(|e| e.to_string())?;
 
-            let shortcut = hotkey::default_shortcut();
-            app.handle()
-                .global_shortcut()
-                .register(shortcut)
-                .map_err(|e| e.to_string())?;
+            let hotkey_setting = initial_settings.hotkey.clone();
+            let shortcut = hotkey::parse_shortcut(&hotkey_setting).unwrap_or_else(|err| {
+                eprintln!("invalid stored hotkey ({hotkey_setting}): {err}, using default");
+                hotkey::default_shortcut()
+            });
+            register_hotkey(app.handle(), shortcut)?;
 
             if let Some(main) = app.get_webview_window("main") {
                 let app_handle = app.handle().clone();
@@ -1255,6 +1675,15 @@ pub fn run() {
             ensure_llm_model,
             get_settings,
             set_settings,
+            get_models_status,
+            delete_model,
+            get_inference_info,
+            set_hotkey,
+            set_hotkey_capture_active,
+            is_onboarding_done,
+            set_onboarding_done,
+            start_mic_probe,
+            stop_mic_probe,
             get_stt_language,
             cycle_dictation_language,
             is_autostart_enabled,
@@ -1299,6 +1728,7 @@ mod integration_tests {
                 "audio",
                 "stt",
                 "llm",
+                "inference",
                 "inject",
                 "hotkey",
                 "store",
