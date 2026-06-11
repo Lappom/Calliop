@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useState } from "react";
 import { useSettings } from "../../hooks/useSettings";
 import { BadgePill } from "../ui/BadgePill";
@@ -85,23 +86,39 @@ export function SettingsView() {
 
   const handleHotkeyCapture = useCallback(
     (event: KeyboardEvent) => {
-      const captured = captureHotkey(event);
-      if (captured === null) {
-        setRecordingHotkey(false);
-        setPendingHotkey(null);
-        return;
-      }
-      setPendingHotkey(captured);
-      setRecordingHotkey(false);
-      void setHotkey(captured);
+      void (async () => {
+        const captured = captureHotkey(event);
+        if (captured === null) {
+          setPendingHotkey(null);
+          setRecordingHotkey(false);
+          return;
+        }
+        setPendingHotkey(captured);
+        try {
+          await setHotkey(captured);
+        } finally {
+          setRecordingHotkey(false);
+        }
+      })();
     },
     [setHotkey],
   );
 
   useEffect(() => {
     if (!recordingHotkey) return;
+
+    void invoke("set_hotkey_capture_active", { active: true }).catch((err) => {
+      console.error("failed to suspend global hotkey during capture:", err);
+      setRecordingHotkey(false);
+    });
+
     window.addEventListener("keydown", handleHotkeyCapture, true);
-    return () => window.removeEventListener("keydown", handleHotkeyCapture, true);
+    return () => {
+      window.removeEventListener("keydown", handleHotkeyCapture, true);
+      void invoke("set_hotkey_capture_active", { active: false }).catch((err) => {
+        console.error("failed to restore global hotkey after capture:", err);
+      });
+    };
   }, [recordingHotkey, handleHotkeyCapture]);
 
   const displayHotkey = pendingHotkey ?? settings.hotkey;

@@ -205,6 +205,64 @@ fn invalidate_whisper_engine(state: &AppState) {
     *state.whisper_engine.lock() = None;
 }
 
+struct SettingsRollbackContext {
+    hotkey_changed: bool,
+    stt_language_changed: bool,
+    whisper_invalidated: bool,
+}
+
+async fn rollback_settings(
+    app: &AppHandle,
+    state: &AppState,
+    previous: &AppSettings,
+    ctx: SettingsRollbackContext,
+) -> Result<(), String> {
+    let app_for_notify = app.clone();
+    state
+        .store
+        .save_settings(previous)
+        .map_err(|e| e.to_string())?;
+    if ctx.hotkey_changed {
+        let prev_shortcut = hotkey::parse_shortcut(&previous.hotkey).map_err(|e| e.to_string())?;
+        register_hotkey(&app_for_notify, prev_shortcut)?;
+    }
+    state
+        .pipeline
+        .lock()
+        .set_default_stt_language(previous.stt_language_mode());
+    state.pipeline.lock().set_auto_learn(previous.auto_learn);
+    state.pipeline.lock().set_auto_edit(previous.auto_edit);
+
+    if ctx.whisper_invalidated {
+        invalidate_whisper_engine(state);
+        ensure_model_inner(app, state).await?;
+    }
+
+    if previous.auto_edit {
+        shutdown_llm_engine(state);
+        ensure_llm_model_inner(app, state).await?;
+    } else {
+        shutdown_llm_engine(state);
+    }
+
+    if ctx.stt_language_changed {
+        state
+            .pipeline
+            .lock()
+            .notify_stt_language_changed(&app_for_notify);
+    }
+    Ok(())
+}
+
+fn unregister_current_hotkey(app: &AppHandle, state: &AppState) -> Result<(), String> {
+    let gs = app.global_shortcut();
+    let current = *state.current_hotkey.lock();
+    if gs.is_registered(current) {
+        gs.unregister(current).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 fn register_hotkey(app: &AppHandle, shortcut: Shortcut) -> Result<(), String> {
     let gs = app.global_shortcut();
     let current = *app.state::<AppState>().current_hotkey.lock();
@@ -503,6 +561,21 @@ async fn set_hotkey(
 }
 
 #[tauri::command]
+fn set_hotkey_capture_active(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    active: bool,
+) -> Result<(), String> {
+    if active {
+        unregister_current_hotkey(&app, &state)
+    } else {
+        let settings = state.store.load_settings().map_err(|e| e.to_string())?;
+        let shortcut = hotkey::parse_shortcut(&settings.hotkey).map_err(|e| e.to_string())?;
+        register_hotkey(&app, shortcut)
+    }
+}
+
+#[tauri::command]
 fn get_stt_language(state: State<'_, AppState>) -> Result<String, String> {
     Ok(state
         .pipeline
@@ -559,28 +632,10 @@ async fn set_settings(
         inference_backend: inference_backend.as_setting_value().into(),
     };
 
-    let rollback = || {
-        let _ = state.store.save_settings(&previous);
-        if hotkey_changed {
-            if let Ok(prev_shortcut) = hotkey::parse_shortcut(&previous.hotkey) {
-                let _ = register_hotkey(&app_for_notify, prev_shortcut);
-            }
-        }
-        state
-            .pipeline
-            .lock()
-            .set_default_stt_language(previous.stt_language_mode());
-        state.pipeline.lock().set_auto_learn(previous.auto_learn);
-        state.pipeline.lock().set_auto_edit(previous.auto_edit);
-        if !previous.auto_edit {
-            shutdown_llm_engine(&state);
-        }
-        if stt_language_changed {
-            state
-                .pipeline
-                .lock()
-                .notify_stt_language_changed(&app_for_notify);
-        }
+    let mut rollback_ctx = SettingsRollbackContext {
+        hotkey_changed,
+        stt_language_changed,
+        whisper_invalidated: false,
     };
 
     state.pipeline.lock().set_auto_learn(settings.auto_learn);
@@ -601,15 +656,24 @@ async fn set_settings(
 
     if hotkey_changed {
         if let Err(err) = register_hotkey(&app, hotkey_shortcut) {
-            rollback();
+            if let Err(rollback_err) =
+                rollback_settings(&app, &state, &previous, rollback_ctx).await
+            {
+                eprintln!("settings rollback failed: {rollback_err}");
+            }
             return Err(err);
         }
     }
 
     if whisper_changed || inference_changed {
         invalidate_whisper_engine(&state);
+        rollback_ctx.whisper_invalidated = true;
         if let Err(err) = ensure_model_inner(&app, &state).await {
-            rollback();
+            if let Err(rollback_err) =
+                rollback_settings(&app, &state, &previous, rollback_ctx).await
+            {
+                eprintln!("settings rollback failed: {rollback_err}");
+            }
             return Err(err);
         }
     }
@@ -619,8 +683,11 @@ async fn set_settings(
         if llm_changed || inference_changed || !llm_engine_is_live(&state) {
             shutdown_llm_engine(&state);
             if let Err(err) = ensure_llm_model_inner(&app, &state).await {
-                rollback();
-                shutdown_llm_engine(&state);
+                if let Err(rollback_err) =
+                    rollback_settings(&app, &state, &previous, rollback_ctx).await
+                {
+                    eprintln!("settings rollback failed: {rollback_err}");
+                }
                 return Err(err);
             }
         }
@@ -1538,6 +1605,7 @@ pub fn run() {
             delete_model,
             get_inference_info,
             set_hotkey,
+            set_hotkey_capture_active,
             is_onboarding_done,
             set_onboarding_done,
             start_mic_probe,
