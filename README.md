@@ -4,7 +4,15 @@ Dictée vocale universelle, **100 % locale** — clone open source de [Wispr Flo
 
 Calliop permet de dicter dans n'importe quelle application via un raccourci global, avec transcription locale et post-traitement IA optionnel. Aucune dépendance cloud pour le fonctionnement core.
 
-## Prérequis (Windows v1)
+## Télécharger
+
+Binaires Windows (NSIS / MSI) sur [GitHub Releases](https://github.com/Lappom/Calliop/releases). Guide : [docs/installation.md](docs/installation.md).
+
+- [Guide utilisateur](docs/guide-utilisateur.md)
+- [Dépannage](docs/depannage.md)
+- [Benchmarks STT](docs/BENCHMARKS.md)
+
+## Prérequis (développement, Windows v1)
 
 - [Rust](https://rustup.rs/) (stable)
 - [Node.js](https://nodejs.org/) 20+
@@ -63,7 +71,9 @@ Voir [PLAN.md](PLAN.md) pour la roadmap complète.
 
 ## Distribution (v1)
 
-Les binaires Windows v1 ne sont **pas signés** (pas de certificat code signing). Windows SmartScreen peut afficher un avertissement à l'installation — comportement attendu en développement.
+Les binaires Windows v1 ne sont **pas signés** (pas de certificat code signing). Windows SmartScreen peut afficher un avertissement à l'installation — voir [docs/installation.md](docs/installation.md).
+
+Build installateur local : `pnpm tauri build --features gpu` (artefacts dans `src-tauri/target/release/bundle/`).
 
 ## Licence
 

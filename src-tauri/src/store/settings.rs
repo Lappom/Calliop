@@ -15,6 +15,7 @@ pub const KEY_LLM_MODEL: &str = "llm_model";
 pub const KEY_HOTKEY: &str = "hotkey";
 pub const KEY_INFERENCE_BACKEND: &str = "inference_backend";
 pub const KEY_ONBOARDING_DONE: &str = "onboarding_done";
+pub const KEY_AUTO_UPDATE: &str = "auto_update";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -45,6 +46,7 @@ impl InferenceBackend {
 pub struct AppSettings {
     pub auto_edit: bool,
     pub auto_learn: bool,
+    pub auto_update: bool,
     pub stt_language: String,
     pub whisper_model: String,
     pub llm_model: String,
@@ -57,6 +59,7 @@ impl Default for AppSettings {
         Self {
             auto_edit: true,
             auto_learn: true,
+            auto_update: false,
             stt_language: DEFAULT_STT_LANGUAGE.to_string(),
             whisper_model: WhisperModel::default().as_setting_value().into(),
             llm_model: LlmModel::default().as_setting_value().into(),
@@ -93,6 +96,7 @@ impl Store {
         Ok(AppSettings {
             auto_edit: self.get_bool(KEY_AUTO_EDIT, true)?,
             auto_learn: self.get_bool(KEY_AUTO_LEARN, true)?,
+            auto_update: self.get_bool(KEY_AUTO_UPDATE, false)?,
             stt_language: self
                 .get_string(KEY_STT_LANGUAGE, DEFAULT_STT_LANGUAGE)?
                 .to_string(),
@@ -134,6 +138,18 @@ impl Store {
             params![
                 KEY_AUTO_LEARN,
                 if settings.auto_learn { "true" } else { "false" }
+            ],
+        )?;
+        tx.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![
+                KEY_AUTO_UPDATE,
+                if settings.auto_update {
+                    "true"
+                } else {
+                    "false"
+                }
             ],
         )?;
         tx.execute(
@@ -190,6 +206,7 @@ mod tests {
         let settings = AppSettings::default();
         assert!(settings.auto_edit);
         assert!(settings.auto_learn);
+        assert!(!settings.auto_update);
         assert_eq!(settings.stt_language, DEFAULT_STT_LANGUAGE);
         assert_eq!(settings.whisper_model, "small");
         assert_eq!(settings.llm_model, "qwen3-1.7b");
@@ -222,6 +239,7 @@ mod tests {
             .save_settings(&AppSettings {
                 auto_edit: true,
                 auto_learn: false,
+                auto_update: true,
                 stt_language: "en".into(),
                 whisper_model: "distil-fr-dec16".into(),
                 llm_model: "qwen3-0.6b".into(),
@@ -232,6 +250,7 @@ mod tests {
         let loaded = store.load_settings().expect("load");
         assert!(loaded.auto_edit);
         assert!(!loaded.auto_learn);
+        assert!(loaded.auto_update);
         assert_eq!(loaded.stt_language, "en");
         assert_eq!(loaded.whisper_model, "distil-fr-dec16");
         assert_eq!(loaded.llm_model, "qwen3-0.6b");

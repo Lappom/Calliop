@@ -77,6 +77,7 @@ export function SettingsView() {
     formatBytes,
     setAutoEdit,
     setAutoLearn,
+    setAutoUpdate,
     setSttLanguage,
     setWhisperModel,
     setLlmModel,
@@ -450,6 +451,25 @@ export function SettingsView() {
 
       {activeTab === "advanced" && (
         <Card variant="bordered" className="space-y-6 p-6">
+          <label className="flex cursor-pointer items-center justify-between gap-4">
+            <span className="text-body-md text-ink">Mises à jour automatiques</span>
+            <input
+              type="checkbox"
+              checked={settings.autoUpdate}
+              disabled={!loaded || saving}
+              onChange={(e) => {
+                void setAutoUpdate(e.target.checked);
+              }}
+              className="size-4 rounded-sm border border-hairline-strong bg-surface-card accent-accent-blue disabled:opacity-50"
+            />
+          </label>
+
+          <p className="text-caption text-ash">
+            {settings.autoUpdate
+              ? "Vérifie les nouvelles versions sur GitHub au démarrage et installe les mises à jour signées."
+              : "Désactivé : aucune vérification réseau pour les mises à jour de l'application."}
+          </p>
+
           <label className="flex cursor-pointer items-center justify-between gap-4">
             <span className="text-body-md text-ink">Lancer au démarrage</span>
             <input

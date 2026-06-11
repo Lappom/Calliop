@@ -23,7 +23,12 @@ cargo run --bin test-stt -- input.wav
 cargo run --bin test-inject -- "Hello world"
 cargo run --bin test-llm -- "euh bonjour donc voilà"
 cargo build -p calliop-llm-worker
+cargo run --release --bin benchmark-stt -- ../benchmarks/corpus/fr.json --cpu
 ```
+
+STT WER unit tests live in `stt/wer.rs` (no network, no model). Full `benchmark-stt` is manual / release-prep only.
+
+GitHub release workflow: `.github/workflows/release.yml` on tag `v*` (draft release + updater artifacts). Secret: `TAURI_SIGNING_PRIVATE_KEY`.
 
 Each module ships tests in `mod.rs` or `tests/` subdirectory.
 

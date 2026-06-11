@@ -1,0 +1,92 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            build_args: "--features gpu"
+          - platform: macos-latest
+            build_args: ""
+          - platform: ubuntu-latest
+            build_args: ""
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            cmake \
+            clang \
+            libclang-dev
+
+      - name: Install Vulkan SDK (Windows)
+        if: matrix.platform == 'windows-latest'
+        uses: humbletim/setup-vulkan-sdk@v1.2.1
+        with:
+          vulkan-query-version: 1.3.290.0
+          vulkan-components: Vulkan-Loader
+          vulkan-use-cache: true
+
+      - name: Prepare LLM sidecar (Windows)
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: ./scripts/prepare-llm-sidecar.ps1
+
+      - name: Prepare LLM sidecar (Linux)
+        if: matrix.platform == 'ubuntu-latest'
+        working-directory: src-tauri
+        run: bash ../scripts/prepare-llm-sidecar.sh
+
+      - name: Prepare LLM sidecar (macOS)
+        if: matrix.platform == 'macos-latest'
+        working-directory: src-tauri
+        run: bash ../scripts/prepare-llm-sidecar.sh
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: Calliop ${{ github.ref_name }}
+          releaseBodyPath: releases/${{ github.ref_name }}.md
+          releaseDraft: true
+          args: ${{ matrix.build_args }}

@@ -38,6 +38,8 @@ use tauri::{
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_global_shortcut::Shortcut;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+use tauri_plugin_notification::NotificationExt;
+use tauri_plugin_updater::UpdaterExt;
 
 /// Returns registered core module names (Phase 0 wiring check).
 pub fn registered_modules() -> [&'static str; 10] {
@@ -121,6 +123,7 @@ pub(crate) fn spawn_llm_recovery_if_needed(app: AppHandle) {
 struct SettingsPayload {
     auto_edit: bool,
     auto_learn: bool,
+    auto_update: bool,
     stt_language: String,
     whisper_model: String,
     llm_model: String,
@@ -147,6 +150,7 @@ fn settings_to_payload(settings: &AppSettings) -> SettingsPayload {
     SettingsPayload {
         auto_edit: settings.auto_edit,
         auto_learn: settings.auto_learn,
+        auto_update: settings.auto_update,
         stt_language: settings.stt_language.clone(),
         whisper_model: settings.whisper_model.clone(),
         llm_model: settings.llm_model.clone(),
@@ -658,14 +662,14 @@ async fn set_settings(
     let llm_changed = previous.llm_model() != llm_model;
     let inference_changed = previous.inference_backend() != inference_backend;
 
-    let hotkey_shortcut =
-        hotkey::parse_shortcut(&settings.hotkey).map_err(|e| e.to_string())?;
+    let hotkey_shortcut = hotkey::parse_shortcut(&settings.hotkey).map_err(|e| e.to_string())?;
     let next_hotkey = hotkey::format_shortcut(&hotkey_shortcut);
     let hotkey_changed = previous.hotkey != next_hotkey;
 
     let next_settings = AppSettings {
         auto_edit: settings.auto_edit,
         auto_learn: settings.auto_learn,
+        auto_update: settings.auto_update,
         stt_language: next_stt,
         whisper_model: whisper_model.as_setting_value().into(),
         llm_model: llm_model.as_setting_value().into(),
@@ -1149,15 +1153,12 @@ fn is_autostart_enabled(app: AppHandle) -> Result<bool, String> {
 
 #[tauri::command]
 async fn start_mic_probe(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    let mut capture_slot = state.mic_probe.capture.lock();
-    if capture_slot.is_some() {
+    if state.mic_probe.capture.lock().is_some() {
         return Err("Le test micro est déjà en cours.".into());
     }
     if state.pipeline.lock().state() != PipelineState::Idle {
         return Err("Une dictée est en cours. Arrêtez-la avant de tester le micro.".into());
     }
-
-    drop(capture_slot);
     suspend_global_hotkey(&app, &state)?;
 
     let mut capture = audio::AudioCapture::new().map_err(|e| e.to_string())?;
@@ -1516,6 +1517,56 @@ fn build_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn spawn_update_check_if_enabled(app: AppHandle, store: Arc<Store>) {
+    tauri::async_runtime::spawn(async move {
+        if cfg!(debug_assertions) {
+            return;
+        }
+
+        let settings = match store.load_settings() {
+            Ok(settings) => settings,
+            Err(err) => {
+                eprintln!("auto-update: failed to load settings: {err}");
+                return;
+            }
+        };
+        if !settings.auto_update {
+            return;
+        }
+        if !store.is_onboarding_done().unwrap_or(false) {
+            return;
+        }
+
+        let updater = match app.updater() {
+            Ok(updater) => updater,
+            Err(err) => {
+                eprintln!("auto-update: updater unavailable: {err}");
+                return;
+            }
+        };
+
+        match updater.check().await {
+            Ok(Some(update)) => {
+                let version = update.version.clone();
+                let _ = app.emit("update-available", version.clone());
+                let _ = app
+                    .notification()
+                    .builder()
+                    .title("Calliop")
+                    .body(format!(
+                        "Mise à jour {version} disponible. Téléchargement en cours…"
+                    ))
+                    .show();
+                if let Err(err) = update.download_and_install(|_, _| {}, || {}).await {
+                    eprintln!("auto-update: download failed: {err}");
+                }
+            }
+            Ok(None) => {}
+            Err(err) => eprintln!("auto-update: check failed: {err}"),
+        }
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let pipeline = Arc::new(Mutex::new(
@@ -1581,6 +1632,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--minimized"]),
@@ -1664,6 +1716,12 @@ pub fn run() {
                         }
                     });
                 }
+            }
+
+            {
+                let app_for_update = app.handle().clone();
+                let state = app.state::<AppState>();
+                spawn_update_check_if_enabled(app_for_update, Arc::clone(&state.store));
             }
 
             Ok(())
