@@ -35,7 +35,7 @@ const primaryItems: NavItem[] = [
   { id: "snippets", label: "Snippets", icon: Braces },
   { id: "style", label: "Style", icon: Palette },
   { id: "history", label: "Historique", icon: History },
-  { id: "insight", label: "Insight", icon: BarChart3 },
+  { id: "insight", label: "Statistiques", icon: BarChart3 },
 ];
 
 const bottomItems: NavItem[] = [

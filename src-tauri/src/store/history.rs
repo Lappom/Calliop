@@ -92,12 +92,20 @@ pub struct Insights {
     pub last_latency: Option<LatencySnapshot>,
     #[serde(rename = "wordsToday")]
     pub words_today: i64,
+    #[serde(rename = "dictationsToday")]
+    pub dictations_today: i64,
     #[serde(rename = "totalWords")]
     pub total_words: i64,
+    #[serde(rename = "totalDictations")]
+    pub total_dictations: i64,
     #[serde(rename = "averageWpm")]
     pub average_wpm: f64,
     #[serde(rename = "wpmVsTypingPercent")]
     pub wpm_vs_typing_percent: i64,
+    #[serde(rename = "averageLatencyMs")]
+    pub average_latency_ms: i64,
+    #[serde(rename = "totalAudioMinutes")]
+    pub total_audio_minutes: i64,
     #[serde(rename = "learnedCorrections")]
     pub learned_corrections: i64,
     #[serde(rename = "appUsage")]
@@ -255,8 +263,34 @@ impl Store {
             |row| row.get(0),
         )?;
 
+        let dictations_today: i64 = conn.query_row(
+            "SELECT COUNT(*)
+             FROM dictations
+             WHERE date(created_at, 'localtime') = date('now', 'localtime')",
+            [],
+            |row| row.get(0),
+        )?;
+
         let total_words: i64 = conn.query_row(
             "SELECT COALESCE(SUM(word_count), 0) FROM dictations",
+            [],
+            |row| row.get(0),
+        )?;
+
+        let total_dictations: i64 =
+            conn.query_row("SELECT COUNT(*) FROM dictations", [], |row| row.get(0))?;
+
+        let average_latency_ms: i64 = conn.query_row(
+            "SELECT COALESCE(CAST(ROUND(AVG(total_ms)) AS INTEGER), 0)
+             FROM dictations
+             WHERE total_ms > 0",
+            [],
+            |row| row.get(0),
+        )?;
+
+        let total_audio_minutes: i64 = conn.query_row(
+            "SELECT COALESCE(CAST(ROUND(SUM(audio_duration_ms) / 60000.0) AS INTEGER), 0)
+             FROM dictations",
             [],
             |row| row.get(0),
         )?;
@@ -306,7 +340,7 @@ impl Store {
              FROM dictations
              GROUP BY exe_name
              ORDER BY word_count DESC, dictation_count DESC
-             LIMIT 5",
+             LIMIT 8",
         )?;
         let app_rows = app_stmt.query_map([], |row| {
             Ok(AppUsageEntry {
@@ -322,9 +356,13 @@ impl Store {
         Ok(Insights {
             last_latency,
             words_today,
+            dictations_today,
             total_words,
+            total_dictations,
             average_wpm,
             wpm_vs_typing_percent: wpm_vs_typing_percent(average_wpm),
+            average_latency_ms,
+            total_audio_minutes,
             learned_corrections,
             app_usage,
             daily_activity,
@@ -531,6 +569,10 @@ mod tests {
         let insights = store.get_insights().unwrap();
         assert_eq!(insights.total_words, 5);
         assert_eq!(insights.words_today, 5);
+        assert_eq!(insights.dictations_today, 2);
+        assert_eq!(insights.total_dictations, 2);
+        assert_eq!(insights.average_latency_ms, 1550);
+        assert!(insights.total_audio_minutes >= 0);
         assert!(insights.average_wpm > 0.0);
         assert_eq!(insights.learned_corrections, 1);
         assert_eq!(insights.app_usage.len(), 2);

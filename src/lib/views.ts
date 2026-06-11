@@ -13,7 +13,7 @@ export const PRIMARY_VIEWS: { id: AppView; label: string }[] = [
   { id: "snippets", label: "Snippets" },
   { id: "style", label: "Style" },
   { id: "history", label: "Historique" },
-  { id: "insight", label: "Insight" },
+  { id: "insight", label: "Statistiques" },
 ];
 
 export const BOTTOM_VIEWS: { id: AppView; label: string }[] = [

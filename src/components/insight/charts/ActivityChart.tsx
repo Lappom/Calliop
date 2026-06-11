@@ -68,6 +68,16 @@ export function ActivityChart({ data }: ActivityChartProps) {
 
           return (
             <g key={entry.date}>
+              {entry.dictationCount > 0 && (
+                <text
+                  x={x + barWidth / 2}
+                  y={Math.max(y - 6, CHART_PADDING.top + 10)}
+                  textAnchor="middle"
+                  className="fill-ash font-[family-name:var(--font-mono)] text-[9px]"
+                >
+                  {entry.dictationCount}×
+                </text>
+              )}
               <rect
                 x={x}
                 y={y}

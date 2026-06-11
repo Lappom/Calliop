@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useState } from "react";
+import type { LatencyMetricsPayload } from "./usePipelineState";
 
 export interface LatencySnapshot {
   sttMs: number;
@@ -32,9 +33,13 @@ export interface RecentLatencyEntry {
 export interface Insights {
   lastLatency: LatencySnapshot | null;
   wordsToday: number;
+  dictationsToday: number;
   totalWords: number;
+  totalDictations: number;
   averageWpm: number;
   wpmVsTypingPercent: number;
+  averageLatencyMs: number;
+  totalAudioMinutes: number;
   learnedCorrections: number;
   appUsage: AppUsageEntry[];
   dailyActivity: DailyActivityEntry[];
@@ -77,6 +82,12 @@ export function useInsights() {
     const unlistenHistory = listen("history-updated", () => {
       void loadInsights();
     });
+    const unlistenLatency = listen<LatencyMetricsPayload>(
+      "latency-metrics",
+      () => {
+        void loadInsights();
+      },
+    );
     const unlistenDictionary = listen<DictionaryUpdatedPayload>(
       "dictionary-updated",
       (event) => {
@@ -104,6 +115,7 @@ export function useInsights() {
     return () => {
       cancelled = true;
       void unlistenHistory.then((drop) => drop());
+      void unlistenLatency.then((drop) => drop());
       void unlistenDictionary.then((drop) => drop());
     };
   }, [loadInsights]);
