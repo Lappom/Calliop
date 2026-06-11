@@ -1517,7 +1517,11 @@ fn build_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn spawn_update_check_if_enabled(app: AppHandle, store: Arc<Store>) {
+fn spawn_update_check_if_enabled(
+    app: AppHandle,
+    store: Arc<Store>,
+    pipeline: Arc<Mutex<PipelineOrchestrator>>,
+) {
     tauri::async_runtime::spawn(async move {
         if cfg!(debug_assertions) {
             return;
@@ -1549,6 +1553,7 @@ fn spawn_update_check_if_enabled(app: AppHandle, store: Arc<Store>) {
             Ok(Some(update)) => {
                 let version = update.version.clone();
                 let _ = app.emit("update-available", version.clone());
+                wait_for_pipeline_idle(&pipeline).await;
                 let _ = app
                     .notification()
                     .builder()
@@ -1565,6 +1570,15 @@ fn spawn_update_check_if_enabled(app: AppHandle, store: Arc<Store>) {
             Err(err) => eprintln!("auto-update: check failed: {err}"),
         }
     });
+}
+
+async fn wait_for_pipeline_idle(pipeline: &Arc<Mutex<PipelineOrchestrator>>) {
+    loop {
+        if pipeline.lock().state() == PipelineState::Idle {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1721,7 +1735,11 @@ pub fn run() {
             {
                 let app_for_update = app.handle().clone();
                 let state = app.state::<AppState>();
-                spawn_update_check_if_enabled(app_for_update, Arc::clone(&state.store));
+                spawn_update_check_if_enabled(
+                    app_for_update,
+                    Arc::clone(&state.store),
+                    Arc::clone(&state.pipeline),
+                );
             }
 
             Ok(())

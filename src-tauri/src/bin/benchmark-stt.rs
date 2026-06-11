@@ -65,9 +65,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Loading Whisper model (download on first run)...");
     let model_path = ensure_model_blocking(None, whisper_model)?;
 
-    let mut engine = WhisperEngine::new(&model_path)?;
+    let mut engine = WhisperEngine::new_with_gpu(&model_path, !cpu_only)?;
     if cpu_only {
-        println!("Note: --cpu requests CPU inference; GPU use depends on build features.");
+        println!("Using CPU-only inference (--cpu).");
     }
 
     let mut results = Vec::new();
