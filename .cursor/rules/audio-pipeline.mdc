@@ -19,6 +19,7 @@ Hotkey (toggle ON / push-to-talk hold)
 Hotkey OFF / release (toggle or PTT)
   -> flush VAD tail + concat segments
   -> optional LlamaEngine cleanup (sidecar process, 4s timeout, fallback raw)
+  -> apply_snippets (deterministic trigger expansion, verbatim + auto-edit)
   -> TextInjector (inject/)
   -> optional CorrectionWatcher (observe/, Windows UIA, if auto_learn)
   -> latency-metrics event (sttMs, llmMs, injectMs, totalMs)
@@ -49,9 +50,10 @@ Hotkey OFF / release (toggle or PTT)
 
 - Frontend (React) handles overlay, settings, onboarding — no heavy ML in the webview.
 - Rust core exposes commands for start/stop dictation, settings read/write, history queries.
-- Commands: `get_settings`, `set_settings`, `ensure_llm_model`, `list_dictionary_words`, `add_dictionary_word`, `remove_dictionary_word`, `learn_from_correction`
-- Events: `pipeline-state`, `partial-transcript`, `audio-level`, `latency-metrics`, `llm-model-download-progress`, `llm-ready`, `dictionary-updated`
-- Dictionary words are cached as a Whisper `initial_prompt` string (`Arc<RwLock<Option<String>>>` in pipeline); refreshed on CRUD and on startup.
+- Commands: `get_settings`, `set_settings`, `ensure_llm_model`, `list_dictionary_words`, `add_dictionary_word`, `remove_dictionary_word`, `learn_from_correction`, `list_snippets`, `add_snippet`, `remove_snippet`, `import_snippets`, `export_snippets`
+- Events: `pipeline-state`, `partial-transcript`, `audio-level`, `latency-metrics`, `llm-model-download-progress`, `llm-ready`, `dictionary-updated`, `snippets-updated`
+- Dictionary words and snippet triggers are cached as a Whisper `initial_prompt` string (`Arc<RwLock<Option<String>>>` in pipeline); refreshed on CRUD and on startup.
+- Snippet triggers are expanded deterministically in `pipeline/snippets.rs` after LLM cleanup (or on raw transcript in verbatim mode), before injection.
 - `auto_learn` (default on): after inject, `observe/` polls the focused control via UIA for ~60s; stabilized corrections call `apply_learned_correction` (same path as in-app `learn_from_correction`).
 
 ## Inference backend

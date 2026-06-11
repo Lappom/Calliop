@@ -44,12 +44,18 @@ impl Store {
         tx.execute(
             "INSERT INTO settings (key, value) VALUES (?1, ?2)
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            params![KEY_AUTO_EDIT, if settings.auto_edit { "true" } else { "false" }],
+            params![
+                KEY_AUTO_EDIT,
+                if settings.auto_edit { "true" } else { "false" }
+            ],
         )?;
         tx.execute(
             "INSERT INTO settings (key, value) VALUES (?1, ?2)
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            params![KEY_AUTO_LEARN, if settings.auto_learn { "true" } else { "false" }],
+            params![
+                KEY_AUTO_LEARN,
+                if settings.auto_learn { "true" } else { "false" }
+            ],
         )?;
         tx.commit()?;
         Ok(())

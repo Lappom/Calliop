@@ -12,7 +12,10 @@ use crate::audio::{AudioCapture, VadSegmenter};
 use crate::inject::{InjectError, TextInjector};
 use crate::llm::LlamaEngine;
 use crate::observe::CorrectionHandler;
+use crate::store::Snippet;
 use crate::stt::{SttError, WhisperEngine};
+
+use super::snippets::{apply_snippets, finalize_llm_with_snippets, shield_snippet_triggers};
 
 /// Maximum time to wait for LLM cleanup (Qwen3 1.7B on CPU can take tens of seconds).
 const LLM_CLEANUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
@@ -108,6 +111,7 @@ pub struct PipelineOrchestrator {
     failed_segments: Arc<Mutex<Vec<Vec<f32>>>>,
     streaming_stt_ms: Arc<AtomicU64>,
     dictionary_prompt: Arc<RwLock<Option<String>>>,
+    snippets: Arc<RwLock<Vec<Snippet>>>,
     auto_learn: Arc<AtomicBool>,
     observer_generation: Arc<AtomicU64>,
     correction_handler: Option<CorrectionHandler>,
@@ -128,6 +132,7 @@ impl PipelineOrchestrator {
             failed_segments: Arc::new(Mutex::new(Vec::new())),
             streaming_stt_ms: Arc::new(AtomicU64::new(0)),
             dictionary_prompt: Arc::new(RwLock::new(None)),
+            snippets: Arc::new(RwLock::new(Vec::new())),
             auto_learn: Arc::new(AtomicBool::new(true)),
             observer_generation: Arc::new(AtomicU64::new(0)),
             correction_handler: None,
@@ -136,6 +141,15 @@ impl PipelineOrchestrator {
 
     pub fn set_dictionary_prompt(&mut self, prompt: Option<String>) {
         *self.dictionary_prompt.write() = prompt;
+    }
+
+    pub fn set_snippets(&mut self, snippets: Vec<Snippet>) {
+        *self.snippets.write() = snippets;
+    }
+
+    fn apply_cached_snippets(&self, text: &str) -> String {
+        let snippets = self.snippets.read().clone();
+        apply_snippets(text, &snippets)
     }
 
     pub fn state(&self) -> PipelineState {
@@ -340,11 +354,14 @@ impl PipelineOrchestrator {
 
         let (text_to_inject, llm_ms, llm_invalidated) =
             if !full_text.is_empty() && auto_edit && self.llm.lock().is_some() {
+                let snippets_at_shield = self.snippets.read().clone();
+                let (shielded_text, snippet_shields) =
+                    shield_snippet_triggers(&full_text, &snippets_at_shield);
                 let job = start_llm_cleanup(
                     Arc::clone(&self.llm),
                     Arc::clone(&self.llm_ready),
                     Arc::clone(&self.auto_edit),
-                    &full_text,
+                    &shielded_text,
                 );
                 match job.wait_for_inject(LLM_INJECT_WAIT) {
                     LlmCleanupWait::Completed {
@@ -352,20 +369,37 @@ impl PipelineOrchestrator {
                         llm_ms,
                         invalidated,
                     } => {
+                        let snippets = self.snippets.read().clone();
                         let text = if self.auto_edit.load(Ordering::SeqCst) {
-                            text
+                            if snippets == snippets_at_shield {
+                                finalize_llm_with_snippets(
+                                    &text,
+                                    &snippet_shields,
+                                    &full_text,
+                                    &snippets,
+                                )
+                            } else {
+                                let from_cleaned = apply_snippets(&text, &snippets);
+                                if from_cleaned != text {
+                                    from_cleaned
+                                } else {
+                                    apply_snippets(&full_text, &snippets)
+                                }
+                            }
                         } else {
-                            full_text.clone()
+                            apply_snippets(&full_text, &snippets)
                         };
                         (text, llm_ms, invalidated)
                     }
                     LlmCleanupWait::Pending(job) => {
                         job.finalize_in_background(app.clone());
-                        (full_text.clone(), 0, false)
+                        let snippets = self.snippets.read().clone();
+                        (apply_snippets(&full_text, &snippets), 0, false)
                     }
                 }
             } else {
-                (full_text.clone(), 0, false)
+                let snippets = self.snippets.read().clone();
+                (apply_snippets(&full_text, &snippets), 0, false)
             };
 
         if llm_invalidated && self.auto_edit.load(Ordering::SeqCst) {

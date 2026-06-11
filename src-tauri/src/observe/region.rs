@@ -224,11 +224,8 @@ mod tests {
 
     #[test]
     fn extract_region_prefers_last_valid_prefix_match() {
-        let anchors = build_anchors(
-            "one two three Calliop four five six",
-            "Calliop",
-        )
-        .expect("anchors");
+        let anchors =
+            build_anchors("one two three Calliop four five six", "Calliop").expect("anchors");
         let doc = "one two three noise one two three Calliope four five six";
         let region = extract_region(doc, &anchors, 64).expect("region");
         assert_eq!(region, "Calliope");

@@ -114,8 +114,10 @@ impl Store {
     pub fn remove_word_by_normalized(&self, word: &str) -> Result<bool, StoreError> {
         let normalized = normalize_word(word);
         let conn = self.connection().lock().expect("store mutex poisoned");
-        let changed =
-            conn.execute("DELETE FROM dictionary WHERE word = ?1 COLLATE NOCASE", params![normalized])?;
+        let changed = conn.execute(
+            "DELETE FROM dictionary WHERE word = ?1 COLLATE NOCASE",
+            params![normalized],
+        )?;
         Ok(changed > 0)
     }
 }
@@ -169,9 +171,7 @@ fn levenshtein_distance(a: &str, b: &str) -> usize {
         curr[0] = i + 1;
         for (j, cb) in b.iter().enumerate() {
             let cost = usize::from(ca != cb);
-            curr[j + 1] = (prev[j + 1] + 1)
-                .min(curr[j] + 1)
-                .min(prev[j] + cost);
+            curr[j + 1] = (prev[j + 1] + 1).min(curr[j] + 1).min(prev[j] + cost);
         }
         std::mem::swap(&mut prev, &mut curr);
     }
@@ -203,10 +203,8 @@ fn should_learn_substitution(original: &str, corrected: &str) -> bool {
     true
 }
 
-fn word_edit_ops(
-    original: &[(String, String)],
-    corrected: &[(String, String)],
-) -> Vec<WordEditOp> {
+#[allow(clippy::needless_range_loop)]
+fn word_edit_ops(original: &[(String, String)], corrected: &[(String, String)]) -> Vec<WordEditOp> {
     let original_keys: Vec<String> = original.iter().map(|(key, _)| key.clone()).collect();
     let n = original_keys.len();
     let m = corrected.len();

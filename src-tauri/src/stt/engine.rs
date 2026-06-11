@@ -7,6 +7,8 @@ use whisper_rs::{
 
 pub const DEFAULT_LANGUAGE: &str = "fr";
 pub const MAX_INITIAL_PROMPT_WORDS: usize = 200;
+/// Snippet triggers reserved in the Whisper initial prompt before dictionary words.
+pub const MAX_SNIPPET_PROMPT_WORDS: usize = 50;
 
 #[derive(Debug, Error)]
 pub enum SttError {
@@ -85,6 +87,23 @@ impl WhisperEngine {
 
         collect_transcript(&state)
     }
+}
+
+/// Merges snippet triggers and dictionary words into a capped Whisper initial prompt.
+pub fn build_whisper_initial_prompt(
+    snippet_triggers: &[String],
+    dictionary_words: &[String],
+) -> Option<String> {
+    let mut words = Vec::with_capacity(MAX_INITIAL_PROMPT_WORDS);
+    words.extend(
+        snippet_triggers
+            .iter()
+            .take(MAX_SNIPPET_PROMPT_WORDS)
+            .cloned(),
+    );
+    let remaining = MAX_INITIAL_PROMPT_WORDS.saturating_sub(words.len());
+    words.extend(dictionary_words.iter().take(remaining).cloned());
+    build_initial_prompt(&words)
 }
 
 pub fn build_initial_prompt(words: &[String]) -> Option<String> {
@@ -167,5 +186,22 @@ mod tests {
     #[test]
     fn build_initial_prompt_returns_none_for_empty_input() {
         assert_eq!(build_initial_prompt(&[]), None);
+    }
+
+    #[test]
+    fn build_whisper_initial_prompt_reserves_dictionary_slots() {
+        let snippets: Vec<String> = (0..MAX_SNIPPET_PROMPT_WORDS + 20)
+            .map(|i| format!("snippet{i}"))
+            .collect();
+        let dictionary: Vec<String> = (0..MAX_INITIAL_PROMPT_WORDS)
+            .map(|i| format!("word{i}"))
+            .collect();
+
+        let prompt = build_whisper_initial_prompt(&snippets, &dictionary).expect("prompt");
+        let entries: Vec<&str> = prompt.split(", ").collect();
+        assert_eq!(entries.len(), MAX_INITIAL_PROMPT_WORDS);
+        assert_eq!(entries[0], "snippet0");
+        assert_eq!(entries[MAX_SNIPPET_PROMPT_WORDS - 1], "snippet49");
+        assert_eq!(entries[MAX_SNIPPET_PROMPT_WORDS], "word0");
     }
 }
