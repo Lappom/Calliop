@@ -121,10 +121,21 @@ export function SettingsView() {
     if (!recordingHotkey) return;
 
     let cancelled = false;
+    let listening = false;
 
     void (async () => {
       try {
         await invoke("set_hotkey_capture_active", { active: true });
+        if (cancelled) {
+          await invoke("set_hotkey_capture_active", { active: false }).catch(
+            (err) => {
+              console.error("failed to restore hotkey after cancelled capture:", err);
+            },
+          );
+          return;
+        }
+        window.addEventListener("keydown", handleHotkeyCapture, true);
+        listening = true;
       } catch (err) {
         if (!cancelled) {
           setHotkeyRestoreError(String(err));
@@ -133,10 +144,11 @@ export function SettingsView() {
       }
     })();
 
-    window.addEventListener("keydown", handleHotkeyCapture, true);
     return () => {
       cancelled = true;
-      window.removeEventListener("keydown", handleHotkeyCapture, true);
+      if (listening) {
+        window.removeEventListener("keydown", handleHotkeyCapture, true);
+      }
       void restoreGlobalHotkey();
     };
   }, [recordingHotkey, handleHotkeyCapture, restoreGlobalHotkey]);

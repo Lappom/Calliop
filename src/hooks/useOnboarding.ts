@@ -11,6 +11,7 @@ export function useOnboarding() {
   const [modelError, setModelError] = useState<string | null>(null);
   const [audioLevel, setAudioLevel] = useState(0);
   const [micProbing, setMicProbing] = useState(false);
+  const [micProbeStopping, setMicProbeStopping] = useState(false);
   const [dictationText, setDictationText] = useState("");
   const [pipelineState, setPipelineState] = useState("idle");
   const [hotkey, setHotkey] = useState("Alt+Space");
@@ -109,14 +110,22 @@ export function useOnboarding() {
   }, []);
 
   const stopMicProbe = useCallback(async () => {
-    await invoke("stop_mic_probe");
-    setMicProbing(false);
+    setMicProbeStopping(true);
+    try {
+      await invoke("stop_mic_probe");
+      setMicProbing(false);
+    } finally {
+      setMicProbeStopping(false);
+    }
   }, []);
 
   const runDictationTest = useCallback(async () => {
+    if (micProbing || micProbeStopping) {
+      await stopMicProbe();
+    }
     setDictationText("");
     await invoke("toggle_dictation");
-  }, []);
+  }, [micProbing, micProbeStopping, stopMicProbe]);
 
   const completeOnboarding = useCallback(async () => {
     await invoke("stop_mic_probe").catch(() => {});
@@ -134,6 +143,7 @@ export function useOnboarding() {
     modelError,
     audioLevel,
     micProbing,
+    micProbeStopping,
     dictationText,
     pipelineState,
     hotkey,

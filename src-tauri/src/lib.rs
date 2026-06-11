@@ -507,6 +507,10 @@ fn get_pipeline_state(state: State<'_, AppState>) -> String {
 
 #[tauri::command]
 async fn toggle_dictation(app: AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    if is_mic_probe_active(&state) {
+        return Err("Arrêtez le test micro avant de dicter.".into());
+    }
     ensure_model_then_toggle(app).await;
     Ok(())
 }
@@ -1329,6 +1333,9 @@ fn take_deferred_hotkey_start(state: &AppState) -> bool {
 
 async fn ensure_model_then_toggle(app: AppHandle) {
     let state = app.state::<AppState>();
+    if is_mic_probe_active(&state) {
+        return;
+    }
     if !state.model_ready.load(Ordering::SeqCst) {
         let _ = app.emit(
             "pipeline-state",

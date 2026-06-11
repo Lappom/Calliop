@@ -57,7 +57,10 @@ const THINK_CLOSE: &str = concat!("</", "think", ">");
 pub const SYSTEM_PROMPT: &str =
     "Tu es un assistant de post-traitement pour une dictée vocale en français. \
 Ta tâche : nettoyer la transcription fournie par l'utilisateur. \
-Supprime les fillers oraux (euh, bah, heu, du coup, voilà, enfin, etc.). \
+Supprime les fillers oraux (euh, bah, heu, ok, alors, bon, du coup, voilà, enfin, etc.) \
+et les amorces de phrase (« ok alors là », « bon ben », etc.). \
+Quand l'utilisateur hésite puis reprend (faux départ suivi de « … » ou d'une reformulation), \
+ne garde que la formulation la plus complète et cohérente — supprime les fragments abandonnés. \
 Corrige la ponctuation et les majuscules. \
 Les commandes de ponctuation et de mise en forme dictées à voix haute ne doivent jamais \
 rester sous forme de mots dans le texte final : convertis-les en signes. \
@@ -156,6 +159,7 @@ pub fn validate_cleanup_output(raw: &str, cleaned: &str) -> Result<String, Promp
 
     cleaned = strip_wrapping_quotes(&cleaned);
     cleaned = interpret_oral_punctuation(&cleaned);
+    cleaned = polish_transcript(&cleaned);
 
     let max_len = raw.len().saturating_mul(3).max(512);
     if cleaned.len() > max_len {
@@ -205,9 +209,203 @@ pub fn whisper_oral_vocabulary_word_count() -> usize {
     WHISPER_ORAL_VOCABULARY_HINT.split_whitespace().count()
 }
 
-/// Full transcript cleanup after STT: fix common mishearings, then oral punctuation.
+/// Joins streaming STT segments without spurious mid-sentence capitals.
+pub fn join_transcript_segments(segments: &[impl AsRef<str>]) -> String {
+    let mut result = String::new();
+    for segment in segments {
+        let segment = segment.as_ref().trim();
+        if segment.is_empty() {
+            continue;
+        }
+        if result.is_empty() {
+            result = segment.to_string();
+            continue;
+        }
+        if !result.ends_with(' ') {
+            result.push(' ');
+        }
+        if should_lowercase_segment_join(&result, segment) {
+            result.push_str(&lowercase_first_char(segment));
+        } else {
+            result.push_str(segment);
+        }
+    }
+    result
+}
+
+/// Full transcript cleanup after STT: fix mishearings, oral punctuation, then polish.
 pub fn post_process_transcript(text: &str) -> String {
-    interpret_oral_punctuation(&normalize_stt_oral_mishearings(text))
+    let text = interpret_oral_punctuation(&normalize_stt_oral_mishearings(text));
+    polish_transcript(&text)
+}
+
+/// Deterministic polish applied after STT and after LLM cleanup validation.
+fn polish_transcript(text: &str) -> String {
+    let text = fix_malformed_punctuation(text);
+    let text = strip_leading_oral_fillers(&text);
+    let text = collapse_extra_whitespace(&text);
+    fix_sentence_capitalization(&text)
+}
+
+/// Longest phrases first so « ok alors là » wins over « ok ».
+const ORAL_FILLERS: &[&str] = &[
+    "ok alors là",
+    "ok alors",
+    "bon alors",
+    "ben voilà",
+    "du coup",
+    "alors là",
+    "enfin bon",
+    "alors",
+    "enfin",
+    "voilà",
+    "donc",
+    "bon",
+    "ben",
+    "beh",
+    "bah",
+    "euh",
+    "euhm",
+    "hem",
+    "hmm",
+    "ok",
+];
+
+fn strip_leading_oral_fillers(text: &str) -> String {
+    let mut result = text.trim().to_string();
+    loop {
+        let mut stripped = false;
+        for filler in ORAL_FILLERS {
+            if let Some(rest) = strip_prefix_phrase_ci(&result, filler) {
+                if rest.is_empty() || rest.starts_with(' ') || rest.starts_with(',') {
+                    result = rest
+                        .trim_start_matches([',', ' ', '—', '-'])
+                        .trim_start()
+                        .to_string();
+                    stripped = true;
+                    break;
+                }
+            }
+        }
+        if !stripped {
+            break;
+        }
+    }
+    result
+}
+
+fn strip_prefix_phrase_ci(text: &str, phrase: &str) -> Option<&str> {
+    let (start, end) = find_phrase_range_ci(text, phrase)?;
+    if start != 0 {
+        return None;
+    }
+    Some(text[end..].trim_start())
+}
+
+fn should_lowercase_segment_join(previous: &str, next: &str) -> bool {
+    let previous = previous.trim_end();
+    if previous.is_empty() {
+        return false;
+    }
+    if matches!(
+        previous.chars().last(),
+        Some('.' | '!' | '?' | '…')
+    ) {
+        return false;
+    }
+    next.trim()
+        .chars()
+        .next()
+        .is_some_and(|ch| ch.is_uppercase())
+}
+
+fn lowercase_first_char(text: &str) -> String {
+    let trimmed = text.trim();
+    let mut chars = trimmed.chars();
+    match chars.next() {
+        None => String::new(),
+        Some(first) => {
+            let mut out = first.to_lowercase().to_string();
+            out.extend(chars);
+            out
+        }
+    }
+}
+
+fn fix_malformed_punctuation(text: &str) -> String {
+    let mut result = text.to_string();
+    for broken in ["(, ", "(,", "( ,", "( ,"] {
+        result = result.replace(broken, "");
+    }
+    result = result.replace(".)", ".");
+    result = result.replace("()", "");
+    result = result.replace("( )", "");
+    unwrap_paren_wrapped_period(&result)
+}
+
+fn unwrap_paren_wrapped_period(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::new();
+    let mut index = 0;
+
+    while index < chars.len() {
+        if chars[index] == '(' {
+            if let Some(close) = find_paren_period_close(&chars, index) {
+                let inner: String = chars[index + 1..close].iter().collect();
+                let inner = inner.trim();
+                if !inner.is_empty() && !inner.contains('(') {
+                    if !out.is_empty() && !out.ends_with(' ') {
+                        out.push(' ');
+                    }
+                    let body = inner.trim_end_matches('.');
+                    out.push_str(body);
+                    out.push('.');
+                    index = close + 1;
+                    continue;
+                }
+            }
+        }
+        out.push(chars[index]);
+        index += 1;
+    }
+
+    out
+}
+
+fn find_paren_period_close(chars: &[char], open: usize) -> Option<usize> {
+    let mut index = open + 1;
+    while index + 1 < chars.len() {
+        if chars[index] == '.' && chars[index + 1] == ')' {
+            return Some(index + 1);
+        }
+        index += 1;
+    }
+    None
+}
+
+fn collapse_extra_whitespace(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn fix_sentence_capitalization(text: &str) -> String {
+    let mut result = String::new();
+    let mut capitalize_next = true;
+
+    for ch in text.chars() {
+        if capitalize_next && ch.is_alphabetic() {
+            result.extend(ch.to_uppercase());
+            capitalize_next = false;
+        } else {
+            result.push(ch);
+            if matches!(ch, '.' | '!' | '?' | '…') {
+                capitalize_next = true;
+            } else if !ch.is_whitespace() {
+                capitalize_next = false;
+            }
+        }
+    }
+
+    result
 }
 
 /// Fixes frequent Whisper mis-transcriptions of spoken symbol commands (before punctuation pass).
@@ -906,10 +1104,34 @@ mod tests {
     #[test]
     fn preserves_point_noun_at_end_of_utterance() {
         let out = post_process_transcript("voici mon point");
-        assert_eq!(out, "voici mon point");
+        assert_eq!(out, "Voici mon point");
 
         let out = post_process_transcript("bonjour point");
-        assert_eq!(out, "bonjour.");
+        assert_eq!(out, "Bonjour.");
+    }
+
+    #[test]
+    fn join_transcript_segments_lowercases_mid_sentence_capital() {
+        let joined = join_transcript_segments(&["de voir de...", "Pour faire un test"]);
+        assert_eq!(joined, "de voir de... pour faire un test");
+    }
+
+    #[test]
+    fn join_transcript_segments_keeps_capital_after_sentence_end() {
+        let joined = join_transcript_segments(&["Première phrase.", "Deuxième phrase"]);
+        assert_eq!(joined, "Première phrase. Deuxième phrase");
+    }
+
+    #[test]
+    fn strips_leading_oral_fillers() {
+        let out = post_process_transcript("ok alors là je teste");
+        assert_eq!(out, "Je teste");
+    }
+
+    #[test]
+    fn fixes_malformed_trailing_punctuation() {
+        let out = post_process_transcript("assez rapidement (, Calliop.)");
+        assert_eq!(out, "Assez rapidement Calliop.");
     }
 
     #[test]

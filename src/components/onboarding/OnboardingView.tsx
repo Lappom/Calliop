@@ -33,6 +33,7 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
     modelError,
     audioLevel,
     micProbing,
+    micProbeStopping,
     dictationText,
     pipelineState,
     hotkey,
@@ -48,10 +49,16 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
   const hotkeyParts = hotkey.split("+").map((p) => p.trim());
 
   useEffect(() => {
-    if (step !== 2 && micProbing) {
-      void stopMicProbe();
-    }
+    if (step === 2 || !micProbing) return;
+    void stopMicProbe();
   }, [step, micProbing, stopMicProbe]);
+
+  const goToNextStep = async () => {
+    if (step === 2 && micProbing) {
+      await stopMicProbe();
+    }
+    setStep((s) => Math.min(STEPS.length, s + 1));
+  };
 
   const handleFinish = async () => {
     await completeOnboarding();
@@ -159,7 +166,11 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
                 {dictationText || "En attente de votre voix…"}
               </CodeWindow>
               <div className="mt-4 flex items-center gap-3">
-                <Button variant="primary" onClick={() => void runDictationTest()}>
+                <Button
+                  variant="primary"
+                  disabled={micProbing || micProbeStopping}
+                  onClick={() => void runDictationTest()}
+                >
                   {pipelineState === "recording"
                     ? "Arrêter la dictée"
                     : "Démarrer la dictée"}
@@ -206,7 +217,7 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
           <Button
             variant="primary"
             disabled={step === 1 && (modelLoading || (!modelReady && !modelError))}
-            onClick={() => setStep((s) => Math.min(STEPS.length, s + 1))}
+            onClick={() => void goToNextStep()}
           >
             Continuer
           </Button>
