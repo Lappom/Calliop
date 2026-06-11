@@ -887,7 +887,7 @@ fn add_dictionary_word(
         }
     }
 
-    let inserted = state
+    let inserted_id = state
         .store
         .add_word(
             &normalized,
@@ -896,30 +896,32 @@ fn add_dictionary_word(
         )
         .map_err(|e| e.to_string())?;
 
-    if !inserted && normalized_misspelling.is_some() {
+    let Some(inserted_id) = inserted_id else {
+        if normalized_misspelling.is_some() {
+            return Err("Cette faute transcrite est déjà enregistrée.".into());
+        }
         return Err("Ce mot est déjà dans le dictionnaire.".into());
+    };
+
+    if let Err(err) = apply_dictionary_additions(&state, std::slice::from_ref(&normalized)) {
+        let _ = state.store.remove_word(inserted_id);
+        return Err(err);
+    }
+    if let Err(err) = refresh_correction_rules(&state.store, &state.pipeline) {
+        let _ = state.store.remove_word(inserted_id);
+        return Err(err);
     }
 
-    if inserted {
-        if let Err(err) = apply_dictionary_additions(&state, std::slice::from_ref(&normalized)) {
-            let _ = state.store.remove_word_by_normalized(&normalized);
-            return Err(err);
-        }
-        if let Err(err) = refresh_correction_rules(&state.store, &state.pipeline) {
-            let _ = state.store.remove_word_by_normalized(&normalized);
-            return Err(err);
-        }
-        state.dictionary_notifier.emit_immediate(
-            &app,
-            DictionaryUpdatedPayload {
-                added: vec![normalized],
-                removed: vec![],
-                source: Some("manual".into()),
-            },
-        );
-    }
+    state.dictionary_notifier.emit_immediate(
+        &app,
+        DictionaryUpdatedPayload {
+            added: vec![normalized],
+            removed: vec![],
+            source: Some("manual".into()),
+        },
+    );
 
-    Ok(inserted)
+    Ok(true)
 }
 
 #[tauri::command]

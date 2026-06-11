@@ -564,7 +564,8 @@ mod tests {
             .unwrap();
         store
             .add_word("Calliope", DictionarySource::Learned, None)
-            .unwrap();
+            .unwrap()
+            .expect("word inserted");
 
         let insights = store.get_insights().unwrap();
         assert_eq!(insights.total_words, 5);

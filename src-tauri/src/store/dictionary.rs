@@ -51,7 +51,7 @@ impl Store {
         let mut stmt = conn.prepare(
             "SELECT id, word, source, misspelling, created_at
              FROM dictionary
-             ORDER BY word COLLATE NOCASE ASC",
+             ORDER BY word COLLATE NOCASE ASC, misspelling COLLATE NOCASE ASC",
         )?;
 
         let rows = stmt.query_map([], Self::map_dictionary_row)?;
@@ -65,7 +65,8 @@ impl Store {
         let conn = self.connection().lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT word FROM dictionary
-             ORDER BY datetime(created_at) DESC, id DESC
+             GROUP BY word COLLATE NOCASE
+             ORDER BY MAX(datetime(created_at)) DESC, MAX(id) DESC
              LIMIT ?1",
         )?;
 
@@ -90,8 +91,12 @@ impl Store {
                 continue;
             }
             let changed = tx.execute(
-                "INSERT INTO dictionary (word, source, misspelling) VALUES (?1, ?2, NULL)
-                 ON CONFLICT(word) DO NOTHING",
+                "INSERT INTO dictionary (word, source, misspelling)
+                 SELECT ?1, ?2, NULL
+                 WHERE NOT EXISTS (
+                     SELECT 1 FROM dictionary
+                     WHERE word = ?1 COLLATE NOCASE AND misspelling IS NULL
+                 )",
                 params![normalized, source.as_str()],
             )?;
             if changed > 0 {
@@ -143,20 +148,20 @@ impl Store {
         word: &str,
         source: DictionarySource,
         misspelling: Option<&str>,
-    ) -> Result<bool, StoreError> {
+    ) -> Result<Option<i64>, StoreError> {
         let normalized = normalize_word(word);
         if !is_valid_dictionary_word(&normalized) {
-            return Ok(false);
+            return Ok(None);
         }
 
         let stored_misspelling = match (source, misspelling) {
             (DictionarySource::Manual, Some(value)) => {
                 let normalized_misspelling = normalize_word(value);
                 if !is_valid_dictionary_word(&normalized_misspelling) {
-                    return Ok(false);
+                    return Ok(None);
                 }
                 if normalized.eq_ignore_ascii_case(&normalized_misspelling) {
-                    return Ok(false);
+                    return Ok(None);
                 }
                 Some(normalized_misspelling)
             }
@@ -164,13 +169,41 @@ impl Store {
         };
 
         let conn = self.connection().lock().expect("store mutex poisoned");
-        let changed = conn.execute(
-            "INSERT INTO dictionary (word, source, misspelling) VALUES (?1, ?2, ?3)
-             ON CONFLICT(word) DO NOTHING",
+
+        if let Some(ref incorrect) = stored_misspelling {
+            let duplicate: Option<i64> = conn
+                .query_row(
+                    "SELECT id FROM dictionary
+                     WHERE misspelling = ?1 COLLATE NOCASE
+                     LIMIT 1",
+                    params![incorrect],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            if duplicate.is_some() {
+                return Ok(None);
+            }
+        } else {
+            let duplicate: Option<i64> = conn
+                .query_row(
+                    "SELECT id FROM dictionary
+                     WHERE word = ?1 COLLATE NOCASE AND misspelling IS NULL
+                     LIMIT 1",
+                    params![normalized],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            if duplicate.is_some() {
+                return Ok(None);
+            }
+        }
+
+        conn.execute(
+            "INSERT INTO dictionary (word, source, misspelling) VALUES (?1, ?2, ?3)",
             params![normalized, source.as_str(), stored_misspelling],
         )?;
 
-        Ok(changed > 0)
+        Ok(Some(conn.last_insert_rowid()))
     }
 
     pub fn get_word_by_id(&self, id: i64) -> Result<Option<DictionaryWord>, StoreError> {
@@ -204,7 +237,10 @@ impl Store {
         let conn = self.connection().lock().expect("store mutex poisoned");
         let conflict: Option<i64> = conn
             .query_row(
-                "SELECT id FROM dictionary WHERE word = ?1 COLLATE NOCASE AND id != ?2",
+                "SELECT id FROM dictionary
+                 WHERE word = ?1 COLLATE NOCASE
+                   AND misspelling IS NULL
+                   AND id != ?2",
                 params![normalized, id],
                 |row| row.get(0),
             )
@@ -420,11 +456,23 @@ mod tests {
         conn.execute(
             "CREATE TABLE dictionary (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                word TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                word TEXT NOT NULL COLLATE NOCASE,
                 source TEXT NOT NULL DEFAULT 'manual',
                 misspelling TEXT,
                 created_at TEXT NOT NULL DEFAULT (datetime('now'))
             )",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "CREATE UNIQUE INDEX idx_dictionary_word_plain
+             ON dictionary(word COLLATE NOCASE) WHERE misspelling IS NULL",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "CREATE UNIQUE INDEX idx_dictionary_misspelling
+             ON dictionary(misspelling COLLATE NOCASE) WHERE misspelling IS NOT NULL",
             [],
         )
         .unwrap();
@@ -438,10 +486,12 @@ mod tests {
 
         assert!(store
             .add_word("Calliop", DictionarySource::Manual, None)
-            .unwrap());
-        assert!(!store
+            .unwrap()
+            .is_some());
+        assert!(store
             .add_word("calliop", DictionarySource::Learned, None)
-            .unwrap());
+            .unwrap()
+            .is_none());
 
         let words = store.list_words().unwrap();
         assert_eq!(words.len(), 1);
@@ -455,10 +505,14 @@ mod tests {
     #[test]
     fn rejects_empty_and_numeric_words() {
         let store = test_store();
-        assert!(!store.add_word("", DictionarySource::Manual, None).unwrap());
-        assert!(!store
+        assert!(store
+            .add_word("", DictionarySource::Manual, None)
+            .unwrap()
+            .is_none());
+        assert!(store
             .add_word("42", DictionarySource::Manual, None)
-            .unwrap());
+            .unwrap()
+            .is_none());
     }
 
     #[test]
@@ -466,11 +520,35 @@ mod tests {
         let store = test_store();
         assert!(store
             .add_word("@", DictionarySource::Manual, Some("Arro.Baz."))
-            .unwrap());
+            .unwrap()
+            .is_some());
 
         let words = store.list_words().unwrap();
         assert_eq!(words[0].word, "@");
         assert_eq!(words[0].misspelling.as_deref(), Some("Arro.Baz."));
+    }
+
+    #[test]
+    fn allows_multiple_misspellings_for_same_replacement() {
+        let store = test_store();
+        assert!(store
+            .add_word("@", DictionarySource::Manual, Some("Arro.Baz."))
+            .unwrap()
+            .is_some());
+        assert!(store
+            .add_word("@", DictionarySource::Manual, Some("À Robaz."))
+            .unwrap()
+            .is_some());
+        assert!(store
+            .add_word("@", DictionarySource::Manual, Some("Arro.Baz."))
+            .unwrap()
+            .is_none());
+
+        let rules = store.list_correction_rules().unwrap();
+        assert_eq!(rules.len(), 2);
+
+        let prompt = store.list_words_for_prompt(10).unwrap();
+        assert_eq!(prompt.iter().filter(|w| *w == "@").count(), 1);
     }
 
     #[test]
@@ -524,7 +602,8 @@ mod tests {
         let store = test_store();
         assert!(store
             .add_word("Calliop", DictionarySource::Manual, None)
-            .unwrap());
+            .unwrap()
+            .is_some());
         let id = store.list_words().unwrap()[0].id;
 
         assert!(store.update_word(id, "Calliope").unwrap());
@@ -558,7 +637,8 @@ mod tests {
         let store = test_store();
         assert!(store
             .add_word("Calliop", DictionarySource::Manual, Some("Caliope"))
-            .unwrap());
+            .unwrap()
+            .is_some());
 
         let words = store.list_words().unwrap();
         assert_eq!(words.len(), 1);
@@ -573,12 +653,14 @@ mod tests {
     #[test]
     fn rejects_misspelling_equal_to_word() {
         let store = test_store();
-        assert!(!store
+        assert!(store
             .add_word("Calliop", DictionarySource::Manual, Some("Calliop"))
-            .unwrap());
-        assert!(!store
+            .unwrap()
+            .is_none());
+        assert!(store
             .add_word("Calliop", DictionarySource::Manual, Some("calliop"))
-            .unwrap());
+            .unwrap()
+            .is_none());
     }
 
     #[test]
@@ -586,7 +668,8 @@ mod tests {
         let store = test_store();
         assert!(store
             .add_word("Calliop", DictionarySource::Learned, Some("Caliope"))
-            .unwrap());
+            .unwrap()
+            .is_some());
 
         let words = store.list_words().unwrap();
         assert!(words[0].misspelling.is_none());

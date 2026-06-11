@@ -134,6 +134,13 @@ mod tests {
     }
 
     #[test]
+    fn replaces_dotted_misspelling_with_symbol() {
+        let rules = vec![rule("Arro.Baz.", "@")];
+        let result = apply_corrections("Envoyez un Arro.Baz. maintenant", &rules);
+        assert_eq!(result, "Envoyez un @ maintenant");
+    }
+
+    #[test]
     fn prefers_longer_incorrect_match() {
         let rules = vec![rule("call", "short"), rule("call io", "long")];
         let result = apply_corrections("call io", &rules);

@@ -101,7 +101,7 @@ pub(crate) fn init_schema(conn: &Connection) -> Result<(), StoreError> {
     conn.execute(
         "CREATE TABLE IF NOT EXISTS dictionary (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            word TEXT NOT NULL UNIQUE COLLATE NOCASE,
+            word TEXT NOT NULL COLLATE NOCASE,
             source TEXT NOT NULL DEFAULT 'manual',
             misspelling TEXT,
             created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -109,6 +109,7 @@ pub(crate) fn init_schema(conn: &Connection) -> Result<(), StoreError> {
         [],
     )?;
     migrate_dictionary_misspelling(conn)?;
+    migrate_dictionary_unique_constraints(conn)?;
     conn.execute(
         "CREATE TABLE IF NOT EXISTS snippets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -180,6 +181,35 @@ fn migrate_dictionary_misspelling(conn: &Connection) -> Result<(), StoreError> {
     if !has_misspelling {
         conn.execute("ALTER TABLE dictionary ADD COLUMN misspelling TEXT", [])?;
     }
+    Ok(())
+}
+
+fn migrate_dictionary_unique_constraints(conn: &Connection) -> Result<(), StoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_dictionary_word_plain'",
+    )?;
+    if stmt.exists([])? {
+        return Ok(());
+    }
+
+    // Rebuild to drop legacy UNIQUE(word) and allow multiple correction rules per replacement.
+    conn.execute_batch(
+        "CREATE TABLE dictionary_migrated (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            word TEXT NOT NULL COLLATE NOCASE,
+            source TEXT NOT NULL DEFAULT 'manual',
+            misspelling TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        INSERT INTO dictionary_migrated (id, word, source, misspelling, created_at)
+            SELECT id, word, source, misspelling, created_at FROM dictionary;
+        DROP TABLE dictionary;
+        ALTER TABLE dictionary_migrated RENAME TO dictionary;
+        CREATE UNIQUE INDEX idx_dictionary_word_plain
+            ON dictionary(word COLLATE NOCASE) WHERE misspelling IS NULL;
+        CREATE UNIQUE INDEX idx_dictionary_misspelling
+            ON dictionary(misspelling COLLATE NOCASE) WHERE misspelling IS NOT NULL;",
+    )?;
     Ok(())
 }
 
