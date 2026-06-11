@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use super::db::{Store, StoreError};
 
+pub const KEY_SNIPPET_USER_NAME: &str = "snippet_user_name";
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Snippet {
     pub id: i64,
@@ -20,6 +22,14 @@ pub struct SnippetImport {
 }
 
 impl Store {
+    pub fn get_snippet_user_name(&self) -> Result<String, StoreError> {
+        self.get_string(KEY_SNIPPET_USER_NAME, "")
+    }
+
+    pub fn set_snippet_user_name(&self, name: &str) -> Result<(), StoreError> {
+        self.set_string(KEY_SNIPPET_USER_NAME, name.trim())
+    }
+
     pub fn list_snippets(&self) -> Result<Vec<Snippet>, StoreError> {
         let conn = self.connection().lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(

@@ -52,6 +52,15 @@ impl TextInjector {
 
     pub fn save_clipboard() -> Result<SavedClipboard, InjectError> {
         let _guard = INJECT_MUTEX.lock();
+        Self::read_clipboard_inner()
+    }
+
+    pub fn read_clipboard_text() -> Result<Option<String>, InjectError> {
+        let _guard = INJECT_MUTEX.lock();
+        Self::read_clipboard_inner().map(|saved| saved.text().map(str::to_string))
+    }
+
+    fn read_clipboard_inner() -> Result<SavedClipboard, InjectError> {
         let mut clipboard = Self::open_clipboard()?;
         let text = clipboard.get_text().ok();
         Ok(SavedClipboard::from_text(text))
@@ -77,9 +86,7 @@ impl TextInjector {
     }
 
     fn save_clipboard_inner() -> Result<SavedClipboard, InjectError> {
-        let mut clipboard = Self::open_clipboard()?;
-        let text = clipboard.get_text().ok();
-        Ok(SavedClipboard::from_text(text))
+        Self::read_clipboard_inner()
     }
 
     fn inject_with_saved_inner(

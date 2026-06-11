@@ -11,6 +11,7 @@ export interface Snippet {
 
 export function useSnippets() {
   const [snippets, setSnippets] = useState<Snippet[]>([]);
+  const [userName, setUserName] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -28,12 +29,42 @@ export function useSnippets() {
     }
   }, []);
 
+  const loadUserName = useCallback(async () => {
+    try {
+      const name = await invoke<string>("get_snippet_user_name");
+      setUserName(name);
+    } catch (err) {
+      setErrorMessage(String(err));
+    }
+  }, []);
+
+  const saveUserName = useCallback(async (name: string) => {
+    const trimmed = name.trim();
+    try {
+      await invoke("set_snippet_user_name", { name: trimmed });
+      setUserName(trimmed);
+      setErrorMessage(null);
+    } catch (err) {
+      setErrorMessage(String(err));
+      throw err;
+    }
+  }, []);
+
+  const previewExpansion = useCallback(async (content: string) => {
+    try {
+      return await invoke<string>("preview_snippet_expansion", { content });
+    } catch (err) {
+      setErrorMessage(String(err));
+      return content;
+    }
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
 
     const setup = async () => {
       if (!cancelled) {
-        await loadSnippets();
+        await Promise.all([loadSnippets(), loadUserName()]);
       }
     };
 
@@ -47,7 +78,7 @@ export function useSnippets() {
       cancelled = true;
       void unlisten.then((drop) => drop());
     };
-  }, [loadSnippets]);
+  }, [loadSnippets, loadUserName]);
 
   const addSnippet = useCallback(
     async (trigger: string, content: string) => {
@@ -191,6 +222,7 @@ export function useSnippets() {
 
   return {
     snippets,
+    userName,
     loaded,
     busy,
     errorMessage,
@@ -202,6 +234,8 @@ export function useSnippets() {
     exportSnippets,
     openImportDialog,
     handleImportFile,
+    saveUserName,
+    previewExpansion,
     reload: loadSnippets,
   };
 }

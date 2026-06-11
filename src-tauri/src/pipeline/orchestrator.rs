@@ -19,11 +19,24 @@ use crate::store::{AppContextRule, NewDictation, Snippet, Store};
 use crate::stt::{SttError, SttLanguage, WhisperEngine};
 
 use super::corrections::{apply_corrections, CorrectionRule};
+use super::snippet_variables::SnippetVariableContext;
 use super::snippets::{
     apply_snippets, finalize_llm_with_snippets, shield_snippet_triggers, unshield_snippets,
 };
 
-fn prepare_display_transcript(raw: &str, snippets: &[Snippet]) -> String {
+fn build_snippet_variable_context(store: Option<&Store>) -> SnippetVariableContext {
+    let user_name = store
+        .and_then(|s| s.get_snippet_user_name().ok())
+        .unwrap_or_default();
+    let clipboard = TextInjector::read_clipboard_text().ok().flatten();
+    SnippetVariableContext::from_user_name(user_name).with_clipboard(clipboard)
+}
+
+fn prepare_display_transcript(
+    raw: &str,
+    snippets: &[Snippet],
+    ctx: &SnippetVariableContext,
+) -> String {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return String::new();
@@ -33,17 +46,21 @@ fn prepare_display_transcript(raw: &str, snippets: &[Snippet]) -> String {
     if shields.is_empty() {
         processed
     } else {
-        unshield_snippets(&processed, &shields)
+        unshield_snippets(&processed, &shields, ctx)
     }
 }
 
 /// Live overlay only: expand snippets without oral punctuation (avoids premature « point » → « . »).
-fn prepare_partial_transcript(raw: &str, snippets: &[Snippet]) -> String {
+fn prepare_partial_transcript(
+    raw: &str,
+    snippets: &[Snippet],
+    ctx: &SnippetVariableContext,
+) -> String {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return String::new();
     }
-    apply_snippets(trimmed, snippets)
+    apply_snippets(trimmed, snippets, ctx)
 }
 
 /// Maximum time to wait for LLM cleanup before inject or worker kill.
@@ -389,6 +406,7 @@ impl PipelineOrchestrator {
         let session_detected_language = Arc::clone(&self.session_detected_language);
         let pending_detection = Arc::clone(&self.pending_detection);
         let snippets = Arc::clone(&self.snippets);
+        let history_store = self.history_store.clone();
         let worker = thread::spawn(move || {
             streaming_worker(
                 app_worker,
@@ -404,6 +422,7 @@ impl PipelineOrchestrator {
                     session_detected_language,
                     pending_detection,
                     snippets,
+                    history_store,
                 },
             );
         });
@@ -503,7 +522,11 @@ impl PipelineOrchestrator {
 
         let auto_edit = self.auto_edit.load(Ordering::SeqCst);
         let snippets = self.snippets.read().clone();
-        let snippet_fallback = prepare_display_transcript(&raw, &snippets);
+        let snippet_ctx = build_snippet_variable_context(
+            self.history_store.as_deref(),
+        );
+        let snippet_fallback =
+            prepare_display_transcript(&raw, &snippets, &snippet_ctx);
         let llm_input = if !raw.is_empty() && auto_edit {
             let (shielded_raw, snippet_shields) = shield_snippet_triggers(&raw, &snippets);
             let full_text = post_process_transcript(shielded_raw.trim());
@@ -523,7 +546,7 @@ impl PipelineOrchestrator {
                     let text = if snippet_shields.is_empty() {
                         full_text
                     } else {
-                        unshield_snippets(&full_text, &snippet_shields)
+                        unshield_snippets(&full_text, &snippet_shields, &snippet_ctx)
                     };
                     (text, 0, false)
                 } else {
@@ -549,9 +572,10 @@ impl PipelineOrchestrator {
                                 &snippet_shields,
                                 &snippet_fallback,
                                 &snippets,
+                                &snippet_ctx,
                             )
                         } else {
-                            let from_cleaned = apply_snippets(&text, &snippets);
+                            let from_cleaned = apply_snippets(&text, &snippets, &snippet_ctx);
                             if from_cleaned != text {
                                 from_cleaned
                             } else {
@@ -886,6 +910,7 @@ struct StreamingSttContext {
     session_detected_language: Arc<RwLock<Option<SttLanguage>>>,
     pending_detection: Arc<Mutex<Option<SttLanguage>>>,
     snippets: Arc<RwLock<Vec<Snippet>>>,
+    history_store: Option<Arc<Store>>,
 }
 
 fn streaming_worker(
@@ -985,7 +1010,8 @@ fn transcribe_segment(
         transcripts.push(text.text.clone());
         join_transcript_segments(transcripts.as_slice())
     };
-    let display = prepare_partial_transcript(&raw, &stt.snippets.read());
+    let snippet_ctx = build_snippet_variable_context(stt.history_store.as_deref());
+    let display = prepare_partial_transcript(&raw, &stt.snippets.read(), &snippet_ctx);
 
     let _ = app.emit(
         "partial-transcript",
@@ -1148,7 +1174,7 @@ mod tests {
             content: "contact at gmail point com".into(),
             created_at: "now".into(),
         }];
-        let result = prepare_display_transcript("voici mon email", &snippets);
+        let result = prepare_display_transcript("voici mon email", &snippets, &SnippetVariableContext::default());
         assert_eq!(result, "Voici contact at gmail point com");
     }
 }

@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
 import { ArrowRight, Pencil, Trash2 } from "lucide-react";
 import type { Snippet } from "../../hooks/useSnippets";
+import { BadgePill } from "../ui/BadgePill";
+import { containsSnippetVariables } from "./snippetVariables";
 
 interface SnippetsTableProps {
   snippets: Snippet[];
@@ -67,8 +69,13 @@ export function SnippetsTable({
                       className="shrink-0 text-ash"
                       aria-hidden
                     />
-                    <span className="min-w-0 truncate text-body-sm text-charcoal">
-                      {entry.content}
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span className="min-w-0 truncate text-body-sm text-charcoal">
+                        {entry.content}
+                      </span>
+                      {containsSnippetVariables(entry.content) && (
+                        <BadgePill className="shrink-0">Variables</BadgePill>
+                      )}
                     </span>
                   </div>
                 </td>

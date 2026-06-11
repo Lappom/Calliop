@@ -26,6 +26,7 @@ pub use settings::{
 };
 pub use snippets::{
     is_valid_snippet_content, is_valid_trigger, normalize_trigger, Snippet, SnippetImport,
+    KEY_SNIPPET_USER_NAME,
 };
 
 pub fn module_name() -> &'static str {

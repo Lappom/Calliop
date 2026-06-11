@@ -7,7 +7,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
-type ModalSize = "sm" | "md";
+type ModalSize = "sm" | "md" | "lg";
 
 interface ModalProps {
   open: boolean;
@@ -21,6 +21,7 @@ interface ModalProps {
 const sizeClasses: Record<ModalSize, string> = {
   sm: "max-w-sm",
   md: "max-w-md",
+  lg: "max-w-lg",
 };
 
 export function Modal({

@@ -88,6 +88,16 @@ impl Store {
         )?;
         Ok(())
     }
+
+    pub fn set_string(&self, key: &str, value: &str) -> Result<(), StoreError> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![key, value],
+        )?;
+        Ok(())
+    }
 }
 
 pub(crate) fn init_schema(conn: &Connection) -> Result<(), StoreError> {

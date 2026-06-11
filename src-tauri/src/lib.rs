@@ -20,8 +20,8 @@ use dictionary_notify::{DictionaryNotifier, DictionaryUpdatedPayload};
 use inject::TextInjector;
 use parking_lot::Mutex;
 use pipeline::{
-    spawn_start, spawn_stop, spawn_toggle, CorrectionRule, PipelineOrchestrator, PipelineState,
-    PipelineStateEvent,
+    expand_snippet_variables, spawn_start, spawn_stop, spawn_toggle, CorrectionRule,
+    PipelineOrchestrator, PipelineState, PipelineStateEvent, SnippetVariableContext,
 };
 use serde::{Deserialize, Serialize};
 use store::{
@@ -1195,6 +1195,38 @@ fn export_snippets(state: State<'_, AppState>) -> Result<String, String> {
 }
 
 #[tauri::command]
+fn get_snippet_user_name(state: State<'_, AppState>) -> Result<String, String> {
+    state
+        .store
+        .get_snippet_user_name()
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_snippet_user_name(state: State<'_, AppState>, name: String) -> Result<(), String> {
+    state
+        .store
+        .set_snippet_user_name(&name)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn preview_snippet_expansion(
+    state: State<'_, AppState>,
+    content: String,
+) -> Result<String, String> {
+    let user_name = state
+        .store
+        .get_snippet_user_name()
+        .map_err(|e| e.to_string())?;
+    let clipboard = TextInjector::read_clipboard_text()
+        .ok()
+        .flatten();
+    let ctx = SnippetVariableContext::from_user_name(user_name).with_clipboard(clipboard);
+    Ok(expand_snippet_variables(&content, &ctx))
+}
+
+#[tauri::command]
 fn get_active_window() -> Option<app_context::ActiveWindow> {
     app_context::get_active_window()
 }
@@ -2149,6 +2181,9 @@ pub fn run() {
             remove_snippet,
             import_snippets,
             export_snippets,
+            get_snippet_user_name,
+            set_snippet_user_name,
+            preview_snippet_expansion,
             get_active_window,
             list_app_context_rules,
             add_app_context_rule,

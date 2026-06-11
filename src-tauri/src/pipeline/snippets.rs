@@ -1,5 +1,7 @@
 use crate::store::Snippet;
 
+use super::snippet_variables::{expand_snippet_variables, SnippetVariableContext};
+
 const TRAILING_PUNCTUATION: [char; 6] = ['.', ',', ';', ':', '!', '?'];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -77,10 +79,15 @@ pub fn shield_snippet_triggers(text: &str, snippets: &[Snippet]) -> (String, Vec
     (result, shields)
 }
 
-pub fn unshield_snippets(text: &str, shields: &[ShieldedSnippet]) -> String {
+pub fn unshield_snippets(
+    text: &str,
+    shields: &[ShieldedSnippet],
+    ctx: &SnippetVariableContext,
+) -> String {
     let mut result = text.to_string();
     for shield in shields {
-        result = result.replace(&shield.token, &shield.content);
+        let expanded = expand_snippet_variables(&shield.content, ctx);
+        result = result.replace(&shield.token, &expanded);
     }
     result
 }
@@ -91,23 +98,28 @@ pub fn finalize_llm_with_snippets(
     shields: &[ShieldedSnippet],
     full_text: &str,
     snippets: &[Snippet],
+    ctx: &SnippetVariableContext,
 ) -> String {
     if shields.is_empty() {
         return cleaned.to_string();
     }
     if shields.iter().all(|shield| cleaned.contains(&shield.token)) {
-        return unshield_snippets(cleaned, shields);
+        return unshield_snippets(cleaned, shields, ctx);
     }
 
-    let from_cleaned = apply_snippets(cleaned, snippets);
+    let from_cleaned = apply_snippets(cleaned, snippets, ctx);
     if from_cleaned != cleaned {
         return from_cleaned;
     }
-    apply_snippets(full_text, snippets)
+    apply_snippets(full_text, snippets, ctx)
 }
 
 /// Expands voice snippet triggers into their full content (deterministic, offline).
-pub fn apply_snippets(text: &str, snippets: &[Snippet]) -> String {
+pub fn apply_snippets(
+    text: &str,
+    snippets: &[Snippet],
+    ctx: &SnippetVariableContext,
+) -> String {
     if snippets.is_empty() || text.is_empty() {
         return text.to_owned();
     }
@@ -152,7 +164,7 @@ pub fn apply_snippets(text: &str, snippets: &[Snippet]) -> String {
         };
 
         result.push_str(&slice[..rel_start]);
-        result.push_str(&snippet.content);
+        result.push_str(&expand_snippet_variables(&snippet.content, ctx));
         if let Some(punctuation) = trailing {
             result.push(punctuation);
         }
@@ -294,6 +306,10 @@ mod tests {
     use super::*;
     use crate::store::Snippet;
 
+    fn empty_ctx() -> SnippetVariableContext {
+        SnippetVariableContext::default()
+    }
+
     fn snippet(trigger: &str, content: &str) -> Snippet {
         Snippet {
             id: 1,
@@ -306,14 +322,15 @@ mod tests {
     #[test]
     fn expands_trigger_case_insensitively() {
         let snippets = vec![snippet("mon calendrier", "https://calendly.com/me")];
-        let result = apply_snippets("Voici Mon Calendrier pour réserver.", &snippets);
+        let result =
+            apply_snippets("Voici Mon Calendrier pour réserver.", &snippets, &empty_ctx());
         assert_eq!(result, "Voici https://calendly.com/me pour réserver.");
     }
 
     #[test]
     fn preserves_trailing_punctuation() {
         let snippets = vec![snippet("mon calendrier", "https://calendly.com/me")];
-        let result = apply_snippets("mon calendrier.", &snippets);
+        let result = apply_snippets("mon calendrier.", &snippets, &empty_ctx());
         assert_eq!(result, "https://calendly.com/me.");
     }
 
@@ -323,28 +340,28 @@ mod tests {
             snippet("calendrier", "short"),
             snippet("mon calendrier", "long"),
         ];
-        let result = apply_snippets("mon calendrier", &snippets);
+        let result = apply_snippets("mon calendrier", &snippets, &empty_ctx());
         assert_eq!(result, "long");
     }
 
     #[test]
     fn ignores_partial_word_matches() {
         let snippets = vec![snippet("cal", "expanded")];
-        let result = apply_snippets("recalibrer", &snippets);
+        let result = apply_snippets("recalibrer", &snippets, &empty_ctx());
         assert_eq!(result, "recalibrer");
     }
 
     #[test]
     fn matches_accent_insensitive() {
         let snippets = vec![snippet("deja", "déjà vu")];
-        let result = apply_snippets("Je l'ai déjà fait.", &snippets);
+        let result = apply_snippets("Je l'ai déjà fait.", &snippets, &empty_ctx());
         assert_eq!(result, "Je l'ai déjà vu fait.");
     }
 
     #[test]
     fn leaves_unmatched_text_unchanged() {
         let snippets = vec![snippet("signature", "Cordialement")];
-        let result = apply_snippets("bonjour tout le monde", &snippets);
+        let result = apply_snippets("bonjour tout le monde", &snippets, &empty_ctx());
         assert_eq!(result, "bonjour tout le monde");
     }
 
@@ -357,9 +374,21 @@ mod tests {
         assert_eq!(shields.len(), 1);
         let cleaned = shielded.replace("Voici", "Voici,");
         assert_eq!(
-            unshield_snippets(&cleaned, &shields),
+            unshield_snippets(&cleaned, &shields, &empty_ctx()),
             "Voici, https://calendly.com/me demain."
         );
+    }
+
+    #[test]
+    fn expands_variables_in_snippet_content() {
+        let snippets = vec![snippet("ma signature", "Cordialement,\n{{nom}}")];
+        let ctx = SnippetVariableContext {
+            user_name: "Dupont".into(),
+            clipboard: None,
+            date_override: None,
+        };
+        let result = apply_snippets("ma signature", &snippets, &ctx);
+        assert_eq!(result, "Cordialement,\nDupont");
     }
 
     #[test]
@@ -367,7 +396,7 @@ mod tests {
         let snippets = vec![snippet("mon calendrier", "https://calendly.com/me")];
         let (_, shields) = shield_snippet_triggers("mon calendrier", &snippets);
         let result =
-            finalize_llm_with_snippets("Mon agenda", &shields, "mon calendrier", &snippets);
+            finalize_llm_with_snippets("Mon agenda", &shields, "mon calendrier", &snippets, &empty_ctx());
         assert_eq!(result, "https://calendly.com/me");
     }
 }
