@@ -178,10 +178,11 @@ impl Store {
         &self,
         query: &str,
         limit: usize,
+        offset: usize,
     ) -> Result<Vec<DictationEntry>, StoreError> {
         let trimmed = query.trim();
         if trimmed.is_empty() {
-            return self.list_dictations(limit, 0);
+            return self.list_dictations(limit, offset);
         }
 
         let conn = self.connection().lock().expect("store mutex poisoned");
@@ -193,11 +194,39 @@ impl Store {
              JOIN dictations d ON d.id = fts.rowid
              WHERE dictations_fts MATCH ?1
              ORDER BY datetime(d.created_at) DESC, d.id DESC
-             LIMIT ?2",
+             LIMIT ?2 OFFSET ?3",
         )?;
-        let rows = stmt.query_map(params![fts_query, limit as i64], map_dictation_row)?;
+        let rows = stmt.query_map(
+            params![fts_query, limit as i64, offset as i64],
+            map_dictation_row,
+        )?;
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(StoreError::from)
+    }
+
+    pub fn count_dictations(&self) -> Result<i64, StoreError> {
+        let conn = self.connection().lock().expect("store mutex poisoned");
+        conn.query_row("SELECT COUNT(*) FROM dictations", [], |row| row.get(0))
+            .map_err(StoreError::from)
+    }
+
+    pub fn count_search_dictations(&self, query: &str) -> Result<i64, StoreError> {
+        let trimmed = query.trim();
+        if trimmed.is_empty() {
+            return self.count_dictations();
+        }
+
+        let conn = self.connection().lock().expect("store mutex poisoned");
+        let fts_query = build_fts_query(trimmed);
+        conn.query_row(
+            "SELECT COUNT(*)
+             FROM dictations_fts fts
+             JOIN dictations d ON d.id = fts.rowid
+             WHERE dictations_fts MATCH ?1",
+            params![fts_query],
+            |row| row.get(0),
+        )
+        .map_err(StoreError::from)
     }
 
     pub fn get_dictation(&self, id: i64) -> Result<Option<DictationEntry>, StoreError> {
@@ -445,6 +474,24 @@ mod tests {
     }
 
     #[test]
+    fn list_dictations_supports_pagination() {
+        let store = test_store();
+        for index in 0..5 {
+            store
+                .insert_dictation(&sample_dictation(&format!("entry {index}")))
+                .unwrap();
+        }
+
+        let page_one = store.list_dictations(2, 0).unwrap();
+        let page_two = store.list_dictations(2, 2).unwrap();
+
+        assert_eq!(page_one.len(), 2);
+        assert_eq!(page_two.len(), 2);
+        assert_ne!(page_one[0].id, page_two[0].id);
+        assert_eq!(store.count_dictations().unwrap(), 5);
+    }
+
+    #[test]
     fn fts_search_finds_matching_text() {
         let store = test_store();
         store
@@ -454,7 +501,7 @@ mod tests {
             .insert_dictation(&sample_dictation("commit message technique"))
             .unwrap();
 
-        let hits = store.search_dictations("Slack", 10).unwrap();
+        let hits = store.search_dictations("Slack", 10, 0).unwrap();
         assert_eq!(hits.len(), 1);
         assert!(hits[0].text.contains("Slack"));
     }
