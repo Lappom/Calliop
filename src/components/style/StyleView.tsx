@@ -10,8 +10,10 @@ import type {
 } from "../../hooks/useAppContext";
 import { useAppContext } from "../../hooks/useAppContext";
 import { useRefreshSpin } from "../../hooks/useRefreshSpin";
+import { EmptyStateCard } from "../motion/EmptyStateCard";
+import { NoResultsCard } from "../motion/NoResultsCard";
+import { Stagger } from "../motion/Stagger";
 import { SnippetListToolbarButton } from "../snippets/SnippetListToolbarButton";
-import { SectionGlow } from "../layout/SectionGlow";
 import { Button } from "../ui/Button";
 import { ExpandableSearchField } from "../ui/ExpandableSearchField";
 import { RefreshIcon } from "../ui/RefreshIcon";
@@ -96,7 +98,8 @@ export function StyleView() {
   };
 
   return (
-    <div className="flex flex-col gap-8">
+    <>
+    <Stagger className="flex flex-col gap-8" itemMotion="fade">
       <header>
         <h1 className="text-heading-md mb-2 text-ink">{t("style.title")}</h1>
         <p className="text-body-sm text-charcoal">{t("style.subtitle")}</p>
@@ -179,30 +182,28 @@ export function StyleView() {
       )}
 
       {loaded && rules.length === 0 && (
-        <SectionGlow glow="orange">
-          <div className="rounded-lg border border-hairline-strong bg-surface-card p-6 sm:p-8">
-            <p className="text-body-md m-0 text-charcoal">{t("style.empty")}</p>
-            <Button
-              type="button"
-              variant="primary"
-              className="mt-4"
-              disabled={busy}
-              onClick={() => openModal()}
-            >
-              {t("style.createRule")}
-            </Button>
-          </div>
-        </SectionGlow>
+        <EmptyStateCard glow="orange">
+          <p className="text-body-md m-0 text-charcoal">{t("style.empty")}</p>
+          <Button
+            type="button"
+            variant="primary"
+            className="mt-4"
+            disabled={busy}
+            onClick={() => openModal()}
+          >
+            {t("style.createRule")}
+          </Button>
+        </EmptyStateCard>
       )}
 
       {loaded && rules.length > 0 && (
         <>
           {visibleRules.length === 0 ? (
-            <div className="rounded-lg border border-hairline-strong bg-surface-card px-4 py-8 text-center">
+            <NoResultsCard>
               <p className="text-body-sm m-0 text-charcoal">
                 {t("common.noResults", { query: searchQuery.trim() })}
               </p>
-            </div>
+            </NoResultsCard>
           ) : (
             <StyleRulesTable
               rules={visibleRules}
@@ -214,6 +215,7 @@ export function StyleView() {
           )}
         </>
       )}
+    </Stagger>
 
       <StyleRuleModal
         open={modalOpen}
@@ -225,6 +227,6 @@ export function StyleView() {
         initialTone={modalDefaults.tone}
         onSubmit={handleSubmit}
       />
-    </div>
+    </>
   );
 }

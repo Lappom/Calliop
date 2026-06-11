@@ -3,8 +3,9 @@ import { useEffect, useMemo, useState } from "react";
 import { useUiLocale } from "../../i18n/useUiLocale";
 import { useHistory } from "../../hooks/useHistory";
 import { useRefreshSpin } from "../../hooks/useRefreshSpin";
+import { EmptyStateCard } from "../motion/EmptyStateCard";
+import { Stagger } from "../motion/Stagger";
 import { SnippetListToolbarButton } from "../snippets/SnippetListToolbarButton";
-import { SectionGlow } from "../layout/SectionGlow";
 import { ExpandableSearchField } from "../ui/ExpandableSearchField";
 import { RefreshIcon } from "../ui/RefreshIcon";
 import { toolbarMenuOptions } from "../ui/toolbarMenu";
@@ -70,7 +71,7 @@ export function HistoryView() {
   const isSearching = searchQuery.trim().length > 0;
 
   return (
-    <div className="flex flex-col gap-8">
+    <Stagger className="flex flex-col gap-8" itemMotion="fade">
       <header>
         <h1 className="text-heading-md mb-2 text-ink">{t("history.title")}</h1>
         <p className="text-body-sm text-charcoal">{t("history.subtitle")}</p>
@@ -147,23 +148,21 @@ export function HistoryView() {
       )}
 
       {loaded && totalCount === 0 && (
-        <SectionGlow glow="green">
-          <div className="rounded-lg border border-hairline-strong bg-surface-card p-6 sm:p-8">
-            <p className="text-body-md m-0 text-charcoal">
-              {isSearching
-                ? t("common.noResults", { query: searchQuery.trim() })
-                : t("history.empty")}
+        <EmptyStateCard glow="green">
+          <p className="text-body-md m-0 text-charcoal">
+            {isSearching
+              ? t("common.noResults", { query: searchQuery.trim() })
+              : t("history.empty")}
+          </p>
+          {!isSearching && (
+            <p className="text-body-sm mt-3 text-ash">
+              {t("keys.dictateStartHint", {
+                alt: t("keys.modifiers.alt"),
+                space: t("keys.space"),
+              })}
             </p>
-            {!isSearching && (
-              <p className="text-body-sm mt-3 text-ash">
-                {t("keys.dictateStartHint", {
-                  alt: t("keys.modifiers.alt"),
-                  space: t("keys.space"),
-                })}
-              </p>
-            )}
-          </div>
-        </SectionGlow>
+          )}
+        </EmptyStateCard>
       )}
 
       {hasPageEntries && (
@@ -188,6 +187,6 @@ export function HistoryView() {
           />
         </>
       )}
-    </div>
+    </Stagger>
   );
 }

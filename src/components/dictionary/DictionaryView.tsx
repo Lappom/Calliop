@@ -8,7 +8,9 @@ import { useUiLocale } from "../../i18n/useUiLocale";
 import type { DictionaryWord } from "../../hooks/useDictionary";
 import { useDictionary } from "../../hooks/useDictionary";
 import { useRefreshSpin } from "../../hooks/useRefreshSpin";
-import { SectionGlow } from "../layout/SectionGlow";
+import { EmptyStateCard } from "../motion/EmptyStateCard";
+import { NoResultsCard } from "../motion/NoResultsCard";
+import { Stagger } from "../motion/Stagger";
 import { SnippetListToolbarButton } from "../snippets/SnippetListToolbarButton";
 import { Button } from "../ui/Button";
 import { ExpandableSearchField } from "../ui/ExpandableSearchField";
@@ -107,7 +109,8 @@ export function DictionaryView() {
   };
 
   return (
-    <div className="flex flex-col gap-8">
+    <>
+    <Stagger className="flex flex-col gap-8" itemMotion="fade">
       <header>
         <h1 className="text-heading-md mb-2 text-ink">{t("dictionary.title")}</h1>
         <p className="text-body-sm text-charcoal">{t("dictionary.subtitle")}</p>
@@ -195,33 +198,31 @@ export function DictionaryView() {
       )}
 
       {loaded && words.length === 0 && (
-        <SectionGlow glow="blue">
-          <div className="rounded-lg border border-hairline-strong bg-surface-card p-6 sm:p-8">
-            <p className="text-body-md m-0 text-charcoal">{t("dictionary.empty")}</p>
-            <Button
-              type="button"
-              variant="primary"
-              className="mt-4"
-              disabled={busy}
-              onClick={() => {
-                setModalError(null);
-                setModalState({ mode: "create" });
-              }}
-            >
-              {t("dictionary.addWord")}
-            </Button>
-          </div>
-        </SectionGlow>
+        <EmptyStateCard glow="blue">
+          <p className="text-body-md m-0 text-charcoal">{t("dictionary.empty")}</p>
+          <Button
+            type="button"
+            variant="primary"
+            className="mt-4"
+            disabled={busy}
+            onClick={() => {
+              setModalError(null);
+              setModalState({ mode: "create" });
+            }}
+          >
+            {t("dictionary.addWord")}
+          </Button>
+        </EmptyStateCard>
       )}
 
       {loaded && words.length > 0 && (
         <div className="flex flex-col gap-3">
           {visibleWords.length === 0 ? (
-            <div className="rounded-lg border border-hairline-strong bg-surface-card px-4 py-8 text-center">
+            <NoResultsCard>
               <p className="text-body-sm m-0 text-charcoal">
                 {t("common.noResultsFilters")}
               </p>
-            </div>
+            </NoResultsCard>
           ) : (
             <DictionaryTable
               words={visibleWords}
@@ -237,6 +238,7 @@ export function DictionaryView() {
           )}
         </div>
       )}
+    </Stagger>
 
       <DictionaryWordModal
         open={modalState.mode !== "closed"}
@@ -254,6 +256,6 @@ export function DictionaryView() {
         }
         onSubmit={handleSubmit}
       />
-    </div>
+    </>
   );
 }

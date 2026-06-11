@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { ArrowRight, Pencil, Trash2 } from "lucide-react";
 import { useUiLocale } from "../../i18n/useUiLocale";
 import type { Snippet } from "../../hooks/useSnippets";
+import { AnimatedTableBody } from "../motion/AnimatedTableBody";
 import { BadgePill } from "../ui/BadgePill";
 import { containsSnippetVariables } from "./snippetVariables";
 
@@ -56,12 +57,11 @@ export function SnippetsTable({
     <div className="overflow-hidden rounded-lg border border-hairline-strong bg-surface-card">
       <div className="overflow-x-auto">
         <table className="w-full min-w-[520px] border-collapse">
-          <tbody>
-            {snippets.map((entry) => (
-              <tr
-                key={entry.id}
-                className="group border-b border-divider-soft transition-colors last:border-b-0 hover:bg-surface-elevated/50"
-              >
+          <AnimatedTableBody
+            items={snippets}
+            getRowKey={(entry) => entry.id}
+            renderRow={(entry) => (
+              <>
                 <td className="min-w-0 px-4 py-3.5">
                   <div className="flex min-w-0 items-center gap-2 sm:gap-3">
                     <span className="shrink-0 text-body-sm font-medium text-ink">
@@ -107,9 +107,9 @@ export function SnippetsTable({
                     </IconActionButton>
                   </div>
                 </td>
-              </tr>
-            ))}
-          </tbody>
+              </>
+            )}
+          />
         </table>
       </div>
     </div>

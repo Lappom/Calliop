@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import type { UiLanguageCode } from "../../i18n/locale";
 import { useSettings } from "../../hooks/useSettings";
 import { translateError } from "../../lib/translateError";
+import { Stagger } from "../motion/Stagger";
 import { Button } from "../ui/Button";
 import { Kbd } from "../ui/Kbd";
 import { ProgressBar } from "../ui/ProgressBar";
@@ -136,13 +137,12 @@ export function SettingsView() {
   const displayHotkey = pendingHotkey ?? settings.hotkey;
 
   return (
-    <div className="w-full">
-      <header className="mb-8">
+    <Stagger className="flex w-full flex-col gap-12 pb-8" itemMotion="fade">
+      <header>
         <h1 className="text-heading-md mb-2 text-ink">{t("settings.title")}</h1>
         <p className="text-body-sm text-charcoal">{t("settings.subtitle")}</p>
       </header>
 
-      <div className="flex flex-col gap-12 pb-8">
           <SettingsSection
             id="general"
             title={sectionMeta.general.label}
@@ -420,7 +420,6 @@ export function SettingsView() {
               {saving ? t("common.saving") : t("common.autoSave")}
             </Button>
           </footer>
-        </div>
-    </div>
+    </Stagger>
   );
 }

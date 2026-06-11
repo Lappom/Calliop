@@ -70,6 +70,41 @@ export const staggerFadeVariants: Variants = {
   },
 };
 
+const listRowExit = {
+  opacity: 0,
+  transition: {
+    duration: MOTION_DURATION.fast,
+    ease: MOTION_EASE.enter,
+  },
+} as const;
+
+/** Table/list rows — capped stagger delay via `custom` index; fast opacity exit on remove. */
+export const listRowVariants: Variants = {
+  initial: { opacity: 0 },
+  animate: (index: number) => ({
+    opacity: 1,
+    transition: {
+      duration: MOTION_DURATION.fast,
+      ease: MOTION_EASE.enter,
+      delay: Math.min(index * MOTION_STAGGER.children, 0.24),
+    },
+  }),
+  exit: listRowExit,
+};
+
+/** Empty state panels — subtle scale + opacity (rare surfaces). */
+export const emptyStateVariants: Variants = {
+  initial: { opacity: 0, scale: 0.98 },
+  animate: {
+    opacity: 1,
+    scale: 1,
+    transition: {
+      duration: MOTION_DURATION.base,
+      ease: MOTION_EASE.editorial,
+    },
+  },
+};
+
 const overlayTransition = {
   duration: MOTION_DURATION.base,
   ease: MOTION_EASE.enter,
@@ -110,3 +145,31 @@ export function pickVariants(
 ): Variants {
   return reducedMotion ? reducedMotionVariants : variants;
 }
+
+const stepSlideTransition = {
+  duration: MOTION_DURATION.base,
+  ease: MOTION_EASE.enter,
+} as const;
+
+const stepSlideExitTransition = {
+  duration: MOTION_DURATION.fast,
+  ease: MOTION_EASE.enter,
+} as const;
+
+/** Direction: 1 = forward, -1 = back */
+export const onboardingStepVariants: Variants = {
+  initial: (direction: number) => ({
+    opacity: 0,
+    x: direction > 0 ? 20 : -20,
+  }),
+  animate: {
+    opacity: 1,
+    x: 0,
+    transition: stepSlideTransition,
+  },
+  exit: (direction: number) => ({
+    opacity: 0,
+    x: direction > 0 ? -12 : 12,
+    transition: stepSlideExitTransition,
+  }),
+};

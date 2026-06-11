@@ -18,8 +18,8 @@ import { useSnippets } from "../../hooks/useSnippets";
 
 import { useRefreshSpin } from "../../hooks/useRefreshSpin";
 
-import { SectionGlow } from "../layout/SectionGlow";
-
+import { EmptyStateCard } from "../motion/EmptyStateCard";
+import { NoResultsCard } from "../motion/NoResultsCard";
 import { Button } from "../ui/Button";
 
 import { ExpandableSearchField } from "../ui/ExpandableSearchField";
@@ -368,9 +368,7 @@ export function SnippetsView() {
 
       {loaded && snippets.length === 0 && (
 
-        <SectionGlow glow="blue">
-
-          <div className="rounded-lg border border-hairline-strong bg-surface-card p-6 sm:p-8">
+        <EmptyStateCard glow="blue">
 
             <p className="text-body-md m-0 text-charcoal">{t("snippets.empty")}</p>
 
@@ -398,9 +396,7 @@ export function SnippetsView() {
 
             </Button>
 
-          </div>
-
-        </SectionGlow>
+        </EmptyStateCard>
 
       )}
 
@@ -412,7 +408,7 @@ export function SnippetsView() {
 
           {visibleSnippets.length === 0 ? (
 
-            <div className="rounded-lg border border-hairline-strong bg-surface-card px-4 py-8 text-center">
+            <NoResultsCard>
 
               <p className="text-body-sm m-0 text-charcoal">
 
@@ -420,7 +416,7 @@ export function SnippetsView() {
 
               </p>
 
-            </div>
+            </NoResultsCard>
 
           ) : (
 

@@ -3,6 +3,7 @@ import { useUiLocale } from "../../i18n/useUiLocale";
 import type { LatencyMetricsPayload } from "../../hooks/usePipelineState";
 import { useInsights } from "../../hooks/useInsights";
 import { useRefreshSpin } from "../../hooks/useRefreshSpin";
+import { Stagger } from "../motion/Stagger";
 import { SnippetListToolbarButton } from "../snippets/SnippetListToolbarButton";
 import { RefreshIcon } from "../ui/RefreshIcon";
 import { glowSurfaceClasses } from "../layout/glowSurface";
@@ -57,7 +58,7 @@ export function InsightView({ latencyMetrics }: InsightViewProps) {
   const showEmptyState = loaded && !hasInsightData(insights);
 
   return (
-    <div className="flex flex-col gap-8">
+    <Stagger className="flex flex-col gap-8" itemMotion="fade">
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-heading-md mb-2 text-ink">{t("insight.title")}</h1>
@@ -229,6 +230,6 @@ export function InsightView({ latencyMetrics }: InsightViewProps) {
           </div>
         </>
       )}
-    </div>
+    </Stagger>
   );
 }

@@ -600,6 +600,8 @@ Editorial restraint — motion confirms state and preserves spatial context; it 
 ### Implementation
 - CSS tokens live in `src/styles/tokens.css`; JS presets in `src/lib/motion/`.
 - View transitions: `PageTransition` with `AnimatePresence mode="wait"`.
+- List rows: `AnimatedTableBody` / `AnimatedListItem` with capped stagger (`listRowVariants`).
+- Empty states: `EmptyStateCard` / `NoResultsCard` for rare or filter-empty surfaces.
 - `prefers-reduced-motion: reduce` disables Motion variants and collapses CSS animations via `globals.css`.
 
 ## Known Gaps

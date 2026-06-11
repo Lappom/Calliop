@@ -1,12 +1,20 @@
 import { BarChart3 } from "lucide-react";
+import { motion } from "motion/react";
 import { useUiLocale } from "../../i18n/useUiLocale";
+import { emptyStateVariants, pickVariants } from "../../lib/motion/variants";
+import { useReducedMotion } from "../../lib/motion/useReducedMotion";
 import { glowSurfaceClasses } from "../layout/glowSurface";
 
 export function InsightEmptyState() {
   const { t } = useUiLocale();
+  const reducedMotion = useReducedMotion();
+  const variants = pickVariants(emptyStateVariants, reducedMotion);
 
   return (
-    <div
+    <motion.div
+      variants={variants}
+      initial="initial"
+      animate="animate"
       className={[
         glowSurfaceClasses("blue"),
         "rounded-lg border border-hairline-strong bg-surface-card p-6 sm:p-8",
@@ -23,6 +31,6 @@ export function InsightEmptyState() {
           </p>
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }

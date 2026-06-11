@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { ArrowRight, Pencil, Trash2 } from "lucide-react";
 import { useUiLocale } from "../../i18n/useUiLocale";
 import type { DictionaryWord } from "../../hooks/useDictionary";
+import { AnimatedTableBody } from "../motion/AnimatedTableBody";
 import { DictionarySourceBadge } from "./DictionarySourceBadge";
 import { formatDictionaryDate } from "./dictionaryUtils";
 
@@ -72,12 +73,11 @@ export function DictionaryTable({
               </th>
             </tr>
           </thead>
-          <tbody>
-            {words.map((entry) => (
-              <tr
-                key={entry.id}
-                className="group border-b border-divider-soft transition-colors last:border-b-0 hover:bg-surface-elevated/50"
-              >
+          <AnimatedTableBody
+            items={words}
+            getRowKey={(entry) => entry.id}
+            renderRow={(entry) => (
+              <>
                 <td className="min-w-0 px-4 py-3.5">
                   <div className="flex min-w-0 flex-col gap-2">
                     {entry.misspelling ? (
@@ -131,9 +131,9 @@ export function DictionaryTable({
                     </IconActionButton>
                   </div>
                 </td>
-              </tr>
-            ))}
-          </tbody>
+              </>
+            )}
+          />
         </table>
       </div>
     </div>

@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowRight, Trash2 } from "lucide-react";
 import type { AppContextRule } from "../../hooks/useAppContext";
+import { AnimatedTableBody } from "../motion/AnimatedTableBody";
 import { getMatchTypeLabels } from "./styleUtils";
 import { ToneBadge } from "./ToneBadge";
 
@@ -23,12 +24,11 @@ export function StyleRulesTable({
     <div className="overflow-hidden rounded-lg border border-hairline-strong bg-surface-card">
       <div className="overflow-x-auto">
         <table className="w-full min-w-[520px] border-collapse">
-          <tbody>
-            {rules.map((rule) => (
-              <tr
-                key={rule.id}
-                className="group border-b border-divider-soft transition-colors last:border-b-0 hover:bg-surface-elevated/50"
-              >
+          <AnimatedTableBody
+            items={rules}
+            getRowKey={(rule) => rule.id}
+            renderRow={(rule) => (
+              <>
                 <td className="min-w-0 px-4 py-3.5">
                   <div className="flex min-w-0 items-center gap-2 sm:gap-3">
                     <span className="shrink-0 text-body-sm font-medium text-ink">
@@ -71,9 +71,9 @@ export function StyleRulesTable({
                     </button>
                   </div>
                 </td>
-              </tr>
-            ))}
-          </tbody>
+              </>
+            )}
+          />
         </table>
       </div>
     </div>

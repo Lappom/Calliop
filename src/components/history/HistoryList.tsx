@@ -1,3 +1,4 @@
+import { AnimatedListItem } from "../motion/AnimatedListItem";
 import { HistoryEntryRow } from "./HistoryEntryRow";
 import type { HistoryGroup } from "./historyUtils";
 
@@ -27,8 +28,8 @@ export function HistoryList({
             {group.label}
           </h2>
           <ul className="m-0 flex list-none flex-col gap-3 p-0">
-            {group.entries.map((entry) => (
-              <li key={entry.id}>
+            {group.entries.map((entry, index) => (
+              <AnimatedListItem key={entry.id} index={index}>
                 <HistoryEntryRow
                   entry={entry}
                   busy={busy}
@@ -36,7 +37,7 @@ export function HistoryList({
                   onCopy={onCopy}
                   onReinject={onReinject}
                 />
-              </li>
+              </AnimatedListItem>
             ))}
           </ul>
         </section>
