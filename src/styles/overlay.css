@@ -1,4 +1,4 @@
-/* Overlay window: transparent shell, compact pill centered, no scroll */
+/* Overlay window: transparent shell, room above pill for uncropped glow */
 html,
 body {
   margin: 0;
@@ -10,13 +10,16 @@ body {
 }
 
 #root {
+  box-sizing: border-box;
   display: flex;
+  width: 100%;
   height: 100%;
   min-height: unset;
   margin: 0;
-  padding: 14px 16px;
+  /* Extra top padding: glow + WebView2 top-edge seam on Windows */
+  padding: 30px 20px 18px;
   overflow: visible;
-  align-items: center;
+  align-items: flex-end;
   justify-content: center;
   background: transparent !important;
   background-color: transparent !important;
