@@ -1,5 +1,10 @@
 import { motion } from "motion/react";
-import { Children, isValidElement, type ReactNode } from "react";
+import {
+  Children,
+  Fragment,
+  isValidElement,
+  type ReactNode,
+} from "react";
 import { MOTION_STAGGER } from "../../lib/motion/presets";
 import {
   createStaggerContainerVariants,
@@ -25,6 +30,28 @@ const itemVariantsByMotion: Record<StaggerItemMotion, typeof fadeUpVariants> = {
   fade: staggerFadeVariants,
 };
 
+/** React.Children.toArray does not flatten fragments — unwrap them for flex gap. */
+function flattenStaggerChildren(children: ReactNode): ReactNode[] {
+  const items: ReactNode[] = [];
+
+  Children.forEach(children, (child) => {
+    if (child == null || typeof child === "boolean") return;
+
+    if (isValidElement(child) && child.type === Fragment) {
+      items.push(
+        ...flattenStaggerChildren(
+          (child.props as { children?: ReactNode }).children,
+        ),
+      );
+      return;
+    }
+
+    items.push(child);
+  });
+
+  return items;
+}
+
 export function Stagger({
   children,
   className = "",
@@ -41,7 +68,7 @@ export function Stagger({
     ? reducedMotionVariants
     : itemVariantsByMotion[itemMotion];
 
-  const items = Children.toArray(children);
+  const items = flattenStaggerChildren(children);
 
   return (
     <motion.div

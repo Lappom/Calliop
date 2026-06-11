@@ -41,3 +41,17 @@ export function formatShortTime(iso: string, intlLocale: string): string {
     minute: "2-digit",
   }).format(date);
 }
+
+/** Latency chart — include seconds so nearby dictations stay distinct on the axis. */
+export function formatLatencyAxisTime(iso: string, intlLocale: string): string {
+  const normalized = iso.includes("T") ? iso : `${iso.replace(" ", "T")}Z`;
+  const date = new Date(normalized);
+  if (Number.isNaN(date.getTime())) {
+    return "—";
+  }
+  return new Intl.DateTimeFormat(intlLocale, {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(date);
+}

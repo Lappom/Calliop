@@ -1,106 +1,142 @@
+import { useMemo } from "react";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  LabelList,
+  ResponsiveContainer,
+  Tooltip,
+  type TooltipContentProps,
+  XAxis,
+  YAxis,
+} from "recharts";
 import type { DailyActivityEntry } from "../../../hooks/useInsights";
 import { useUiLocale } from "../../../i18n/useUiLocale";
 import { ChartFrame } from "./ChartFrame";
 import { CHART_COLORS, formatShortDate } from "./chartTheme";
 import {
-  CHART_PADDING,
-  CHART_VIEW_HEIGHT,
-  CHART_VIEW_WIDTH,
-  computeBarLayout,
-  gridLineRatios,
-  plotDimensions,
-} from "./chartLayout";
+  RECHARTS_AXIS_TICK,
+  RECHARTS_AXIS_TICK_UI,
+  RECHARTS_MARGIN,
+  rechartsTooltipStyle,
+} from "./rechartsTheme";
 
 interface ActivityChartProps {
   data: DailyActivityEntry[];
 }
 
+interface ActivityChartRow {
+  date: string;
+  label: string;
+  wordCount: number;
+  dictationCount: number;
+}
+
 export function ActivityChart({ data }: ActivityChartProps) {
-  const { t, intlLocale } = useUiLocale();
-  const maxWords = Math.max(...data.map((d) => d.wordCount), 1);
-  const { plotWidth, plotHeight } = plotDimensions();
-  const { barWidth, gap, groupOffset } = computeBarLayout(
-    data.length,
-    plotWidth,
-    { maxBarWidth: 26, gap: 6 },
+  const { t, intlLocale, formatNumber } = useUiLocale();
+
+  const chartData = useMemo(
+    (): ActivityChartRow[] =>
+      data.map((entry) => ({
+        date: entry.date,
+        label: formatShortDate(entry.date, intlLocale),
+        wordCount: entry.wordCount,
+        dictationCount: entry.dictationCount,
+      })),
+    [data, intlLocale],
   );
 
-  const gridLines = gridLineRatios(4).map((ratio) => ({
-    y: CHART_PADDING.top + plotHeight * (1 - ratio),
-    label: Math.round(maxWords * ratio),
-  }));
+  const wordsLabel = t("insight.week.words");
+
+  function ActivityTooltip(props: TooltipContentProps) {
+    const { active, payload, label } = props;
+    if (!active || !payload?.length) {
+      return null;
+    }
+
+    const row = payload[0]?.payload as ActivityChartRow | undefined;
+    if (!row) {
+      return null;
+    }
+
+    return (
+      <div style={rechartsTooltipStyle}>
+        <p className="m-0 mb-2 text-caption text-ink">{label}</p>
+        <ul className="m-0 list-none space-y-1 p-0 text-caption">
+          <li className="flex items-center justify-between gap-4">
+            <span className="text-charcoal">{wordsLabel}</span>
+            <span className="font-[family-name:var(--font-mono)] tabular-nums text-ink">
+              {formatNumber(row.wordCount)}
+            </span>
+          </li>
+          {row.dictationCount > 0 && (
+            <li className="flex items-center justify-between gap-4">
+              <span className="text-charcoal">{t("insight.week.dictations")}</span>
+              <span className="font-[family-name:var(--font-mono)] tabular-nums text-ink">
+                {row.dictationCount}
+              </span>
+            </li>
+          )}
+        </ul>
+      </div>
+    );
+  }
 
   return (
     <ChartFrame ariaLabel={t("insight.charts.activity.aria")}>
-      <svg
-        viewBox={`0 0 ${CHART_VIEW_WIDTH} ${CHART_VIEW_HEIGHT}`}
-        preserveAspectRatio="xMidYMid meet"
-        className="h-full w-full"
-        role="img"
-      >
-        {gridLines.map((line) => (
-          <g key={line.y}>
-            <line
-              x1={CHART_PADDING.left}
-              y1={line.y}
-              x2={CHART_VIEW_WIDTH - CHART_PADDING.right}
-              y2={line.y}
-              stroke={CHART_COLORS.grid}
-              strokeWidth={1}
-            />
-            <text
-              x={CHART_PADDING.left - 8}
-              y={line.y + 4}
-              textAnchor="end"
-              className="fill-ash font-[family-name:var(--font-mono)] text-[10px]"
-            >
-              {line.label}
-            </text>
-          </g>
-        ))}
-
-        {data.map((entry, index) => {
-          const barHeight =
-            maxWords > 0 ? (entry.wordCount / maxWords) * plotHeight : 0;
-          const x =
-            CHART_PADDING.left +
-            groupOffset +
-            index * (barWidth + gap);
-          const y = CHART_PADDING.top + plotHeight - barHeight;
-
-          return (
-            <g key={entry.date}>
-              {entry.dictationCount > 0 && (
-                <text
-                  x={x + barWidth / 2}
-                  y={Math.max(y - 6, CHART_PADDING.top + 10)}
-                  textAnchor="middle"
-                  className="fill-ash font-[family-name:var(--font-mono)] text-[9px]"
-                >
-                  {entry.dictationCount}×
-                </text>
-              )}
-              <rect
-                x={x}
-                y={y}
-                width={barWidth}
-                height={Math.max(barHeight, entry.wordCount > 0 ? 3 : 0)}
-                rx={3}
-                fill={CHART_COLORS.blue}
+      <ResponsiveContainer width="100%" height={200}>
+        <BarChart data={chartData} margin={RECHARTS_MARGIN} barCategoryGap="18%">
+          <CartesianGrid
+            stroke={CHART_COLORS.grid}
+            vertical={false}
+            strokeDasharray="0"
+          />
+          <XAxis
+            dataKey="label"
+            tick={RECHARTS_AXIS_TICK_UI}
+            tickLine={false}
+            axisLine={{ stroke: CHART_COLORS.hairline }}
+            interval={0}
+          />
+          <YAxis
+            tick={RECHARTS_AXIS_TICK}
+            tickLine={false}
+            axisLine={false}
+            width={36}
+            allowDecimals={false}
+          />
+          <Tooltip
+            content={ActivityTooltip}
+            cursor={{ fill: "rgba(255, 255, 255, 0.04)" }}
+          />
+          <Bar
+            dataKey="wordCount"
+            name={wordsLabel}
+            fill={CHART_COLORS.blue}
+            maxBarSize={26}
+            radius={[3, 3, 0, 0]}
+            minPointSize={3}
+          >
+            {chartData.map((entry) => (
+              <Cell
+                key={entry.date}
                 fillOpacity={entry.wordCount > 0 ? 0.85 : 0.12}
               />
-              <text
-                x={x + barWidth / 2}
-                y={CHART_VIEW_HEIGHT - 12}
-                textAnchor="middle"
-                className="fill-charcoal font-[family-name:var(--font-ui)] text-[10px]"
-              >
-                {formatShortDate(entry.date, intlLocale)}
-              </text>
-            </g>
-          );
-        })}
-      </svg>
+            ))}
+            <LabelList
+              dataKey="dictationCount"
+              position="top"
+              formatter={(value) =>
+                typeof value === "number" && value > 0 ? `${value}×` : ""
+              }
+              fill={CHART_COLORS.muted}
+              fontSize={9}
+              fontFamily="var(--font-mono)"
+            />
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
     </ChartFrame>
   );
 }

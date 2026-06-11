@@ -68,11 +68,6 @@ export function WpmGauge({
         <p className="text-caption m-0 text-charcoal">
           {t("insight.wpm.vsBaseline", { baseline: baselineWpm })}
         </p>
-        {averageWpm > 0 && (
-          <p className="text-caption m-0 text-ash">
-            {t("insight.wpm.average", { wpm: roundedWpm })}
-          </p>
-        )}
       </div>
     </figure>
   );

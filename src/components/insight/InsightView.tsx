@@ -88,7 +88,7 @@ export function InsightView({ latencyMetrics }: InsightViewProps) {
       {showEmptyState && <InsightEmptyState />}
 
       {loaded && hasInsightData(insights) && (
-        <>
+        <div className="flex flex-col gap-8">
           <section className="flex flex-col gap-3">
             <p className="text-caption m-0 text-charcoal">
               {t("insight.sections.today")}
@@ -228,7 +228,7 @@ export function InsightView({ latencyMetrics }: InsightViewProps) {
               </p>
             </div>
           </div>
-        </>
+        </div>
       )}
     </Stagger>
   );
