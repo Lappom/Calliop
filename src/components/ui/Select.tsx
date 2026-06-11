@@ -315,7 +315,7 @@ export function Select<T extends string>({
               "animate-[select-panel-in_120ms_ease-out]",
             ].join(" ")}
           >
-            <ul className="relative m-0 max-h-60 list-none overflow-y-auto p-0">
+            <ul className="calliop-scroll relative m-0 max-h-60 list-none overflow-y-auto p-0">
               {options.map((option, index) => {
                 const isSelected = option.value === value;
                 const isHighlighted = index === highlightedIndex;

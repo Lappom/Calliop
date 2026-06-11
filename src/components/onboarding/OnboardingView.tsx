@@ -66,7 +66,7 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
   };
 
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-[880px] flex-col gap-8 bg-canvas p-4 sm:p-8">
+    <div className="calliop-scroll mx-auto flex min-h-0 flex-1 w-full max-w-[880px] flex-col gap-8 overflow-y-auto bg-canvas p-4 sm:p-8">
       <div className="flex flex-wrap gap-2">
         {STEPS.map((s) => (
           <BadgePill key={s.id} active={s.id === step}>

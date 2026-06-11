@@ -31,6 +31,34 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+.calliop-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-ash) var(--color-surface-elevated);
+}
+
+.calliop-scroll::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+.calliop-scroll::-webkit-scrollbar-track {
+  background: var(--color-surface-elevated);
+}
+
+.calliop-scroll::-webkit-scrollbar-thumb {
+  background: var(--color-ash);
+  border: 3px solid var(--color-surface-elevated);
+  border-radius: var(--rounded-full);
+}
+
+.calliop-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--color-stone);
+}
+
+.calliop-scroll::-webkit-scrollbar-corner {
+  background: var(--color-surface-elevated);
+}
+
 /* Typography utilities (DESIGN.md tokens) */
 .text-display-lg {
   font-family: var(--font-body);

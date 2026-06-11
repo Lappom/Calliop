@@ -30,7 +30,7 @@ export function AppShell({ currentView, onNavigate, children }: AppShellProps) {
   }, [sidebarOpen, closeSidebar]);
 
   return (
-    <div className="flex h-screen overflow-hidden bg-canvas text-body">
+    <div className="flex min-h-0 flex-1 overflow-hidden">
       <Sidebar
         currentView={currentView}
         onNavigate={onNavigate}
@@ -59,7 +59,7 @@ export function AppShell({ currentView, onNavigate, children }: AppShellProps) {
         </header>
 
         <main
-          className="flex-1 overflow-y-auto px-4 py-6 sm:px-6 sm:py-8 lg:px-8"
+          className="calliop-scroll flex-1 overflow-y-auto px-4 py-6 sm:px-6 sm:py-8 lg:px-8"
           inert={sidebarOpen ? true : undefined}
           aria-hidden={sidebarOpen ? true : undefined}
         >

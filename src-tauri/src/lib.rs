@@ -35,7 +35,7 @@ use stt::{SttLanguage, WhisperModel, WhisperPromptCache, MAX_INITIAL_PROMPT_WORD
 use tauri::{
     menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Manager, RunEvent, State, WindowEvent,
+    AppHandle, Emitter, Manager, RunEvent, State, Theme, WindowEvent,
 };
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_global_shortcut::Shortcut;
@@ -2061,6 +2061,7 @@ pub fn run() {
             register_hotkey(app.handle(), shortcut)?;
 
             if let Some(main) = app.get_webview_window("main") {
+                let _ = main.set_theme(Some(Theme::Dark));
                 let app_handle = app.handle().clone();
                 main.on_window_event(move |event| {
                     if let WindowEvent::CloseRequested { api, .. } = event {

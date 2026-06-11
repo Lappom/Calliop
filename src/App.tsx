@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { AppFrame } from "./components/layout/AppFrame";
 import { AppShell } from "./components/layout/AppShell";
 import { ModelDownloadToasts } from "./components/layout/ModelDownloadToasts";
 import { StyleView } from "./components/style/StyleView";
@@ -55,9 +56,11 @@ function App() {
   if (!onboardingChecked) {
     return (
       <>
-        <div className="flex min-h-screen items-center justify-center bg-canvas text-body">
-          Chargement…
-        </div>
+        <AppFrame>
+          <div className="flex flex-1 items-center justify-center text-body">
+            Chargement…
+          </div>
+        </AppFrame>
         <ModelDownloadToasts />
       </>
     );
@@ -66,12 +69,14 @@ function App() {
   if (showOnboarding) {
     return (
       <>
-        <OnboardingView
-          onComplete={() => {
-            setShowOnboarding(false);
-            setCurrentView("main");
-          }}
-        />
+        <AppFrame>
+          <OnboardingView
+            onComplete={() => {
+              setShowOnboarding(false);
+              setCurrentView("main");
+            }}
+          />
+        </AppFrame>
         <ModelDownloadToasts />
       </>
     );
@@ -79,7 +84,8 @@ function App() {
 
   return (
     <>
-      <AppShell currentView={currentView} onNavigate={setCurrentView}>
+      <AppFrame>
+        <AppShell currentView={currentView} onNavigate={setCurrentView}>
         {currentView === "main" && <MainView {...pipeline} />}
         {currentView === "dictionary" && <DictionaryView />}
         {currentView === "snippets" && <SnippetsView />}
@@ -89,7 +95,8 @@ function App() {
           <InsightView latencyMetrics={pipeline.latencyMetrics} />
         )}
         {currentView === "settings" && <SettingsView />}
-      </AppShell>
+        </AppShell>
+      </AppFrame>
       <ModelDownloadToasts />
     </>
   );

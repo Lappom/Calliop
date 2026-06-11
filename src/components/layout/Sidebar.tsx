@@ -97,7 +97,7 @@ export function Sidebar({ currentView, onNavigate, open, onClose }: SidebarProps
       {open && (
         <button
           type="button"
-          className="fixed inset-0 z-30 bg-black/60 lg:hidden"
+          className="fixed inset-x-0 bottom-0 top-8 z-30 bg-black/60 lg:hidden"
           aria-label="Fermer le menu"
           onClick={onClose}
         />
@@ -105,9 +105,9 @@ export function Sidebar({ currentView, onNavigate, open, onClose }: SidebarProps
 
       <aside
         className={[
-          "fixed inset-y-0 left-0 z-40 flex h-screen w-[220px] min-w-[220px] max-w-[220px] shrink-0 flex-col",
+          "fixed bottom-0 left-0 top-8 z-40 flex w-[220px] min-w-[220px] max-w-[220px] shrink-0 flex-col",
           "border-r border-hairline bg-canvas transition-transform duration-200 ease-out",
-          "lg:static lg:sticky lg:top-0 lg:translate-x-0",
+          "lg:static lg:h-full lg:min-h-0 lg:translate-x-0",
           open ? "translate-x-0" : "-translate-x-full lg:translate-x-0",
         ].join(" ")}
         aria-label="Navigation"
@@ -133,7 +133,7 @@ export function Sidebar({ currentView, onNavigate, open, onClose }: SidebarProps
         </div>
 
         <nav
-          className="relative flex flex-1 flex-col gap-1 overflow-y-auto px-3 pt-6 lg:pt-0"
+          className="calliop-scroll relative flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-3 pt-6 lg:pt-0"
           aria-label="Navigation principale"
         >
           {primaryItems.map((item) => (
@@ -147,7 +147,7 @@ export function Sidebar({ currentView, onNavigate, open, onClose }: SidebarProps
           ))}
         </nav>
 
-        <div className="relative mt-auto flex flex-col gap-1 border-t border-hairline px-3 py-4">
+        <div className="relative shrink-0 flex flex-col gap-1 border-t border-hairline px-3 py-4">
           {bottomItems.map((item) => (
             <NavButton
               key={item.id}
