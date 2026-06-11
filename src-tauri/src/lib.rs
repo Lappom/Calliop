@@ -66,6 +66,7 @@ struct AppState {
     llm_engine: Arc<Mutex<Option<llm::LlamaEngine>>>,
     store: Arc<Store>,
     model_ready: AtomicBool,
+    model_init: Arc<tokio::sync::Mutex<()>>,
     llm_ready: Arc<AtomicBool>,
     llm_init: Arc<tokio::sync::Mutex<()>>,
     hotkey_press: Mutex<HotkeyPressState>,
@@ -718,6 +719,12 @@ async fn ensure_model(app: AppHandle, state: State<'_, AppState>) -> Result<(), 
         return Ok(());
     }
 
+    let _init_guard = state.model_init.lock().await;
+
+    if state.model_ready.load(Ordering::SeqCst) {
+        return Ok(());
+    }
+
     let app_for_download = app.clone();
     let model_path = tauri::async_runtime::spawn_blocking(move || {
         stt::ensure_model_blocking(Some(&app_for_download))
@@ -954,6 +961,7 @@ pub fn run() {
             llm_engine: llm_engine.clone(),
             store,
             model_ready: AtomicBool::new(false),
+            model_init: Arc::new(tokio::sync::Mutex::new(())),
             llm_ready: llm_ready.clone(),
             llm_init: Arc::new(tokio::sync::Mutex::new(())),
             hotkey_press: Mutex::new(HotkeyPressState {
@@ -993,6 +1001,7 @@ pub fn run() {
                 let state = app_handle.state::<AppState>();
                 if let Err(err) = ensure_model(app_handle.clone(), state).await {
                     eprintln!("model initialization failed: {err}");
+                    let _ = app_handle.emit("model-init-error", err);
                 }
             });
 
