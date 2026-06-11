@@ -289,8 +289,7 @@ mod tests {
 
     #[test]
     fn legacy_medium_path_uses_expected_filename() {
-        assert!(legacy_medium_model_path()
-            .ends_with(LEGACY_MEDIUM_MODEL_FILE));
+        assert!(legacy_medium_model_path().ends_with(LEGACY_MEDIUM_MODEL_FILE));
     }
 
     #[test]

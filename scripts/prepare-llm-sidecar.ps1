@@ -18,6 +18,7 @@ function Add-NinjaToPath {
     $roots = @(
         "${env:ProgramFiles(x86)}\Microsoft Visual Studio\18\BuildTools",
         "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\BuildTools",
+        "${env:ProgramFiles}\Microsoft Visual Studio\2022\Enterprise",
         "${env:ProgramFiles}\Microsoft Visual Studio\2022\Community"
     )
     foreach ($root in $roots) {
@@ -34,10 +35,21 @@ $buildGpu = ($env:CALLIOP_BUILD_GPU -eq "1") -or ($env:VULKAN_SDK -and (Test-Pat
 
 if ($buildGpu) {
     Add-NinjaToPath
+    if (-not $env:CARGO_TARGET_DIR) {
+        $env:CARGO_TARGET_DIR = Join-Path $srcTauri "ct"
+    }
     $null = & (Join-Path $PSScriptRoot "ensure-vulkan-sdk.ps1") -InstallIfMissing
     # Cargo sets NUM_JOBS for build scripts; cmake-rs forwards it as `cmake --build --parallel N`,
     # which races MSBuild on vulkan-shaders-gen ExternalProject steps.
     $env:NUM_JOBS = "1"
+    Push-Location $srcTauri
+    try {
+        # Resolve GPU deps so llama-cpp-sys-2 is present in the cargo registry before patching.
+        cargo tree -p calliop-llm-worker --features gpu > $null
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    } finally {
+        Pop-Location
+    }
     $patchResult = & (Join-Path $PSScriptRoot "patch-llama-cpp-vulkan-build.ps1") | Select-Object -Last 1
     if ($patchResult -eq "PATCHED" -or $env:CALLIOP_CLEAN_LLAMA_VULKAN -eq "1") {
         foreach ($profile in @("release", "debug")) {

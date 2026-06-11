@@ -10,6 +10,7 @@ export type InferenceBackendId = "auto" | "cpu";
 export interface AppSettings {
   autoEdit: boolean;
   autoLearn: boolean;
+  autoUpdate: boolean;
   sttLanguage: SttLanguageCode;
   whisperModel: WhisperModelId;
   llmModel: LlmModelId;
@@ -40,6 +41,7 @@ export interface InferenceInfo {
 interface SettingsPayload {
   auto_edit: boolean;
   auto_learn: boolean;
+  auto_update: boolean;
   stt_language: string;
   whisper_model: string;
   llm_model: string;
@@ -81,6 +83,7 @@ function toPayload(settings: AppSettings): SettingsPayload {
   return {
     auto_edit: settings.autoEdit,
     auto_learn: settings.autoLearn,
+    auto_update: settings.autoUpdate,
     stt_language: settings.sttLanguage,
     whisper_model: settings.whisperModel,
     llm_model: settings.llmModel,
@@ -97,6 +100,7 @@ function fromPayload(payload: SettingsPayload): AppSettings {
   return {
     autoEdit: payload.auto_edit,
     autoLearn: payload.auto_learn,
+    autoUpdate: payload.auto_update,
     sttLanguage,
     whisperModel: parseWhisperModel(payload.whisper_model),
     llmModel: parseLlmModel(payload.llm_model),
@@ -108,6 +112,7 @@ function fromPayload(payload: SettingsPayload): AppSettings {
 export const DEFAULT_SETTINGS: AppSettings = {
   autoEdit: true,
   autoLearn: true,
+  autoUpdate: false,
   sttLanguage: "fr",
   whisperModel: "small",
   llmModel: "qwen3-1.7b",
@@ -286,6 +291,13 @@ export function useSettings() {
     [saveSettings],
   );
 
+  const setAutoUpdate = useCallback(
+    async (enabled: boolean) => {
+      await saveSettings({ ...settingsRef.current, autoUpdate: enabled });
+    },
+    [saveSettings],
+  );
+
   const setSttLanguage = useCallback(
     async (sttLanguage: AppSettings["sttLanguage"]) => {
       await saveSettings({ ...settingsRef.current, sttLanguage });
@@ -366,6 +378,7 @@ export function useSettings() {
     formatBytes,
     setAutoEdit,
     setAutoLearn,
+    setAutoUpdate,
     setSttLanguage,
     setWhisperModel,
     setLlmModel,

@@ -1,0 +1,48 @@
+{
+  "version": "0.1.0",
+  "corpus_version": "1",
+  "language": "fr",
+  "model": "small",
+  "platform": "windows",
+  "cpu_only": true,
+  "samples": [
+    {
+      "id": "fr-01",
+      "reference": "Bonjour, ceci est un test de dictée vocale en français.",
+      "hypothesis": "Bonjour, ceci est un test de dictée vocale en français.",
+      "wer": 0.0,
+      "latency_ms": 10361
+    },
+    {
+      "id": "fr-02",
+      "reference": "Merci de rédiger un message poli pour mon équipe.",
+      "hypothesis": "Merci de rédiger un message poli pour mon équipe.",
+      "wer": 0.0,
+      "latency_ms": 10342
+    },
+    {
+      "id": "fr-03",
+      "reference": "Le rendez-vous est prévu demain à quatorze heures trente.",
+      "hypothesis": "Le rendez-vous est prévu demain à 14h30.",
+      "wer": 0.3,
+      "latency_ms": 10390
+    },
+    {
+      "id": "fr-04",
+      "reference": "J'aimerais corriger le brouillon avant l'envoi du rapport.",
+      "hypothesis": "J'aimerais corriger le brouillon avant l'envoi du rapport.",
+      "wer": 0.0,
+      "latency_ms": 10499
+    },
+    {
+      "id": "fr-05",
+      "reference": "La transcription locale fonctionne sans connexion internet.",
+      "hypothesis": "La transcription locale fonctionne sans connexion Internet.",
+      "wer": 0.0,
+      "latency_ms": 10381
+    }
+  ],
+  "mean_wer": 0.06,
+  "mean_latency_ms": 10394,
+  "generated_at": "unix:1781198778"
+}

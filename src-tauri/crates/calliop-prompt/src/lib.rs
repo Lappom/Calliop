@@ -318,10 +318,7 @@ fn should_lowercase_segment_join(previous: &str, next: &str) -> bool {
             .next()
             .is_some_and(|ch| ch.is_uppercase());
     }
-    if matches!(
-        previous.chars().last(),
-        Some('.' | '!' | '?' | '…')
-    ) {
+    if matches!(previous.chars().last(), Some('.' | '!' | '?' | '…')) {
         return false;
     }
     next.trim()

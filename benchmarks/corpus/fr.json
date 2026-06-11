@@ -1,0 +1,32 @@
+{
+  "version": "1",
+  "language": "fr",
+  "model": "small",
+  "samples": [
+    {
+      "id": "fr-01",
+      "reference": "Bonjour, ceci est un test de dictée vocale en français.",
+      "wav": "fr-01.wav"
+    },
+    {
+      "id": "fr-02",
+      "reference": "Merci de rédiger un message poli pour mon équipe.",
+      "wav": "fr-02.wav"
+    },
+    {
+      "id": "fr-03",
+      "reference": "Le rendez-vous est prévu demain à quatorze heures trente.",
+      "wav": "fr-03.wav"
+    },
+    {
+      "id": "fr-04",
+      "reference": "J'aimerais corriger le brouillon avant l'envoi du rapport.",
+      "wav": "fr-04.wav"
+    },
+    {
+      "id": "fr-05",
+      "reference": "La transcription locale fonctionne sans connexion internet.",
+      "wav": "fr-05.wav"
+    }
+  ]
+}

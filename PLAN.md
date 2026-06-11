@@ -231,10 +231,10 @@ Application desktop qui permet de **dicter dans n'importe quelle application** a
 - [x] Gestion modèles : Whisper STT (small / medium) + LLM auto-edit (CPU vs GPU optionnel)
 - [x] Choix modèle LLM : **Qwen3-0.6B-Instruct** Q4_K_M (~484 Mo, latence CPU réduite) ou **Qwen3-1.7B-Instruct** Q4_K_M (~1,1 Go, défaut Phase 3, meilleure fidélité sur le prompt de nettoyage FR)
 - [x] Onboarding (permissions micro + accessibilité, test dictée)
-- [ ] Installeurs : MSI/NSIS (Win), DMG (macOS), AppImage/deb (Linux)
-- [ ] Auto-update Tauri (optionnel, désactivable)
-- [ ] Benchmarks publics (latence, WER)
-- [ ] Documentation utilisateur
+- [x] Installeurs : MSI/NSIS (Win), DMG (macOS), AppImage/deb (Linux)
+- [x] Auto-update Tauri (optionnel, désactivable)
+- [x] Benchmarks publics (latence, WER)
+- [x] Documentation utilisateur
 
 **Critère de done :** installateur Windows testé sur machine vierge, dictée fonctionnelle en < 5 min.
 
@@ -242,7 +242,7 @@ Application desktop qui permet de **dicter dans n'importe quelle application** a
 
 ### Phase 5 — Open source & communauté
 
-- [ ] Releases GitHub avec binaires + changelog
+- [x] Releases GitHub avec binaires + changelog
 - [ ] Roadmap publique (GitHub Projects)
 - [ ] Labels `good first issue`
 - [ ] Discord / GitHub Discussions

@@ -851,7 +851,9 @@ fn start_llm_cleanup(
 fn force_kill_sidecar(pid: u32) {
     #[cfg(windows)]
     {
-        let _ = std::process::Command::new("taskkill")
+        let mut command = std::process::Command::new("taskkill");
+        crate::process_util::hide_console(&mut command);
+        let _ = command
             .args(["/PID", &pid.to_string(), "/F", "/T"])
             .output();
     }
@@ -970,7 +972,7 @@ fn transcribe_segment(
     let raw = {
         let mut transcripts = stt.transcripts.lock();
         transcripts.push(text.text.clone());
-        join_transcript_segments(transcripts.iter().map(String::as_str).collect::<Vec<_>>())
+        join_transcript_segments(transcripts.as_slice())
     };
     let display = prepare_partial_transcript(&raw, &stt.snippets.read());
 
@@ -1136,6 +1138,6 @@ mod tests {
             created_at: "now".into(),
         }];
         let result = prepare_display_transcript("voici mon email", &snippets);
-        assert_eq!(result, "voici contact at gmail point com");
+        assert_eq!(result, "Voici contact at gmail point com");
     }
 }

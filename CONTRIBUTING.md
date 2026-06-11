@@ -39,7 +39,17 @@ cargo run --bin test-stt -- output.wav
 cargo run --bin test-inject -- "Hello world"
 cargo run --bin test-llm -- "euh bonjour donc voilà"
 cargo build -p calliop-llm-worker
+cargo run --release --bin benchmark-stt -- ../benchmarks/corpus/fr.json --cpu
 ```
+
+## Releases GitHub
+
+1. Mettre à jour `releases/v{version}.md` et les versions dans `package.json`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`.
+2. Configurer le secret `TAURI_SIGNING_PRIVATE_KEY` avec le contenu de `src-tauri/.tauri/calliop.key` (ne jamais committer la clé privée).
+3. Pousser un tag : `git tag v0.1.0 && git push origin v0.1.0`
+4. Le workflow [`.github/workflows/release.yml`](.github/workflows/release.yml) crée un brouillon de release avec les installateurs et `latest.json` pour l’auto-update.
+
+Clé publique commitée : `src-tauri/.tauri/calliop.key.pub`.
 
 ## Conventions
 

@@ -1,86 +1,28 @@
-name: CI
+name: Release
 
 on:
   push:
-    branches: [main, master]
-  pull_request:
+    tags:
+      - "v*"
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  frontend:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
-
-      - name: Install frontend dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Typecheck
-        run: pnpm typecheck
-
-      - name: Lint
-        run: pnpm lint
-
-  rust:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: src-tauri
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-
-      - name: Install Linux dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libasound2-dev \
-            libwebkit2gtk-4.1-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            libxdo-dev \
-            patchelf \
-            cmake \
-            clang \
-            libclang-dev
-
-      - name: Prepare LLM sidecar
-        run: bash ../scripts/prepare-llm-sidecar.sh
-
-      - name: Check formatting
-        run: cargo fmt --check
-
-      - name: Clippy
-        run: cargo clippy --all-targets -- -D warnings
-
-      - name: Tests
-        run: cargo test
-
-  build:
+  release:
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
         include:
           - platform: windows-latest
+            build_args: "--features gpu"
           - platform: macos-latest
+            build_args: ""
           - platform: ubuntu-latest
+            build_args: ""
     runs-on: ${{ matrix.platform }}
     env:
       MACOSX_DEPLOYMENT_TARGET: "10.15"
@@ -164,10 +106,13 @@ jobs:
         if: matrix.platform == 'macos-latest'
         run: echo "CXXFLAGS=-mmacosx-version-min=10.15" >> "$GITHUB_ENV"
 
-      - name: Build Tauri app (Windows GPU)
-        if: matrix.platform == 'windows-latest'
-        run: pnpm tauri build --features gpu --config src-tauri/tauri.ci.conf.json
-
-      - name: Build Tauri app
-        if: matrix.platform != 'windows-latest'
-        run: pnpm tauri build --config src-tauri/tauri.ci.conf.json
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: Calliop ${{ github.ref_name }}
+          releaseBodyPath: releases/${{ github.ref_name }}.md
+          releaseDraft: true
+          args: ${{ matrix.build_args }}

@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 
 use std::path::Path;
 
+use crate::process_util::hide_console;
+
 use super::LlmError;
 
 #[derive(Debug, Serialize)]
@@ -41,7 +43,9 @@ impl WorkerClient {
         }
 
         let worker_exe = resolve_worker_exe()?;
-        let mut child = Command::new(&worker_exe)
+        let mut command = Command::new(&worker_exe);
+        hide_console(&mut command);
+        let mut child = command
             .arg("--serve")
             .arg("--model-path")
             .arg(model_path)
@@ -49,7 +53,7 @@ impl WorkerClient {
             .arg(n_gpu_layers.to_string())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
+            .stderr(Stdio::null())
             .spawn()
             .map_err(|err| {
                 LlmError::Worker(format!("failed to spawn {}: {err}", worker_exe.display()))

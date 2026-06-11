@@ -218,6 +218,8 @@ function ensureNinjaOnPath() {
 
     "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools",
 
+    "C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise",
+
     "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community",
 
   ];

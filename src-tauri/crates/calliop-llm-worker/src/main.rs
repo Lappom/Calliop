@@ -1,6 +1,9 @@
 //! Sidecar process for local LLM cleanup. Keeps llama.cpp out of the main binary
 //! to avoid ggml symbol conflicts with whisper-rs.
 
+// Never show a console when spawned from the GUI app (release builds).
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use std::env;
 use std::io::{self, BufRead, Write};
 use std::num::NonZeroU32;

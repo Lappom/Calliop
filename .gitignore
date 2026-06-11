@@ -30,3 +30,7 @@ dist-ssr
 # Rust
 src-tauri/target/
 ct/
+
+# Tauri updater signing (public key is committed)
+src-tauri/.tauri/*.key
+!src-tauri/.tauri/*.key.pub
