@@ -1,14 +1,9 @@
-import type { LucideIcon } from "lucide-react";
-import {
-  BarChart3,
-  BookOpen,
-  Braces,
-  History,
-  Palette,
-  Mic,
-  Settings,
-} from "lucide-react";
 import type { AppView } from "../../lib/views";
+import {
+  BOTTOM_NAV_ITEMS,
+  NAV_SECTIONS,
+  type NavItem,
+} from "./navItems";
 
 interface SidebarProps {
   currentView: AppView;
@@ -17,30 +12,11 @@ interface SidebarProps {
   onClose: () => void;
 }
 
-interface NavItem {
-  id: AppView;
-  label: string;
-  icon: LucideIcon;
-}
-
 const iconProps = {
   size: 18,
   strokeWidth: 1.5,
   absoluteStrokeWidth: true,
 } as const;
-
-const primaryItems: NavItem[] = [
-  { id: "main", label: "Accueil", icon: Mic },
-  { id: "dictionary", label: "Dictionnaire", icon: BookOpen },
-  { id: "snippets", label: "Snippets", icon: Braces },
-  { id: "style", label: "Style", icon: Palette },
-  { id: "history", label: "Historique", icon: History },
-  { id: "insight", label: "Statistiques", icon: BarChart3 },
-];
-
-const bottomItems: NavItem[] = [
-  { id: "settings", label: "Paramètres", icon: Settings },
-];
 
 function NavButton({
   item,
@@ -136,19 +112,35 @@ export function Sidebar({ currentView, onNavigate, open, onClose }: SidebarProps
           className="calliop-scroll relative flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-3 pt-6 lg:pt-0"
           aria-label="Navigation principale"
         >
-          {primaryItems.map((item) => (
-            <NavButton
-              key={item.id}
-              item={item}
-              active={currentView === item.id}
-              onNavigate={onNavigate}
-              onClose={onClose}
-            />
+          {NAV_SECTIONS.map((section, sectionIndex) => (
+            <div
+              key={section.label ?? section.items[0]?.id ?? sectionIndex}
+              className={sectionIndex > 0 ? "mt-4 border-t border-hairline pt-4" : undefined}
+              role={section.label ? "group" : undefined}
+              aria-label={section.label}
+            >
+              {section.label && (
+                <p className="mb-1.5 px-3 text-[10px] font-medium uppercase tracking-[0.14em] text-ash">
+                  {section.label}
+                </p>
+              )}
+              <div className="flex flex-col gap-1">
+                {section.items.map((item) => (
+                  <NavButton
+                    key={item.id}
+                    item={item}
+                    active={currentView === item.id}
+                    onNavigate={onNavigate}
+                    onClose={onClose}
+                  />
+                ))}
+              </div>
+            </div>
           ))}
         </nav>
 
         <div className="relative shrink-0 flex flex-col gap-1 border-t border-hairline px-3 py-4">
-          {bottomItems.map((item) => (
+          {BOTTOM_NAV_ITEMS.map((item) => (
             <NavButton
               key={item.id}
               item={item}

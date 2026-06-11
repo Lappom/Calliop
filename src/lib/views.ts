@@ -21,11 +21,11 @@ export function isAppView(value: string): value is AppView {
 
 export const PRIMARY_VIEWS: { id: AppView; label: string }[] = [
   { id: "main", label: "Accueil" },
+  { id: "history", label: "Historique" },
+  { id: "insight", label: "Statistiques" },
   { id: "dictionary", label: "Dictionnaire" },
   { id: "snippets", label: "Snippets" },
   { id: "style", label: "Style" },
-  { id: "history", label: "Historique" },
-  { id: "insight", label: "Statistiques" },
 ];
 
 export const BOTTOM_VIEWS: { id: AppView; label: string }[] = [
