@@ -11,6 +11,12 @@ export interface DictionaryWord {
   created_at: string;
 }
 
+interface DictionaryUpdatedPayload {
+  added: string[];
+  removed: string[];
+  source?: DictionarySource;
+}
+
 export function useDictionary() {
   const [words, setWords] = useState<DictionaryWord[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -39,8 +45,11 @@ export function useDictionary() {
 
     void setup();
 
-    const unlisten = listen("dictionary-updated", () => {
-      void loadWords();
+    const unlisten = listen<DictionaryUpdatedPayload>("dictionary-updated", (event) => {
+      const { added, removed } = event.payload;
+      if (added.length > 0 || removed.length > 0) {
+        void loadWords();
+      }
     });
 
     return () => {

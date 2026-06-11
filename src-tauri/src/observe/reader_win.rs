@@ -5,6 +5,10 @@ use uiautomation::core::UIElement;
 use uiautomation::patterns::{UITextPattern, UIValuePattern};
 use uiautomation::UIAutomation;
 
+thread_local! {
+    static UIA: std::cell::RefCell<Option<UIAutomation>> = const { std::cell::RefCell::new(None) };
+}
+
 fn focused_in_own_process(element: &UIElement) -> bool {
     let own_pid = std::process::id() as i32;
     let mut current = element.clone();
@@ -22,7 +26,16 @@ fn focused_in_own_process(element: &UIElement) -> bool {
 }
 
 pub fn read_focused_text() -> Option<String> {
-    let automation = UIAutomation::new().ok()?;
+    UIA.with(|cell| {
+        let mut slot = cell.borrow_mut();
+        if slot.is_none() {
+            *slot = UIAutomation::new().ok();
+        }
+        read_focused_text_with(slot.as_ref()?)
+    })
+}
+
+fn read_focused_text_with(automation: &UIAutomation) -> Option<String> {
     let element = automation.get_focused_element().ok()?;
     if focused_in_own_process(&element) {
         return None;

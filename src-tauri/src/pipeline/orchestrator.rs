@@ -206,6 +206,10 @@ impl PipelineOrchestrator {
         *self.dictionary_prompt.write() = prompt.map(|value| Arc::from(value.as_str()));
     }
 
+    pub fn set_dictionary_prompt_arc(&mut self, prompt: Option<Arc<str>>) {
+        *self.dictionary_prompt.write() = prompt;
+    }
+
     pub fn set_snippets(&mut self, snippets: Vec<Snippet>) {
         *self.snippets.write() = snippets;
     }
@@ -632,7 +636,7 @@ impl PipelineOrchestrator {
             return;
         };
 
-        let watch_generation = self.observer_generation.load(Ordering::SeqCst);
+        let watch_generation = self.observer_generation.fetch_add(1, Ordering::SeqCst) + 1;
         crate::observe::spawn_correction_watcher(
             app.clone(),
             injected_text.to_string(),

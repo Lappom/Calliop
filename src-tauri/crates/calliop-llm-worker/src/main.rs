@@ -202,8 +202,8 @@ impl InferenceEngine {
             };
         }
 
-        let max_tokens =
-            (full_tokens.len() as i32 + CLEANUP_MAX_OUTPUT_TOKENS).min(CLEANUP_CONTEXT_TOKENS as i32);
+        let max_tokens = (full_tokens.len() as i32 + CLEANUP_MAX_OUTPUT_TOKENS)
+            .min(CLEANUP_CONTEXT_TOKENS as i32);
         if full_tokens.len() >= max_tokens as usize {
             return Err("prompt too long".into());
         }
@@ -339,8 +339,13 @@ fn oneshot(model_path: PathBuf, text: String) -> Result<(), String> {
     let engine = InferenceEngine::load(&model_path)?;
     let (mut ctx, mut batch) = engine.new_session_context()?;
     let mut tone_cache = ToneKvCache::default();
-    let cleaned =
-        engine.cleanup_with_context(&mut ctx, &mut batch, &mut tone_cache, &text, ToneProfile::Default)?;
+    let cleaned = engine.cleanup_with_context(
+        &mut ctx,
+        &mut batch,
+        &mut tone_cache,
+        &text,
+        ToneProfile::Default,
+    )?;
     println!("{cleaned}");
     Ok(())
 }
