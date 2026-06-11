@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { AppView } from "../../lib/views";
-import { NavBar } from "./NavBar";
+import { Sidebar } from "./Sidebar";
 
 interface AppShellProps {
   currentView: AppView;
@@ -10,10 +10,10 @@ interface AppShellProps {
 
 export function AppShell({ currentView, onNavigate, children }: AppShellProps) {
   return (
-    <div className="flex min-h-screen flex-col bg-canvas text-body">
-      <NavBar currentView={currentView} onNavigate={onNavigate} />
-      <main className="mx-auto w-full max-w-[720px] flex-1 px-8 py-8">
-        {children}
+    <div className="flex min-h-screen bg-canvas text-body">
+      <Sidebar currentView={currentView} onNavigate={onNavigate} />
+      <main className="flex-1 overflow-y-auto px-8 py-8">
+        <div className="mx-auto w-full max-w-[880px]">{children}</div>
       </main>
     </div>
   );
