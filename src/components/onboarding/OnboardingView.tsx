@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useOnboarding } from "../../hooks/useOnboarding";
 import { BadgePill } from "../ui/BadgePill";
 import { Button } from "../ui/Button";
@@ -43,6 +43,12 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
   const isFirst = step === 1;
   const isLast = step === STEPS.length;
   const hotkeyParts = hotkey.split("+").map((p) => p.trim());
+
+  useEffect(() => {
+    if (step !== 2 && micProbing) {
+      void stopMicProbe();
+    }
+  }, [step, micProbing, stopMicProbe]);
 
   const handleFinish = async () => {
     await completeOnboarding();

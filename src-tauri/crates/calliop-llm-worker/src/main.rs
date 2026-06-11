@@ -97,7 +97,7 @@ impl InferenceEngine {
         }
     }
 
-    fn new_session_context(&self) -> Result<(LlamaContext<'_>, LlamaBatch), String> {
+    fn new_session_context(&self) -> Result<(LlamaContext<'_>, LlamaBatch<'_>), String> {
         let ctx_size = NonZeroU32::new(CLEANUP_CONTEXT_TOKENS).expect("non-zero context");
         let ctx_params = LlamaContextParams::default()
             .with_n_ctx(Some(ctx_size))

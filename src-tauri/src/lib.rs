@@ -544,7 +544,28 @@ async fn set_settings(
     let llm_changed = previous.llm_model() != llm_model;
     let inference_changed = previous.inference_backend() != inference_backend;
 
+    let hotkey_shortcut =
+        hotkey::parse_shortcut(&settings.hotkey).map_err(|e| e.to_string())?;
+    let next_hotkey = hotkey::format_shortcut(&hotkey_shortcut);
+    let hotkey_changed = previous.hotkey != next_hotkey;
+
+    let next_settings = AppSettings {
+        auto_edit: settings.auto_edit,
+        auto_learn: settings.auto_learn,
+        stt_language: next_stt,
+        whisper_model: whisper_model.as_setting_value().into(),
+        llm_model: llm_model.as_setting_value().into(),
+        hotkey: next_hotkey,
+        inference_backend: inference_backend.as_setting_value().into(),
+    };
+
     let rollback = || {
+        let _ = state.store.save_settings(&previous);
+        if hotkey_changed {
+            if let Ok(prev_shortcut) = hotkey::parse_shortcut(&previous.hotkey) {
+                let _ = register_hotkey(&app_for_notify, prev_shortcut);
+            }
+        }
         state
             .pipeline
             .lock()
@@ -565,6 +586,26 @@ async fn set_settings(
     state.pipeline.lock().set_auto_learn(settings.auto_learn);
     state.pipeline.lock().set_default_stt_language(stt_language);
 
+    if let Err(err) = state
+        .store
+        .save_settings(&next_settings)
+        .map_err(|e| e.to_string())
+    {
+        state
+            .pipeline
+            .lock()
+            .set_default_stt_language(previous.stt_language_mode());
+        state.pipeline.lock().set_auto_learn(previous.auto_learn);
+        return Err(err);
+    }
+
+    if hotkey_changed {
+        if let Err(err) = register_hotkey(&app, hotkey_shortcut) {
+            rollback();
+            return Err(err);
+        }
+    }
+
     if whisper_changed || inference_changed {
         invalidate_whisper_engine(&state);
         if let Err(err) = ensure_model_inner(&app, &state).await {
@@ -573,21 +614,11 @@ async fn set_settings(
         }
     }
 
-    let next_settings = AppSettings {
-        auto_edit: settings.auto_edit,
-        auto_learn: settings.auto_learn,
-        stt_language: next_stt,
-        whisper_model: whisper_model.as_setting_value().into(),
-        llm_model: llm_model.as_setting_value().into(),
-        hotkey: previous.hotkey.clone(),
-        inference_backend: inference_backend.as_setting_value().into(),
-    };
-
     if settings.auto_edit {
         state.pipeline.lock().set_auto_edit(true);
         if llm_changed || inference_changed || !llm_engine_is_live(&state) {
             shutdown_llm_engine(&state);
-            if let Err(err) = ensure_llm_model(app.clone(), state.clone()).await {
+            if let Err(err) = ensure_llm_model_inner(&app, &state).await {
                 rollback();
                 shutdown_llm_engine(&state);
                 return Err(err);
@@ -595,18 +626,6 @@ async fn set_settings(
         }
     } else {
         state.pipeline.lock().set_auto_edit(false);
-    }
-
-    if let Err(err) = state
-        .store
-        .save_settings(&next_settings)
-        .map_err(|e| e.to_string())
-    {
-        rollback();
-        return Err(err);
-    }
-
-    if !settings.auto_edit {
         shutdown_llm_engine(&state);
     }
 
@@ -1071,6 +1090,7 @@ fn set_autostart_enabled(app: AppHandle, enabled: bool) -> Result<(), String> {
 
 async fn ensure_model_inner(app: &AppHandle, state: &AppState) -> Result<(), String> {
     if state.model_ready.load(Ordering::SeqCst) {
+        let _ = app.emit("model-ready", ());
         return Ok(());
     }
 

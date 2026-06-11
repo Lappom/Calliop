@@ -30,7 +30,14 @@ export function useOnboarding() {
           setLoading(false);
         }
         if (!onboardingDone) {
-          void invoke("ensure_model");
+          try {
+            await invoke("ensure_model");
+            if (!cancelled) {
+              setModelReady(true);
+            }
+          } catch {
+            // model-ready listener or retry on next launch
+          }
         }
       } catch {
         if (!cancelled) {
@@ -71,6 +78,7 @@ export function useOnboarding() {
 
     return () => {
       cancelled = true;
+      void invoke("stop_mic_probe").catch(() => {});
       void unlisteners.then((drops) => drops.forEach((drop) => drop()));
     };
   }, []);
@@ -78,7 +86,11 @@ export function useOnboarding() {
   const startMicProbe = useCallback(async () => {
     setMicProbing(true);
     setAudioLevel(0);
-    await invoke("start_mic_probe");
+    try {
+      await invoke("start_mic_probe");
+    } catch {
+      setMicProbing(false);
+    }
   }, []);
 
   const stopMicProbe = useCallback(async () => {
@@ -92,6 +104,8 @@ export function useOnboarding() {
   }, []);
 
   const completeOnboarding = useCallback(async () => {
+    await invoke("stop_mic_probe").catch(() => {});
+    setMicProbing(false);
     await invoke("set_onboarding_done", { done: true });
     setDone(true);
   }, []);
