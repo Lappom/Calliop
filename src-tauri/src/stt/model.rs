@@ -10,6 +10,7 @@ pub const DEFAULT_MODEL_FILE: &str = "ggml-small.bin";
 #[serde(rename_all = "lowercase")]
 pub enum WhisperModel {
     #[default]
+    Auto,
     Small,
     DistilFrDec16,
 }
@@ -17,6 +18,7 @@ pub enum WhisperModel {
 impl WhisperModel {
     pub fn parse(value: &str) -> Option<Self> {
         match value.trim().to_lowercase().as_str() {
+            "auto" => Some(Self::Auto),
             "small" => Some(Self::Small),
             // Legacy: medium replaced by distil-fr-dec16 (option 3 tier lineup).
             "medium" | "distil-fr-dec16" => Some(Self::DistilFrDec16),
@@ -26,20 +28,27 @@ impl WhisperModel {
 
     pub fn as_setting_value(self) -> &'static str {
         match self {
+            Self::Auto => "auto",
             Self::Small => "small",
             Self::DistilFrDec16 => "distil-fr-dec16",
         }
     }
 
-    pub fn file_name(self) -> &'static str {
+    pub fn is_concrete(self) -> bool {
+        !matches!(self, Self::Auto)
+    }
+
+    pub fn file_name(self) -> Option<&'static str> {
         match self {
-            Self::Small => "ggml-small.bin",
-            Self::DistilFrDec16 => "whisper-distil-fr-dec16-q5_0.bin",
+            Self::Auto => None,
+            Self::Small => Some("ggml-small.bin"),
+            Self::DistilFrDec16 => Some("whisper-distil-fr-dec16-q5_0.bin"),
         }
     }
 
     pub fn label(self) -> &'static str {
         match self {
+            Self::Auto => "Automatique (recommandé)",
             Self::Small => "Rapide — Small (~466 Mo)",
             Self::DistilFrDec16 => "Équilibré — Distil FR dec16 (~755 Mo)",
         }
@@ -47,6 +56,7 @@ impl WhisperModel {
 
     pub fn min_bytes(self) -> u64 {
         match self {
+            Self::Auto => 0,
             Self::Small => 450_000_000,
             Self::DistilFrDec16 => 750_000_000,
         }
@@ -54,6 +64,7 @@ impl WhisperModel {
 
     pub fn download_urls(self) -> &'static [&'static str] {
         match self {
+            Self::Auto => &[],
             Self::Small => {
                 &["https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin"]
             }
@@ -64,15 +75,22 @@ impl WhisperModel {
     }
 
     pub fn path(self) -> PathBuf {
-        models_dir().join(self.file_name())
+        models_dir().join(self.file_name().expect("concrete whisper model path"))
     }
 
     pub fn is_installed(self) -> bool {
+        if !self.is_concrete() {
+            return false;
+        }
         is_valid_model_file(self, &self.path())
     }
 
-    pub fn all() -> [Self; 2] {
+    pub fn all_concrete() -> [Self; 2] {
         [Self::Small, Self::DistilFrDec16]
+    }
+
+    pub fn all_selectable() -> [Self; 3] {
+        [Self::Auto, Self::Small, Self::DistilFrDec16]
     }
 }
 
@@ -131,6 +149,9 @@ pub enum ModelError {
 }
 
 pub fn is_valid_model_file(model: WhisperModel, path: &Path) -> bool {
+    if !model.is_concrete() {
+        return false;
+    }
     std::fs::metadata(path)
         .map(|meta| meta.len() >= model.min_bytes())
         .unwrap_or(false)
@@ -140,6 +161,12 @@ pub fn ensure_model_blocking(
     app: Option<&AppHandle>,
     model: WhisperModel,
 ) -> Result<PathBuf, ModelError> {
+    if !model.is_concrete() {
+        return Err(ModelError::Download {
+            url: "model".into(),
+            message: "cannot download unresolved whisper model (auto)".into(),
+        });
+    }
     let path = model.path();
     if path.exists() {
         if is_valid_model_file(model, &path) {
@@ -266,7 +293,7 @@ mod tests {
 
     #[test]
     fn model_urls_use_huggingface_primary() {
-        for model in WhisperModel::all() {
+        for model in WhisperModel::all_concrete() {
             let urls = model.download_urls();
             assert!(urls[0].contains("huggingface.co"));
         }
@@ -283,8 +310,13 @@ mod tests {
     }
 
     #[test]
-    fn default_model_filename() {
-        assert!(model_path(WhisperModel::default()).ends_with(DEFAULT_MODEL_FILE));
+    fn default_model_is_auto() {
+        assert_eq!(WhisperModel::default(), WhisperModel::Auto);
+    }
+
+    #[test]
+    fn concrete_small_model_filename() {
+        assert!(model_path(WhisperModel::Small).ends_with(DEFAULT_MODEL_FILE));
     }
 
     #[test]

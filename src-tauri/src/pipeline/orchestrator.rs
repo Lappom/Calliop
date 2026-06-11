@@ -184,6 +184,7 @@ pub struct PipelineOrchestrator {
     session_detected_language: Arc<RwLock<Option<SttLanguage>>>,
     pending_detection: Arc<Mutex<Option<SttLanguage>>>,
     history_store: Option<Arc<Store>>,
+    vad_chunk_size: usize,
 }
 
 impl PipelineOrchestrator {
@@ -212,7 +213,12 @@ impl PipelineOrchestrator {
             session_detected_language: Arc::new(RwLock::new(None)),
             pending_detection: Arc::new(Mutex::new(None)),
             history_store: None,
+            vad_chunk_size: crate::system::DEFAULT_VAD_CHUNK_SIZE,
         })
+    }
+
+    pub fn set_vad_chunk_size(&mut self, chunk_size: usize) {
+        self.vad_chunk_size = chunk_size;
     }
 
     pub fn set_history_store(&mut self, store: Arc<Store>) {
@@ -386,7 +392,9 @@ impl PipelineOrchestrator {
         emit_stt_language_changed(app, &self.effective_stt_language(), false);
 
         // Fail fast before opening the mic if VAD cannot initialize.
-        VadSegmenter::new()?;
+        VadSegmenter::with_chunk_size(self.vad_chunk_size)?;
+
+        let vad_chunk_size = self.vad_chunk_size;
 
         let (chunk_tx, chunk_rx) = std::sync::mpsc::channel::<Vec<f32>>();
         let (level_tx, level_rx) = std::sync::mpsc::channel();
@@ -412,6 +420,7 @@ impl PipelineOrchestrator {
                 app_worker,
                 chunk_rx,
                 worker_stop,
+                vad_chunk_size,
                 StreamingSttContext {
                     whisper,
                     transcripts,
@@ -522,11 +531,8 @@ impl PipelineOrchestrator {
 
         let auto_edit = self.auto_edit.load(Ordering::SeqCst);
         let snippets = self.snippets.read().clone();
-        let snippet_ctx = build_snippet_variable_context(
-            self.history_store.as_deref(),
-        );
-        let snippet_fallback =
-            prepare_display_transcript(&raw, &snippets, &snippet_ctx);
+        let snippet_ctx = build_snippet_variable_context(self.history_store.as_deref());
+        let snippet_fallback = prepare_display_transcript(&raw, &snippets, &snippet_ctx);
         let llm_input = if !raw.is_empty() && auto_edit {
             let (shielded_raw, snippet_shields) = shield_snippet_triggers(&raw, &snippets);
             let full_text = post_process_transcript(shielded_raw.trim());
@@ -917,9 +923,10 @@ fn streaming_worker(
     app: AppHandle,
     chunk_rx: std::sync::mpsc::Receiver<Vec<f32>>,
     stop_flag: Arc<AtomicBool>,
+    vad_chunk_size: usize,
     stt: StreamingSttContext,
 ) {
-    let Ok(mut vad) = VadSegmenter::new() else {
+    let Ok(mut vad) = VadSegmenter::with_chunk_size(vad_chunk_size) else {
         eprintln!("streaming_worker: VAD init failed after preflight check");
         return;
     };
@@ -1089,6 +1096,7 @@ pub fn hide_overlay(app: &AppHandle) {
 
 pub fn spawn_start(app: AppHandle, orchestrator: Arc<Mutex<PipelineOrchestrator>>) {
     std::thread::spawn(move || {
+        crate::touch_activity(&app);
         let result = {
             let mut guard = orchestrator.lock();
             guard.start(&app)
@@ -1106,6 +1114,11 @@ pub fn spawn_stop(app: AppHandle, orchestrator: Arc<Mutex<PipelineOrchestrator>>
             let mut guard = orchestrator.lock();
             guard.stop(&app)
         };
+
+        if result.is_ok() {
+            crate::touch_activity(&app);
+            crate::spawn_llm_on_demand_if_needed(app.clone());
+        }
 
         if let Err(err) = result {
             emit_error(&app, &orchestrator, err);
@@ -1174,7 +1187,11 @@ mod tests {
             content: "contact at gmail point com".into(),
             created_at: "now".into(),
         }];
-        let result = prepare_display_transcript("voici mon email", &snippets, &SnippetVariableContext::default());
+        let result = prepare_display_transcript(
+            "voici mon email",
+            &snippets,
+            &SnippetVariableContext::default(),
+        );
         assert_eq!(result, "Voici contact at gmail point com");
     }
 }

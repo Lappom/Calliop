@@ -10,10 +10,11 @@ pub mod pipeline;
 pub mod process_util;
 pub mod store;
 pub mod stt;
+pub mod system;
 
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use calliop_prompt::ToneProfile;
 use dictionary_notify::{DictionaryNotifier, DictionaryUpdatedPayload};
@@ -32,6 +33,7 @@ use store::{
     DEFAULT_LIST_LIMIT,
 };
 use stt::{SttLanguage, WhisperModel, WhisperPromptCache, MAX_INITIAL_PROMPT_WORDS};
+use system::{resolve_perf_config, RuntimePerfConfig, SystemCapabilities};
 use tauri::{
     menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -44,7 +46,7 @@ use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_updater::UpdaterExt;
 
 /// Returns registered core module names (Phase 0 wiring check).
-pub fn registered_modules() -> [&'static str; 10] {
+pub fn registered_modules() -> [&'static str; 11] {
     [
         audio::module_name(),
         stt::module_name(),
@@ -56,6 +58,7 @@ pub fn registered_modules() -> [&'static str; 10] {
         observe::module_name(),
         app_context::module_name(),
         pipeline::module_name(),
+        system::module_name(),
     ]
 }
 
@@ -93,6 +96,9 @@ struct AppState {
     store: Arc<Store>,
     prompt_cache: Mutex<WhisperPromptCache>,
     dictionary_notifier: Arc<DictionaryNotifier>,
+    capabilities: SystemCapabilities,
+    perf_config: Mutex<RuntimePerfConfig>,
+    last_activity: Mutex<Instant>,
     model_ready: AtomicBool,
     model_init: Arc<tokio::sync::Mutex<()>>,
     llm_ready: Arc<AtomicBool>,
@@ -111,6 +117,65 @@ fn llm_engine_is_live(state: &AppState) -> bool {
 fn shutdown_llm_engine(state: &AppState) {
     state.llm_ready.store(false, Ordering::SeqCst);
     *state.llm_engine.lock() = None;
+}
+
+fn refresh_perf_config(state: &AppState, settings: &AppSettings, start_minimized: bool) {
+    let perf = resolve_perf_config(settings, &state.capabilities, start_minimized);
+    state
+        .pipeline
+        .lock()
+        .set_vad_chunk_size(perf.vad_chunk_size);
+    *state.perf_config.lock() = perf;
+}
+
+pub fn touch_activity(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    *state.last_activity.lock() = Instant::now();
+}
+
+pub fn spawn_llm_on_demand_if_needed(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        let state = app.state::<AppState>();
+        if !state.pipeline.lock().auto_edit_enabled() {
+            return;
+        }
+        if llm_engine_is_live(&state) {
+            return;
+        }
+        if !state.perf_config.lock().llm_lazy_load {
+            return;
+        }
+        if let Err(err) = ensure_llm_model_inner(&app, &state).await {
+            eprintln!("llm on-demand load failed: {err}");
+        }
+    });
+}
+
+fn spawn_whisper_idle_watchdog(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            let state = app.state::<AppState>();
+            let idle_limit = state.perf_config.lock().whisper_unload_idle;
+            let Some(idle_limit) = idle_limit else {
+                continue;
+            };
+            if is_mic_probe_active(&state) {
+                continue;
+            }
+            if state.pipeline.lock().state() != PipelineState::Idle {
+                continue;
+            }
+            if !state.model_ready.load(Ordering::SeqCst) {
+                continue;
+            }
+            if state.last_activity.lock().elapsed() < idle_limit {
+                continue;
+            }
+            invalidate_whisper_engine(&state);
+            let _ = app.emit("model-unready", ());
+        }
+    });
 }
 
 pub(crate) fn spawn_llm_recovery_if_needed(app: AppHandle) {
@@ -138,6 +203,8 @@ struct SettingsPayload {
     llm_model: String,
     hotkey: String,
     inference_backend: String,
+    low_power_mode: bool,
+    adaptive_perf: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -165,6 +232,8 @@ fn settings_to_payload(settings: &AppSettings) -> SettingsPayload {
         llm_model: settings.llm_model.clone(),
         hotkey: settings.hotkey.clone(),
         inference_backend: settings.inference_backend.clone(),
+        low_power_mode: settings.low_power_mode,
+        adaptive_perf: settings.adaptive_perf,
     }
 }
 
@@ -172,12 +241,13 @@ fn file_size_bytes(path: &std::path::Path) -> Option<u64> {
     std::fs::metadata(path).ok().map(|meta| meta.len())
 }
 
-fn build_models_status(settings: &AppSettings) -> ModelsStatusPayload {
-    let active_whisper = settings.whisper_model();
-    let active_llm = settings.llm_model();
+fn build_models_status(state: &AppState, settings: &AppSettings) -> ModelsStatusPayload {
+    let active_whisper =
+        system::resolve_whisper_model(settings.whisper_model(), &state.capabilities);
+    let active_llm = system::resolve_llm_model(settings.llm_model(), &state.capabilities);
 
     ModelsStatusPayload {
-        whisper: WhisperModel::all()
+        whisper: WhisperModel::all_concrete()
             .into_iter()
             .map(|model| {
                 let path = model.path();
@@ -194,7 +264,7 @@ fn build_models_status(settings: &AppSettings) -> ModelsStatusPayload {
                 }
             })
             .collect(),
-        llm: llm::LlmModel::all()
+        llm: llm::LlmModel::all_concrete()
             .into_iter()
             .map(|model| {
                 let path = model.path();
@@ -560,13 +630,16 @@ fn get_settings(state: State<'_, AppState>) -> Result<SettingsPayload, String> {
 #[tauri::command]
 fn get_models_status(state: State<'_, AppState>) -> Result<ModelsStatusPayload, String> {
     let settings = state.store.load_settings().map_err(|e| e.to_string())?;
-    Ok(build_models_status(&settings))
+    Ok(build_models_status(&state, &settings))
 }
 
 #[tauri::command]
 fn get_inference_info(state: State<'_, AppState>) -> Result<inference::InferenceInfo, String> {
     let settings = state.store.load_settings().map_err(|e| e.to_string())?;
-    Ok(inference::get_inference_info(settings.inference_backend()))
+    Ok(inference::get_inference_info(
+        &settings,
+        &state.capabilities,
+    ))
 }
 
 #[tauri::command]
@@ -589,11 +662,17 @@ async fn delete_model(
     model_id: String,
 ) -> Result<(), String> {
     let settings = state.store.load_settings().map_err(|e| e.to_string())?;
+    let effective_whisper =
+        system::resolve_whisper_model(settings.whisper_model(), &state.capabilities);
+    let effective_llm = system::resolve_llm_model(settings.llm_model(), &state.capabilities);
     let path = match kind.as_str() {
         "whisper" => {
             let model = WhisperModel::parse(&model_id)
                 .ok_or_else(|| format!("modèle Whisper inconnu: {model_id}"))?;
-            if model == settings.whisper_model() {
+            if !model.is_concrete() {
+                return Err("Impossible de supprimer le modèle Whisper automatique.".into());
+            }
+            if model == effective_whisper {
                 return Err("Impossible de supprimer le modèle Whisper actif.".into());
             }
             model.path()
@@ -601,7 +680,10 @@ async fn delete_model(
         "llm" => {
             let model = llm::LlmModel::parse(&model_id)
                 .ok_or_else(|| format!("modèle LLM inconnu: {model_id}"))?;
-            if model == settings.llm_model() {
+            if !model.is_concrete() {
+                return Err("Impossible de supprimer le modèle LLM automatique.".into());
+            }
+            if model == effective_llm {
                 return Err("Impossible de supprimer le modèle LLM actif.".into());
             }
             model.path()
@@ -693,6 +775,16 @@ async fn set_settings(
     let whisper_changed = previous.whisper_model() != whisper_model;
     let llm_changed = previous.llm_model() != llm_model;
     let inference_changed = previous.inference_backend() != inference_backend;
+    let low_power_changed = previous.low_power_mode != settings.low_power_mode;
+    let adaptive_changed = previous.adaptive_perf != settings.adaptive_perf;
+
+    let prev_effective_whisper =
+        system::resolve_whisper_model(previous.whisper_model(), &state.capabilities);
+    let next_effective_whisper = system::resolve_whisper_model(whisper_model, &state.capabilities);
+    let prev_effective_llm = system::resolve_llm_model(previous.llm_model(), &state.capabilities);
+    let next_effective_llm = system::resolve_llm_model(llm_model, &state.capabilities);
+    let whisper_effective_changed = prev_effective_whisper != next_effective_whisper;
+    let llm_effective_changed = prev_effective_llm != next_effective_llm;
 
     let hotkey_shortcut = hotkey::parse_shortcut(&settings.hotkey).map_err(|e| e.to_string())?;
     let next_hotkey = hotkey::format_shortcut(&hotkey_shortcut);
@@ -707,6 +799,8 @@ async fn set_settings(
         llm_model: llm_model.as_setting_value().into(),
         hotkey: next_hotkey,
         inference_backend: inference_backend.as_setting_value().into(),
+        low_power_mode: settings.low_power_mode,
+        adaptive_perf: settings.adaptive_perf,
     };
 
     let mut rollback_ctx = SettingsRollbackContext {
@@ -742,7 +836,22 @@ async fn set_settings(
         }
     }
 
-    if whisper_changed || inference_changed {
+    refresh_perf_config(&state, &next_settings, should_start_minimized());
+
+    if low_power_changed && settings.low_power_mode {
+        shutdown_llm_engine(&state);
+        let _ = app.emit("llm-unready", ());
+        state
+            .deferred_llm_on_boot
+            .store(settings.auto_edit, Ordering::SeqCst);
+    }
+
+    let whisper_reload_needed = whisper_changed
+        || inference_changed
+        || whisper_effective_changed
+        || (adaptive_changed && settings.adaptive_perf);
+
+    if whisper_reload_needed {
         invalidate_whisper_engine(&state);
         rollback_ctx.whisper_invalidated = true;
         if let Err(err) = ensure_model_inner(&app, &state).await {
@@ -757,20 +866,31 @@ async fn set_settings(
 
     if settings.auto_edit {
         state.pipeline.lock().set_auto_edit(true);
-        if llm_changed || inference_changed || !llm_engine_is_live(&state) {
+        let llm_reload_needed = llm_changed
+            || inference_changed
+            || llm_effective_changed
+            || low_power_changed
+            || (adaptive_changed && settings.adaptive_perf);
+        if llm_reload_needed || !llm_engine_is_live(&state) {
             shutdown_llm_engine(&state);
-            if let Err(err) = ensure_llm_model_inner(&app, &state).await {
-                if let Err(rollback_err) =
-                    rollback_settings(&app, &state, &previous, rollback_ctx).await
-                {
-                    eprintln!("settings rollback failed: {rollback_err}");
+            let _ = app.emit("llm-unready", ());
+            if !state.perf_config.lock().llm_lazy_load {
+                if let Err(err) = ensure_llm_model_inner(&app, &state).await {
+                    if let Err(rollback_err) =
+                        rollback_settings(&app, &state, &previous, rollback_ctx).await
+                    {
+                        eprintln!("settings rollback failed: {rollback_err}");
+                    }
+                    return Err(err);
                 }
-                return Err(err);
+            } else {
+                state.deferred_llm_on_boot.store(true, Ordering::SeqCst);
             }
         }
     } else {
         state.pipeline.lock().set_auto_edit(false);
         shutdown_llm_engine(&state);
+        let _ = app.emit("llm-unready", ());
     }
 
     if stt_language_changed {
@@ -810,7 +930,7 @@ async fn ensure_llm_model_inner(app: &AppHandle, state: &AppState) -> Result<(),
     shutdown_llm_engine(state);
 
     let settings = state.store.load_settings().map_err(|e| e.to_string())?;
-    let llm_model = settings.llm_model();
+    let llm_model = state.perf_config.lock().llm;
     let n_gpu_layers = inference::gpu_layers(settings.inference_backend());
 
     let app_for_download = app.clone();
@@ -881,8 +1001,7 @@ fn add_dictionary_word(
     }
     if !is_valid_dictionary_word(&normalized) {
         return Err(
-            "Le mot ne peut pas être vide et ne peut pas être uniquement numérique."
-                .into(),
+            "Le mot ne peut pas être vide et ne peut pas être uniquement numérique.".into(),
         );
     }
 
@@ -952,8 +1071,7 @@ fn update_dictionary_word(
     }
     if !is_valid_dictionary_word(&normalized) {
         return Err(
-            "Le mot ne peut pas être vide et ne peut pas être uniquement numérique."
-                .into(),
+            "Le mot ne peut pas être vide et ne peut pas être uniquement numérique.".into(),
         );
     }
 
@@ -1219,9 +1337,7 @@ fn preview_snippet_expansion(
         .store
         .get_snippet_user_name()
         .map_err(|e| e.to_string())?;
-    let clipboard = TextInjector::read_clipboard_text()
-        .ok()
-        .flatten();
+    let clipboard = TextInjector::read_clipboard_text().ok().flatten();
     let ctx = SnippetVariableContext::from_user_name(user_name).with_clipboard(clipboard);
     Ok(expand_snippet_variables(&content, &ctx))
 }
@@ -1461,7 +1577,9 @@ fn cycle_stt_language_from_tray(app: AppHandle) -> Result<(), String> {
     let next = {
         let mut pipeline = state.pipeline.lock();
         if pipeline.state() == PipelineState::Recording {
-            pipeline.cycle_session_language(&app).map_err(|e| e.to_string())?
+            pipeline
+                .cycle_session_language(&app)
+                .map_err(|e| e.to_string())?
         } else {
             let next = pipeline.effective_stt_language().cycle();
             pipeline.set_default_stt_language(next);
@@ -1476,10 +1594,7 @@ fn cycle_stt_language_from_tray(app: AppHandle) -> Result<(), String> {
             .store
             .save_settings(&settings)
             .map_err(|e| e.to_string())?;
-        state
-            .pipeline
-            .lock()
-            .notify_stt_language_changed(&app);
+        state.pipeline.lock().notify_stt_language_changed(&app);
     }
 
     sync_tray_menus(&app);
@@ -1499,8 +1614,10 @@ async fn ensure_model_inner(app: &AppHandle, state: &AppState) -> Result<(), Str
     }
 
     let settings = state.store.load_settings().map_err(|e| e.to_string())?;
-    let whisper_model = settings.whisper_model();
+    let perf = *state.perf_config.lock();
+    let whisper_model = perf.whisper;
     let use_gpu = inference::should_use_gpu(settings.inference_backend());
+    let n_threads = perf.stt_threads;
 
     let app_for_download = app.clone();
     let model_path = tauri::async_runtime::spawn_blocking(move || {
@@ -1511,7 +1628,7 @@ async fn ensure_model_inner(app: &AppHandle, state: &AppState) -> Result<(), Str
     .map_err(|e| e.to_string())?;
 
     let engine = tauri::async_runtime::spawn_blocking(move || {
-        stt::WhisperEngine::new_with_gpu(&model_path, use_gpu)
+        stt::WhisperEngine::new_with_config(&model_path, use_gpu, n_threads)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1532,6 +1649,7 @@ async fn ensure_model_inner(app: &AppHandle, state: &AppState) -> Result<(), Str
     }
 
     state.model_ready.store(true, Ordering::SeqCst);
+    *state.last_activity.lock() = Instant::now();
     let _ = app.emit("model-ready", ());
     let _ = app.emit(
         "pipeline-state",
@@ -1752,9 +1870,7 @@ fn sync_tray_menus(app: &AppHandle) {
             .map(|state| state.pipeline.lock().auto_edit_enabled())
             .unwrap_or(false);
         let _ = handles.auto_edit_item.set_checked(auto_edit_enabled);
-        let _ = handles
-            .language_item
-            .set_text(tray_language_menu_text(app));
+        let _ = handles.language_item.set_text(tray_language_menu_text(app));
     }
 }
 
@@ -1774,20 +1890,9 @@ fn build_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         true,
         None::<&str>,
     )?;
-    let settings_item = MenuItem::with_id(
-        app,
-        MENU_OPEN_SETTINGS,
-        "Paramètres",
-        true,
-        None::<&str>,
-    )?;
-    let history_item = MenuItem::with_id(
-        app,
-        MENU_OPEN_HISTORY,
-        "Historique",
-        true,
-        None::<&str>,
-    )?;
+    let settings_item =
+        MenuItem::with_id(app, MENU_OPEN_SETTINGS, "Paramètres", true, None::<&str>)?;
+    let history_item = MenuItem::with_id(app, MENU_OPEN_HISTORY, "Historique", true, None::<&str>)?;
     let dictionary_item = MenuItem::with_id(
         app,
         MENU_OPEN_DICTIONARY,
@@ -1795,20 +1900,9 @@ fn build_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         true,
         None::<&str>,
     )?;
-    let snippets_item = MenuItem::with_id(
-        app,
-        MENU_OPEN_SNIPPETS,
-        "Snippets",
-        true,
-        None::<&str>,
-    )?;
-    let insight_item = MenuItem::with_id(
-        app,
-        MENU_OPEN_INSIGHT,
-        "Statistiques",
-        true,
-        None::<&str>,
-    )?;
+    let snippets_item = MenuItem::with_id(app, MENU_OPEN_SNIPPETS, "Snippets", true, None::<&str>)?;
+    let insight_item =
+        MenuItem::with_id(app, MENU_OPEN_INSIGHT, "Statistiques", true, None::<&str>)?;
     let auto_edit_checked = app
         .try_state::<AppState>()
         .map(|state| state.pipeline.lock().auto_edit_enabled())
@@ -2037,6 +2131,11 @@ pub fn run() {
     let model_init = Arc::new(tokio::sync::Mutex::new(()));
     let llm_init = Arc::new(tokio::sync::Mutex::new(()));
     let start_minimized = should_start_minimized();
+    let capabilities = SystemCapabilities::detect();
+    let initial_perf = resolve_perf_config(&initial_settings, &capabilities, start_minimized);
+    pipeline
+        .lock()
+        .set_vad_chunk_size(initial_perf.vad_chunk_size);
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -2060,6 +2159,9 @@ pub fn run() {
             store,
             prompt_cache,
             dictionary_notifier,
+            capabilities,
+            perf_config: Mutex::new(initial_perf),
+            last_activity: Mutex::new(Instant::now()),
             model_ready: AtomicBool::new(false),
             model_init: Arc::clone(&model_init),
             llm_ready: llm_ready.clone(),
@@ -2071,7 +2173,9 @@ pub fn run() {
                 deferred_start_pending: false,
                 deferred_toggle_intent: false,
             }),
-            deferred_llm_on_boot: AtomicBool::new(start_minimized && initial_settings.auto_edit),
+            deferred_llm_on_boot: AtomicBool::new(
+                initial_settings.auto_edit && initial_perf.llm_lazy_load,
+            ),
             current_hotkey: Mutex::new(hotkey::default_shortcut()),
             hotkey_suspend_depth: AtomicU32::new(0),
             mic_probe: MicProbeState {
@@ -2117,7 +2221,13 @@ pub fn run() {
                 hide_main_window(app.handle());
             }
 
-            if !start_minimized {
+            let app_for_watchdog = app.handle().clone();
+            spawn_whisper_idle_watchdog(app_for_watchdog);
+
+            let preload_whisper = initial_perf.preload_whisper;
+            let preload_llm = initial_perf.preload_llm && initial_settings.auto_edit;
+
+            if preload_whisper {
                 let app_handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     let state = app_handle.state::<AppState>();
@@ -2126,16 +2236,16 @@ pub fn run() {
                         let _ = app_handle.emit("model-init-error", err);
                     }
                 });
+            }
 
-                if initial_settings.auto_edit {
-                    let app_handle = app.handle().clone();
-                    tauri::async_runtime::spawn(async move {
-                        let state = app_handle.state::<AppState>();
-                        if let Err(err) = ensure_llm_model(app_handle.clone(), state).await {
-                            eprintln!("llm model initialization failed: {err}");
-                        }
-                    });
-                }
+            if preload_llm {
+                let app_handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let state = app_handle.state::<AppState>();
+                    if let Err(err) = ensure_llm_model(app_handle.clone(), state).await {
+                        eprintln!("llm model initialization failed: {err}");
+                    }
+                });
             }
 
             {
@@ -2224,6 +2334,7 @@ mod integration_tests {
                 "observe",
                 "app_context",
                 "pipeline",
+                "system",
             ]
         );
     }

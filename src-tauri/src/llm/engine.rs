@@ -12,7 +12,7 @@ pub struct LlamaEngine {
 
 impl LlamaEngine {
     pub fn start() -> Result<Self, LlmError> {
-        let model = LlmModel::default();
+        let model = LlmModel::Qwen3_1_7B;
         let path = model.path();
         Self::start_with_config(
             &path,
@@ -53,7 +53,7 @@ mod tests {
 
     #[test]
     fn start_requires_downloaded_model_or_worker() {
-        let path = super::super::model::LlmModel::default().path();
+        let path = super::super::model::LlmModel::Qwen3_1_7B.path();
         if !path.exists() {
             return;
         }
@@ -67,6 +67,10 @@ mod tests {
         if !worker_path.exists() {
             return;
         }
-        assert!(LlamaEngine::start().is_ok());
+        assert!(LlamaEngine::start_with_config(
+            &path,
+            crate::inference::gpu_layers(crate::store::InferenceBackend::Auto),
+        )
+        .is_ok());
     }
 }

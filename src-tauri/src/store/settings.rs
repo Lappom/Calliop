@@ -16,6 +16,8 @@ pub const KEY_HOTKEY: &str = "hotkey";
 pub const KEY_INFERENCE_BACKEND: &str = "inference_backend";
 pub const KEY_ONBOARDING_DONE: &str = "onboarding_done";
 pub const KEY_AUTO_UPDATE: &str = "auto_update";
+pub const KEY_LOW_POWER_MODE: &str = "low_power_mode";
+pub const KEY_ADAPTIVE_PERF: &str = "adaptive_perf";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -52,6 +54,8 @@ pub struct AppSettings {
     pub llm_model: String,
     pub hotkey: String,
     pub inference_backend: String,
+    pub low_power_mode: bool,
+    pub adaptive_perf: bool,
 }
 
 impl Default for AppSettings {
@@ -65,6 +69,8 @@ impl Default for AppSettings {
             llm_model: LlmModel::default().as_setting_value().into(),
             hotkey: DEFAULT_HOTKEY_SETTING.into(),
             inference_backend: InferenceBackend::default().as_setting_value().into(),
+            low_power_mode: false,
+            adaptive_perf: true,
         }
     }
 }
@@ -88,6 +94,14 @@ impl AppSettings {
 
     pub fn inference_backend(&self) -> InferenceBackend {
         InferenceBackend::parse(&self.inference_backend).unwrap_or_default()
+    }
+
+    pub fn low_power_mode(&self) -> bool {
+        self.low_power_mode
+    }
+
+    pub fn adaptive_perf(&self) -> bool {
+        self.adaptive_perf
     }
 }
 
@@ -118,6 +132,8 @@ impl Store {
                     InferenceBackend::default().as_setting_value(),
                 )?
                 .to_string(),
+            low_power_mode: self.get_bool(KEY_LOW_POWER_MODE, false)?,
+            adaptive_perf: self.get_bool(KEY_ADAPTIVE_PERF, true)?,
         })
     }
 
@@ -177,6 +193,30 @@ impl Store {
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             params![KEY_INFERENCE_BACKEND, settings.inference_backend.as_str()],
         )?;
+        tx.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![
+                KEY_LOW_POWER_MODE,
+                if settings.low_power_mode {
+                    "true"
+                } else {
+                    "false"
+                }
+            ],
+        )?;
+        tx.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![
+                KEY_ADAPTIVE_PERF,
+                if settings.adaptive_perf {
+                    "true"
+                } else {
+                    "false"
+                }
+            ],
+        )?;
         tx.commit()?;
         Ok(())
     }
@@ -208,8 +248,10 @@ mod tests {
         assert!(settings.auto_learn);
         assert!(!settings.auto_update);
         assert_eq!(settings.stt_language, DEFAULT_STT_LANGUAGE);
-        assert_eq!(settings.whisper_model, "small");
-        assert_eq!(settings.llm_model, "qwen3-1.7b");
+        assert_eq!(settings.whisper_model, "auto");
+        assert_eq!(settings.llm_model, "auto");
+        assert!(settings.adaptive_perf);
+        assert!(!settings.low_power_mode);
     }
 
     #[test]
@@ -245,6 +287,8 @@ mod tests {
                 llm_model: "qwen3-0.6b".into(),
                 hotkey: "Ctrl+Shift+Space".into(),
                 inference_backend: "cpu".into(),
+                low_power_mode: true,
+                adaptive_perf: false,
             })
             .expect("save");
         let loaded = store.load_settings().expect("load");
@@ -254,6 +298,8 @@ mod tests {
         assert_eq!(loaded.stt_language, "en");
         assert_eq!(loaded.whisper_model, "distil-fr-dec16");
         assert_eq!(loaded.llm_model, "qwen3-0.6b");
+        assert!(loaded.low_power_mode);
+        assert!(!loaded.adaptive_perf);
 
         let _ = std::fs::remove_dir_all(dir);
     }

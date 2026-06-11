@@ -48,6 +48,18 @@ impl WhisperEngine {
     }
 
     pub fn new_with_gpu(model_path: &Path, use_gpu: bool) -> Result<Self, SttError> {
+        let n_threads = std::thread::available_parallelism()
+            .map(|n| n.get() as i32)
+            .unwrap_or(4)
+            .min(8);
+        Self::new_with_config(model_path, use_gpu, n_threads)
+    }
+
+    pub fn new_with_config(
+        model_path: &Path,
+        use_gpu: bool,
+        n_threads: i32,
+    ) -> Result<Self, SttError> {
         let path_str = model_path.to_str().ok_or_else(|| SttError::LoadModel {
             path: model_path.display().to_string(),
             message: "invalid UTF-8 path".into(),
@@ -71,10 +83,7 @@ impl WhisperEngine {
             context,
             state,
             language: SttLanguage::default_fixed(),
-            n_threads: std::thread::available_parallelism()
-                .map(|n| n.get() as i32)
-                .unwrap_or(4)
-                .min(8),
+            n_threads: n_threads.max(1),
         })
     }
 

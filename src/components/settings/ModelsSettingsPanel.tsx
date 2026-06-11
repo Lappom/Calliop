@@ -72,7 +72,9 @@ export function ModelsSettingsPanel({
           Backend {inferenceInfo.active_backend.toUpperCase()}
           {inferenceInfo.gpu_available ? " · GPU Vulkan" : " · CPU"}
           {" · "}
-          compilé {inferenceInfo.compiled_backend}
+          profil {inferenceInfo.perf_tier}
+          {" · "}
+          effectif {inferenceInfo.effective_whisper} / {inferenceInfo.effective_llm}
         </p>
       )}
     </div>

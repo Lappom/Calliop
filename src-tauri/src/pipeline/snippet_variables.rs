@@ -65,10 +65,7 @@ pub fn format_local_date_french() -> String {
     use chrono::Datelike;
 
     let now = chrono::Local::now();
-    let month_name = MONTHS_FR
-        .get(now.month0() as usize)
-        .copied()
-        .unwrap_or("?");
+    let month_name = MONTHS_FR.get(now.month0() as usize).copied().unwrap_or("?");
     format!("{} {month_name} {}", now.day(), now.year())
 }
 
@@ -110,10 +107,7 @@ mod tests {
 
     #[test]
     fn date_token_is_case_sensitive() {
-        let result = expand_snippet_variables(
-            "{{DATE}}",
-            &ctx("", None, Some("2 février 2026")),
-        );
+        let result = expand_snippet_variables("{{DATE}}", &ctx("", None, Some("2 février 2026")));
         assert_eq!(result, "{{DATE}}");
     }
 }

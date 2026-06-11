@@ -11,9 +11,11 @@ pub const DEFAULT_MODEL_FILE: &str = "qwen3-1.7b-instruct-q4_k_m.gguf";
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum LlmModel {
+    #[default]
+    #[serde(rename = "auto")]
+    Auto,
     #[serde(rename = "qwen3-0.6b")]
     Qwen3_0_6B,
-    #[default]
     #[serde(rename = "qwen3-1.7b")]
     Qwen3_1_7B,
     #[serde(rename = "qwen3-4b")]
@@ -23,6 +25,7 @@ pub enum LlmModel {
 impl LlmModel {
     pub fn parse(value: &str) -> Option<Self> {
         match value.trim().to_lowercase().as_str() {
+            "auto" => Some(Self::Auto),
             "qwen3-0.6b" | "qwen3_0.6b" => Some(Self::Qwen3_0_6B),
             "qwen3-1.7b" | "qwen3_1.7b" => Some(Self::Qwen3_1_7B),
             "qwen3-4b" | "qwen3_4b" => Some(Self::Qwen3_4B),
@@ -32,22 +35,29 @@ impl LlmModel {
 
     pub fn as_setting_value(self) -> &'static str {
         match self {
+            Self::Auto => "auto",
             Self::Qwen3_0_6B => "qwen3-0.6b",
             Self::Qwen3_1_7B => "qwen3-1.7b",
             Self::Qwen3_4B => "qwen3-4b",
         }
     }
 
-    pub fn file_name(self) -> &'static str {
+    pub fn is_concrete(self) -> bool {
+        !matches!(self, Self::Auto)
+    }
+
+    pub fn file_name(self) -> Option<&'static str> {
         match self {
-            Self::Qwen3_0_6B => "qwen3-0.6b-instruct-q4_k_m.gguf",
-            Self::Qwen3_1_7B => "qwen3-1.7b-instruct-q4_k_m.gguf",
-            Self::Qwen3_4B => "qwen3-4b-instruct-q4_k_m.gguf",
+            Self::Auto => None,
+            Self::Qwen3_0_6B => Some("qwen3-0.6b-instruct-q4_k_m.gguf"),
+            Self::Qwen3_1_7B => Some("qwen3-1.7b-instruct-q4_k_m.gguf"),
+            Self::Qwen3_4B => Some("qwen3-4b-instruct-q4_k_m.gguf"),
         }
     }
 
     pub fn label(self) -> &'static str {
         match self {
+            Self::Auto => "Automatique (recommandé)",
             Self::Qwen3_0_6B => "Qwen3 0.6B Instruct Q4_K_M (~484 Mo)",
             Self::Qwen3_1_7B => "Qwen3 1.7B Instruct Q4_K_M (~1,1 Go)",
             Self::Qwen3_4B => "Qwen3 4B Instruct Q4_K_M (~2,5 Go, GPU recommandé)",
@@ -56,6 +66,7 @@ impl LlmModel {
 
     pub fn min_bytes(self) -> u64 {
         match self {
+            Self::Auto => 0,
             Self::Qwen3_0_6B => 450_000_000,
             Self::Qwen3_1_7B => 1_000_000_000,
             Self::Qwen3_4B => 2_400_000_000,
@@ -64,6 +75,7 @@ impl LlmModel {
 
     pub fn download_urls(self) -> &'static [&'static str] {
         match self {
+            Self::Auto => &[],
             Self::Qwen3_0_6B => &[
                 "https://huggingface.co/unsloth/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q4_K_M.gguf",
             ],
@@ -77,15 +89,27 @@ impl LlmModel {
     }
 
     pub fn path(self) -> PathBuf {
-        models_dir().join(self.file_name())
+        models_dir().join(self.file_name().expect("concrete llm model path"))
     }
 
     pub fn is_installed(self) -> bool {
+        if !self.is_concrete() {
+            return false;
+        }
         is_valid_model_file(self, &self.path())
     }
 
-    pub fn all() -> [Self; 3] {
+    pub fn all_concrete() -> [Self; 3] {
         [Self::Qwen3_0_6B, Self::Qwen3_1_7B, Self::Qwen3_4B]
+    }
+
+    pub fn all_selectable() -> [Self; 4] {
+        [
+            Self::Auto,
+            Self::Qwen3_0_6B,
+            Self::Qwen3_1_7B,
+            Self::Qwen3_4B,
+        ]
     }
 }
 
@@ -121,6 +145,9 @@ pub enum LlmModelError {
 }
 
 pub fn is_valid_model_file(model: LlmModel, path: &Path) -> bool {
+    if !model.is_concrete() {
+        return false;
+    }
     std::fs::metadata(path)
         .map(|meta| meta.len() >= model.min_bytes())
         .unwrap_or(false)
@@ -130,6 +157,12 @@ pub fn ensure_llm_model_blocking(
     app: Option<&AppHandle>,
     model: LlmModel,
 ) -> Result<PathBuf, LlmModelError> {
+    if !model.is_concrete() {
+        return Err(LlmModelError::Download {
+            url: "model".into(),
+            message: "cannot download unresolved llm model (auto)".into(),
+        });
+    }
     let path = model.path();
     if path.exists() {
         if is_valid_model_file(model, &path) {
@@ -260,7 +293,7 @@ mod tests {
 
     #[test]
     fn model_urls_use_huggingface_primary() {
-        for model in LlmModel::all() {
+        for model in LlmModel::all_concrete() {
             let urls = model.download_urls();
             assert!(urls[0].contains("huggingface.co"));
         }

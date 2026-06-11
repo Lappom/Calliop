@@ -115,11 +115,7 @@ pub fn finalize_llm_with_snippets(
 }
 
 /// Expands voice snippet triggers into their full content (deterministic, offline).
-pub fn apply_snippets(
-    text: &str,
-    snippets: &[Snippet],
-    ctx: &SnippetVariableContext,
-) -> String {
+pub fn apply_snippets(text: &str, snippets: &[Snippet], ctx: &SnippetVariableContext) -> String {
     if snippets.is_empty() || text.is_empty() {
         return text.to_owned();
     }
@@ -322,8 +318,11 @@ mod tests {
     #[test]
     fn expands_trigger_case_insensitively() {
         let snippets = vec![snippet("mon calendrier", "https://calendly.com/me")];
-        let result =
-            apply_snippets("Voici Mon Calendrier pour réserver.", &snippets, &empty_ctx());
+        let result = apply_snippets(
+            "Voici Mon Calendrier pour réserver.",
+            &snippets,
+            &empty_ctx(),
+        );
         assert_eq!(result, "Voici https://calendly.com/me pour réserver.");
     }
 
@@ -395,8 +394,13 @@ mod tests {
     fn finalize_llm_with_snippets_falls_back_when_tokens_missing() {
         let snippets = vec![snippet("mon calendrier", "https://calendly.com/me")];
         let (_, shields) = shield_snippet_triggers("mon calendrier", &snippets);
-        let result =
-            finalize_llm_with_snippets("Mon agenda", &shields, "mon calendrier", &snippets, &empty_ctx());
+        let result = finalize_llm_with_snippets(
+            "Mon agenda",
+            &shields,
+            "mon calendrier",
+            &snippets,
+            &empty_ctx(),
+        );
         assert_eq!(result, "https://calendly.com/me");
     }
 }

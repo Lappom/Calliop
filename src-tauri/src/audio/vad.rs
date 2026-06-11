@@ -21,6 +21,7 @@ pub enum VadError {
 /// Segments speech from a PCM stream using Silero VAD.
 pub struct VadSegmenter {
     vad: VoiceActivityDetector,
+    chunk_size: usize,
     pending: Vec<f32>,
     speech: Vec<f32>,
     pre_speech: VecDeque<Vec<f32>>,
@@ -30,14 +31,19 @@ pub struct VadSegmenter {
 
 impl VadSegmenter {
     pub fn new() -> Result<Self, VadError> {
+        Self::with_chunk_size(VAD_CHUNK_SIZE)
+    }
+
+    pub fn with_chunk_size(chunk_size: usize) -> Result<Self, VadError> {
         let vad = VoiceActivityDetector::builder()
             .sample_rate(TARGET_SAMPLE_RATE)
-            .chunk_size(VAD_CHUNK_SIZE)
+            .chunk_size(chunk_size)
             .build()
             .map_err(|e| VadError::Init(e.to_string()))?;
 
         Ok(Self {
             vad,
+            chunk_size,
             pending: Vec::new(),
             speech: Vec::new(),
             pre_speech: VecDeque::with_capacity(PRE_SPEECH_CHUNKS + 1),
@@ -50,9 +56,10 @@ impl VadSegmenter {
     pub fn push(&mut self, samples: &[f32]) -> Result<Vec<Vec<f32>>, VadError> {
         self.pending.extend_from_slice(samples);
         let mut completed = Vec::new();
+        let chunk_size = self.chunk_size;
 
-        while self.pending.len() >= VAD_CHUNK_SIZE {
-            let chunk: Vec<f32> = self.pending.drain(..VAD_CHUNK_SIZE).collect();
+        while self.pending.len() >= chunk_size {
+            let chunk: Vec<f32> = self.pending.drain(..chunk_size).collect();
             let probability = self.vad.predict(chunk.iter().copied());
             self.process_chunk(chunk, probability, &mut completed)?;
         }
@@ -63,10 +70,11 @@ impl VadSegmenter {
     /// Flush trailing audio at end of recording.
     pub fn flush(&mut self) -> Result<Vec<Vec<f32>>, VadError> {
         let mut completed = Vec::new();
+        let chunk_size = self.chunk_size;
 
         if !self.pending.is_empty() {
             let mut chunk = self.pending.drain(..).collect::<Vec<_>>();
-            chunk.resize(VAD_CHUNK_SIZE, 0.0);
+            chunk.resize(chunk_size, 0.0);
             let probability = self.vad.predict(chunk.iter().copied());
             self.process_chunk(chunk, probability, &mut completed)?;
         }
@@ -138,6 +146,12 @@ mod tests {
         assert!(segments.is_empty());
         let flushed = vad.flush().expect("flush");
         assert!(flushed.is_empty());
+    }
+
+    #[test]
+    fn with_chunk_size_256_initializes() {
+        let vad = VadSegmenter::with_chunk_size(256);
+        assert!(vad.is_ok());
     }
 
     #[test]

@@ -3,8 +3,8 @@ import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { SttLanguageCode } from "./useSttLanguage";
 
-export type WhisperModelId = "small" | "distil-fr-dec16";
-export type LlmModelId = "qwen3-0.6b" | "qwen3-1.7b" | "qwen3-4b";
+export type WhisperModelId = "auto" | "small" | "distil-fr-dec16";
+export type LlmModelId = "auto" | "qwen3-0.6b" | "qwen3-1.7b" | "qwen3-4b";
 export type InferenceBackendId = "auto" | "cpu";
 
 export interface AppSettings {
@@ -16,6 +16,8 @@ export interface AppSettings {
   llmModel: LlmModelId;
   hotkey: string;
   inferenceBackend: InferenceBackendId;
+  lowPowerMode: boolean;
+  adaptivePerf: boolean;
 }
 
 export interface ModelStatusEntry {
@@ -36,6 +38,12 @@ export interface InferenceInfo {
   gpu_available: boolean;
   active_backend: string;
   inference_backend_setting: string;
+  total_ram_gb: number;
+  avail_ram_gb: number;
+  perf_tier: string;
+  effective_whisper: string;
+  effective_llm: string;
+  vad_chunk_size: number;
 }
 
 interface SettingsPayload {
@@ -47,6 +55,8 @@ interface SettingsPayload {
   llm_model: string;
   hotkey: string;
   inference_backend: string;
+  low_power_mode: boolean;
+  adaptive_perf: boolean;
 }
 
 interface DownloadProgress {
@@ -57,8 +67,8 @@ interface DownloadProgress {
   source: string;
 }
 
-const WHISPER_MODEL_IDS = ["small", "distil-fr-dec16"] as const;
-const LLM_MODEL_IDS = ["qwen3-0.6b", "qwen3-1.7b", "qwen3-4b"] as const;
+const WHISPER_MODEL_IDS = ["auto", "small", "distil-fr-dec16"] as const;
+const LLM_MODEL_IDS = ["auto", "qwen3-0.6b", "qwen3-1.7b", "qwen3-4b"] as const;
 
 function parseWhisperModel(value: string): WhisperModelId {
   if (value === "medium") {
@@ -66,13 +76,13 @@ function parseWhisperModel(value: string): WhisperModelId {
   }
   return WHISPER_MODEL_IDS.includes(value as WhisperModelId)
     ? (value as WhisperModelId)
-    : "small";
+    : "auto";
 }
 
 function parseLlmModel(value: string): LlmModelId {
   return LLM_MODEL_IDS.includes(value as LlmModelId)
     ? (value as LlmModelId)
-    : "qwen3-1.7b";
+    : "auto";
 }
 
 function parseInferenceBackend(value: string): InferenceBackendId {
@@ -89,6 +99,8 @@ function toPayload(settings: AppSettings): SettingsPayload {
     llm_model: settings.llmModel,
     hotkey: settings.hotkey,
     inference_backend: settings.inferenceBackend,
+    low_power_mode: settings.lowPowerMode,
+    adaptive_perf: settings.adaptivePerf,
   };
 }
 
@@ -106,6 +118,8 @@ function fromPayload(payload: SettingsPayload): AppSettings {
     llmModel: parseLlmModel(payload.llm_model),
     hotkey: payload.hotkey,
     inferenceBackend: parseInferenceBackend(payload.inference_backend),
+    lowPowerMode: payload.low_power_mode,
+    adaptivePerf: payload.adaptive_perf,
   };
 }
 
@@ -114,10 +128,12 @@ export const DEFAULT_SETTINGS: AppSettings = {
   autoLearn: true,
   autoUpdate: false,
   sttLanguage: "fr",
-  whisperModel: "small",
-  llmModel: "qwen3-1.7b",
+  whisperModel: "auto",
+  llmModel: "auto",
   hotkey: "Alt+Space",
   inferenceBackend: "auto",
+  lowPowerMode: false,
+  adaptivePerf: true,
 };
 
 function formatBytes(bytes: number | null): string {
@@ -212,6 +228,13 @@ export function useSettings() {
         setSttProgress(null);
         setSttProgressModel(null);
         void refreshModelsStatus();
+        void refreshInferenceInfo();
+      }),
+      listen("model-unready", () => {
+        setSttProgress(null);
+        setSttProgressModel(null);
+        void refreshModelsStatus();
+        void refreshInferenceInfo();
       }),
     ]);
 
@@ -317,6 +340,20 @@ export function useSettings() {
     [saveSettings],
   );
 
+  const setLowPowerMode = useCallback(
+    async (lowPowerMode: boolean) => {
+      await saveSettings({ ...settingsRef.current, lowPowerMode });
+    },
+    [saveSettings],
+  );
+
+  const setAdaptivePerf = useCallback(
+    async (adaptivePerf: boolean) => {
+      await saveSettings({ ...settingsRef.current, adaptivePerf });
+    },
+    [saveSettings],
+  );
+
   const setHotkey = useCallback(async (hotkey: string) => {
     setSaving(true);
     setErrorMessage(null);
@@ -374,6 +411,8 @@ export function useSettings() {
     setWhisperModel,
     setLlmModel,
     setInferenceBackend,
+    setLowPowerMode,
+    setAdaptivePerf,
     setHotkey,
     setAutostart,
     resetSettings,

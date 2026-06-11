@@ -42,6 +42,8 @@ export function SettingsView() {
     setWhisperModel,
     setLlmModel,
     setInferenceBackend,
+    setLowPowerMode,
+    setAdaptivePerf,
     setHotkey,
     setAutostart,
     resetSettings,
@@ -210,12 +212,17 @@ export function SettingsView() {
               modelsStatus={modelsStatus}
               disabled={!loaded || saving}
               onWhisperChange={(value) => {
-                if (value === "small" || value === "distil-fr-dec16") {
+                if (
+                  value === "auto" ||
+                  value === "small" ||
+                  value === "distil-fr-dec16"
+                ) {
                   void setWhisperModel(value);
                 }
               }}
               onLlmChange={(value) => {
                 if (
+                  value === "auto" ||
                   value === "qwen3-0.6b" ||
                   value === "qwen3-1.7b" ||
                   value === "qwen3-4b"
@@ -307,6 +314,34 @@ export function SettingsView() {
               }}
             />
 
+            <SettingsToggleRow
+              label="Mode basse consommation"
+              description={
+                settings.lowPowerMode
+                  ? "LLM chargé à la demande ; Whisper déchargé après 10 min d'inactivité."
+                  : "Modèles maintenus en mémoire pour une latence réduite."
+              }
+              checked={settings.lowPowerMode}
+              disabled={!loaded}
+              onCheckedChange={(checked) => {
+                void setLowPowerMode(checked);
+              }}
+            />
+
+            <SettingsToggleRow
+              label="Profils adaptatifs"
+              description={
+                settings.adaptivePerf
+                  ? "Ajuste chunk VAD, threads STT et modèles « Automatique » selon la RAM/GPU."
+                  : "Paramètres de performance fixes (chunk 512, threads par défaut)."
+              }
+              checked={settings.adaptivePerf}
+              disabled={!loaded}
+              onCheckedChange={(checked) => {
+                void setAdaptivePerf(checked);
+              }}
+            />
+
             <Select
               id="inference-backend"
               label="Backend d'inférence"
@@ -327,7 +362,13 @@ export function SettingsView() {
             {inferenceInfo && (
               <p className="text-caption text-ash">
                 Compilé avec support {inferenceInfo.compiled_backend} — backend
-                actif : {inferenceInfo.active_backend}.
+                actif : {inferenceInfo.active_backend}. Profil{" "}
+                {inferenceInfo.perf_tier} — RAM{" "}
+                {inferenceInfo.total_ram_gb.toFixed(0)} Go (
+                {inferenceInfo.avail_ram_gb.toFixed(1)} Go libres). Modèles
+                effectifs : Whisper {inferenceInfo.effective_whisper}, LLM{" "}
+                {inferenceInfo.effective_llm}, chunk VAD{" "}
+                {inferenceInfo.vad_chunk_size}.
               </p>
             )}
           </SettingsSection>

@@ -221,6 +221,9 @@ Application desktop qui permet de **dicter dans n'importe quelle application** a
 - [x] Optimiser le pipeline de démarrage automatique
 - [x] Optimiser le pipeline d'apprentissage automatique des corrections utilisateur
 - [x] Optimiser le pipeline de dictionnaire personnel
+- [x] Profils perf adaptatifs : détection RAM/GPU → modèle et chunk size auto
+- [x] Mode basse consommation : LLM lazy-load, Whisper unload après inactivité
+- [x] Préchargement intelligent : modèles en RAM au boot si ressources disponibles
 
 ---
 
