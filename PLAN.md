@@ -172,10 +172,10 @@ Application desktop qui permet de **dicter dans n'importe quelle application** a
 - [x] Exécution async (ne bloque pas l'injection si LLM lent)
 
 #### 3b — Dictionnaire personnel
-- [ ] CRUD mots / noms propres dans Settings
-- [ ] Injection dans `initial_prompt` Whisper
-- [ ] Apprentissage auto des corrections utilisateur
-- [ ] Notifications sur les corrections utilisateur
+- [x] CRUD mots / noms propres dans Settings
+- [x] Injection dans `initial_prompt` Whisper
+- [x] Apprentissage auto des corrections utilisateur
+- [x] Notifications sur les corrections utilisateur
 
 #### 3c — Snippets vocaux
 - [ ] Définition trigger → texte complet

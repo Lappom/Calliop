@@ -1,9 +1,10 @@
 import { Card } from "../ui/Card";
-import { CodeWindow } from "../ui/CodeWindow";
+import { Button } from "../ui/Button";
 import { Kbd } from "../ui/Kbd";
 import { ProgressBar } from "../ui/ProgressBar";
 import { SectionGlow } from "../layout/SectionGlow";
 import { StatusDot } from "../ui/StatusDot";
+import { useTranscriptCorrection } from "../../hooks/useTranscriptCorrection";
 import {
   pipelineGlow,
   pipelineStatusColor,
@@ -36,6 +37,15 @@ export function MainView({
     pipelineState,
     Boolean(errorMessage),
   );
+  const {
+    editedTranscript,
+    setEditedTranscript,
+    applyCorrection,
+    learning,
+    learnedWords,
+    errorMessage: correctionError,
+    hasChanges,
+  } = useTranscriptCorrection(lastTranscript);
 
   return (
     <>
@@ -79,13 +89,47 @@ export function MainView({
               <p className="text-body-sm mt-4 text-accent-red">{errorMessage}</p>
             )}
             {lastTranscript && (
-              <div className="mt-6">
-                <p className="text-caption mb-2 text-charcoal">
-                  Dernière dictée
+              <div className="mt-6 space-y-3">
+                <p className="text-caption text-charcoal">
+                  Dernière dictée — modifiez pour corriger et enrichir le
+                  dictionnaire
                 </p>
-                <CodeWindow showTrafficLights={false}>
-                  {lastTranscript}
-                </CodeWindow>
+                <textarea
+                  value={editedTranscript}
+                  onChange={(event) => setEditedTranscript(event.target.value)}
+                  onBlur={() => {
+                    if (hasChanges) {
+                      void applyCorrection();
+                    }
+                  }}
+                  rows={4}
+                  className={[
+                    "w-full rounded-md border border-hairline-strong",
+                    "bg-surface-card px-3.5 py-2.5 text-ink",
+                    "font-[family-name:var(--font-ui)] text-sm leading-relaxed",
+                    "focus:border-ink focus:outline-none",
+                  ].join(" ")}
+                />
+                <div className="flex flex-wrap items-center gap-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={!hasChanges || learning}
+                    onClick={() => {
+                      void applyCorrection();
+                    }}
+                  >
+                    {learning ? "Apprentissage…" : "Appliquer la correction"}
+                  </Button>
+                  {learnedWords.length > 0 && (
+                    <p className="text-body-sm text-charcoal">
+                      Ajouté au dictionnaire : {learnedWords.join(", ")}
+                    </p>
+                  )}
+                </div>
+                {correctionError && (
+                  <p className="text-body-sm text-accent-red">{correctionError}</p>
+                )}
               </div>
             )}
             {latencyMetrics && (

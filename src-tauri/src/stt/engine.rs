@@ -6,6 +6,7 @@ use whisper_rs::{
 };
 
 pub const DEFAULT_LANGUAGE: &str = "fr";
+pub const MAX_INITIAL_PROMPT_WORDS: usize = 200;
 
 #[derive(Debug, Error)]
 pub enum SttError {
@@ -57,7 +58,11 @@ impl WhisperEngine {
         self.n_threads
     }
 
-    pub fn transcribe(&self, audio: &[f32]) -> Result<String, SttError> {
+    pub fn transcribe(
+        &self,
+        audio: &[f32],
+        initial_prompt: Option<&str>,
+    ) -> Result<String, SttError> {
         if audio.is_empty() {
             return Err(SttError::EmptyAudio);
         }
@@ -68,7 +73,12 @@ impl WhisperEngine {
             .map_err(|e| SttError::CreateState(e.to_string()))?;
 
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-        configure_full_params(&mut params, self.language(), self.n_threads());
+        configure_full_params(
+            &mut params,
+            self.language(),
+            self.n_threads(),
+            initial_prompt,
+        );
         state
             .full(params, audio)
             .map_err(|e| SttError::Transcribe(e.to_string()))?;
@@ -77,10 +87,30 @@ impl WhisperEngine {
     }
 }
 
+pub fn build_initial_prompt(words: &[String]) -> Option<String> {
+    if words.is_empty() {
+        return None;
+    }
+
+    let prompt = words
+        .iter()
+        .take(MAX_INITIAL_PROMPT_WORDS)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    if prompt.is_empty() {
+        None
+    } else {
+        Some(prompt)
+    }
+}
+
 pub fn configure_full_params<'a>(
     params: &mut FullParams<'a, 'a>,
     language: &'a str,
     n_threads: i32,
+    initial_prompt: Option<&str>,
 ) {
     params.set_language(Some(language));
     params.set_translate(false);
@@ -89,6 +119,12 @@ pub fn configure_full_params<'a>(
     params.set_print_progress(false);
     params.set_print_realtime(false);
     params.set_print_timestamps(false);
+
+    if let Some(prompt) = initial_prompt {
+        if !prompt.is_empty() {
+            params.set_initial_prompt(prompt);
+        }
+    }
 }
 
 fn collect_transcript(state: &WhisperState) -> Result<String, SttError> {
@@ -108,5 +144,28 @@ mod tests {
     #[test]
     fn default_language_is_french() {
         assert_eq!(DEFAULT_LANGUAGE, "fr");
+    }
+
+    #[test]
+    fn build_initial_prompt_joins_words() {
+        let words = vec!["Calliop".into(), "Whisper".into()];
+        assert_eq!(
+            build_initial_prompt(&words),
+            Some("Calliop, Whisper".into())
+        );
+    }
+
+    #[test]
+    fn build_initial_prompt_caps_word_count() {
+        let words = (0..MAX_INITIAL_PROMPT_WORDS + 10)
+            .map(|i| format!("word{i}"))
+            .collect::<Vec<_>>();
+        let prompt = build_initial_prompt(&words).expect("prompt");
+        assert_eq!(prompt.matches(", ").count() + 1, MAX_INITIAL_PROMPT_WORDS);
+    }
+
+    #[test]
+    fn build_initial_prompt_returns_none_for_empty_input() {
+        assert_eq!(build_initial_prompt(&[]), None);
     }
 }

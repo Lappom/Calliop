@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Instant;
 
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RwLock};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize};
 use thiserror::Error;
@@ -106,6 +106,7 @@ pub struct PipelineOrchestrator {
     segment_transcripts: Arc<Mutex<Vec<String>>>,
     failed_segments: Arc<Mutex<Vec<Vec<f32>>>>,
     streaming_stt_ms: Arc<AtomicU64>,
+    dictionary_prompt: Arc<RwLock<Option<String>>>,
 }
 
 impl PipelineOrchestrator {
@@ -122,7 +123,12 @@ impl PipelineOrchestrator {
             segment_transcripts: Arc::new(Mutex::new(Vec::new())),
             failed_segments: Arc::new(Mutex::new(Vec::new())),
             streaming_stt_ms: Arc::new(AtomicU64::new(0)),
+            dictionary_prompt: Arc::new(RwLock::new(None)),
         })
+    }
+
+    pub fn set_dictionary_prompt(&mut self, prompt: Option<String>) {
+        *self.dictionary_prompt.write() = prompt;
     }
 
     pub fn state(&self) -> PipelineState {
@@ -207,15 +213,19 @@ impl PipelineOrchestrator {
         let transcripts = Arc::clone(&self.segment_transcripts);
         let failed_segments = Arc::clone(&self.failed_segments);
         let stt_time_ms = Arc::clone(&self.streaming_stt_ms);
+        let dictionary_prompt = Arc::clone(&self.dictionary_prompt);
         let worker = thread::spawn(move || {
             streaming_worker(
                 app_worker,
                 chunk_rx,
                 worker_stop,
-                whisper,
-                transcripts,
-                failed_segments,
-                stt_time_ms,
+                StreamingSttContext {
+                    whisper,
+                    transcripts,
+                    failed_segments,
+                    stt_time_ms,
+                    dictionary_prompt,
+                },
             );
         });
 
@@ -273,9 +283,10 @@ impl PipelineOrchestrator {
                 return Err(PipelineError::ModelNotLoaded);
             };
 
+            let prompt = self.dictionary_prompt.read().clone();
             for segment in failed_segments {
                 let retry_start = Instant::now();
-                match engine.transcribe(&segment) {
+                match engine.transcribe(&segment, prompt.as_deref()) {
                     Ok(text) if !text.is_empty() => {
                         fallback_stt_ms += retry_start.elapsed().as_millis() as u64;
                         transcripts.push(text);
@@ -288,7 +299,7 @@ impl PipelineOrchestrator {
             // Fallback: if VAD produced no segments, transcribe the full buffer.
             if transcripts.is_empty() && !samples.is_empty() {
                 let fallback_start = Instant::now();
-                let text = engine.transcribe(&samples)?;
+                let text = engine.transcribe(&samples, prompt.as_deref())?;
                 fallback_stt_ms += fallback_start.elapsed().as_millis() as u64;
                 if !text.is_empty() {
                     transcripts.push(text);
@@ -304,37 +315,35 @@ impl PipelineOrchestrator {
             wait_for_llm_engine(&self.llm, LLM_INJECT_WAIT);
         }
 
-        let (text_to_inject, llm_ms, llm_invalidated) = if !full_text.is_empty()
-            && auto_edit
-            && self.llm.lock().is_some()
-        {
-            let job = start_llm_cleanup(
-                Arc::clone(&self.llm),
-                Arc::clone(&self.llm_ready),
-                Arc::clone(&self.auto_edit),
-                &full_text,
-            );
-            match job.wait_for_inject(LLM_INJECT_WAIT) {
-                LlmCleanupWait::Completed {
-                    text,
-                    llm_ms,
-                    invalidated,
-                } => {
-                    let text = if self.auto_edit.load(Ordering::SeqCst) {
-                        text
-                    } else {
-                        full_text.clone()
-                    };
-                    (text, llm_ms, invalidated)
+        let (text_to_inject, llm_ms, llm_invalidated) =
+            if !full_text.is_empty() && auto_edit && self.llm.lock().is_some() {
+                let job = start_llm_cleanup(
+                    Arc::clone(&self.llm),
+                    Arc::clone(&self.llm_ready),
+                    Arc::clone(&self.auto_edit),
+                    &full_text,
+                );
+                match job.wait_for_inject(LLM_INJECT_WAIT) {
+                    LlmCleanupWait::Completed {
+                        text,
+                        llm_ms,
+                        invalidated,
+                    } => {
+                        let text = if self.auto_edit.load(Ordering::SeqCst) {
+                            text
+                        } else {
+                            full_text.clone()
+                        };
+                        (text, llm_ms, invalidated)
+                    }
+                    LlmCleanupWait::Pending(job) => {
+                        job.finalize_in_background(app.clone());
+                        (full_text.clone(), 0, false)
+                    }
                 }
-                LlmCleanupWait::Pending(job) => {
-                    job.finalize_in_background(app.clone());
-                    (full_text.clone(), 0, false)
-                }
-            }
-        } else {
-            (full_text.clone(), 0, false)
-        };
+            } else {
+                (full_text.clone(), 0, false)
+            };
 
         if llm_invalidated && self.auto_edit.load(Ordering::SeqCst) {
             let _ = app.emit("llm-unready", ());
@@ -500,11 +509,8 @@ impl LlmCleanupJob {
             }
             Ok(LlmCleanupOutcome::Failed) => {
                 let _ = self.worker.join();
-                let invalidated = invalidate_llm_engine_from_cleanup(
-                    &self.llm,
-                    &self.llm_ready,
-                    self.worker_pid,
-                );
+                let invalidated =
+                    invalidate_llm_engine_from_cleanup(&self.llm, &self.llm_ready, self.worker_pid);
                 LlmCleanupWait::Completed {
                     text: self.raw,
                     llm_ms: self.start.elapsed().as_millis() as u64,
@@ -514,11 +520,8 @@ impl LlmCleanupJob {
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => LlmCleanupWait::Pending(self),
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                 let _ = self.worker.join();
-                let invalidated = invalidate_llm_engine_from_cleanup(
-                    &self.llm,
-                    &self.llm_ready,
-                    self.worker_pid,
-                );
+                let invalidated =
+                    invalidate_llm_engine_from_cleanup(&self.llm, &self.llm_ready, self.worker_pid);
                 LlmCleanupWait::Completed {
                     text: self.raw,
                     llm_ms: self.start.elapsed().as_millis() as u64,
@@ -536,11 +539,9 @@ impl LlmCleanupJob {
                     restore_llm_engine(&self.llm, &self.auto_edit, engine);
                     false
                 }
-                Ok(LlmCleanupOutcome::Failed) => invalidate_llm_engine_from_cleanup(
-                    &self.llm,
-                    &self.llm_ready,
-                    self.worker_pid,
-                ),
+                Ok(LlmCleanupOutcome::Failed) => {
+                    invalidate_llm_engine_from_cleanup(&self.llm, &self.llm_ready, self.worker_pid)
+                }
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                     eprintln!(
                         "llm cleanup timed out after {:?}, raw transcript already injected",
@@ -550,20 +551,12 @@ impl LlmCleanupJob {
                         force_kill_sidecar(pid);
                     }
                     let _ = self.worker.join();
-                    invalidate_llm_engine_from_cleanup(
-                        &self.llm,
-                        &self.llm_ready,
-                        self.worker_pid,
-                    )
+                    invalidate_llm_engine_from_cleanup(&self.llm, &self.llm_ready, self.worker_pid)
                 }
                 Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                     eprintln!("llm cleanup worker disconnected, raw transcript already injected");
                     let _ = self.worker.join();
-                    invalidate_llm_engine_from_cleanup(
-                        &self.llm,
-                        &self.llm_ready,
-                        self.worker_pid,
-                    )
+                    invalidate_llm_engine_from_cleanup(&self.llm, &self.llm_ready, self.worker_pid)
                 }
             };
 
@@ -633,21 +626,25 @@ fn force_kill_sidecar(pid: u32) {
     }
 }
 
-fn streaming_worker(
-    app: AppHandle,
-    chunk_rx: std::sync::mpsc::Receiver<Vec<f32>>,
-    stop_flag: Arc<AtomicBool>,
+struct StreamingSttContext {
     whisper: Arc<Mutex<Option<WhisperEngine>>>,
     transcripts: Arc<Mutex<Vec<String>>>,
     failed_segments: Arc<Mutex<Vec<Vec<f32>>>>,
     stt_time_ms: Arc<AtomicU64>,
+    dictionary_prompt: Arc<RwLock<Option<String>>>,
+}
+
+fn streaming_worker(
+    app: AppHandle,
+    chunk_rx: std::sync::mpsc::Receiver<Vec<f32>>,
+    stop_flag: Arc<AtomicBool>,
+    stt: StreamingSttContext,
 ) {
     let Ok(mut vad) = VadSegmenter::new() else {
         eprintln!("streaming_worker: VAD init failed after preflight check");
         return;
     };
 
-    let orchestrator_state = transcripts;
     let mut segment_index = 0_u32;
 
     loop {
@@ -661,15 +658,7 @@ fn streaming_worker(
                     }
                 };
                 for segment in segments {
-                    transcribe_segment(
-                        &app,
-                        &whisper,
-                        &orchestrator_state,
-                        &failed_segments,
-                        &stt_time_ms,
-                        segment,
-                        segment_index,
-                    );
+                    transcribe_segment(&app, &stt, segment, segment_index);
                     segment_index += 1;
                 }
             }
@@ -684,15 +673,7 @@ fn streaming_worker(
 
     if let Ok(segments) = vad.flush() {
         for segment in segments {
-            transcribe_segment(
-                &app,
-                &whisper,
-                &orchestrator_state,
-                &failed_segments,
-                &stt_time_ms,
-                segment,
-                segment_index,
-            );
+            transcribe_segment(&app, &stt, segment, segment_index);
             segment_index += 1;
         }
     }
@@ -700,36 +681,35 @@ fn streaming_worker(
 
 fn transcribe_segment(
     app: &AppHandle,
-    whisper: &Arc<Mutex<Option<WhisperEngine>>>,
-    transcripts: &Arc<Mutex<Vec<String>>>,
-    failed_segments: &Arc<Mutex<Vec<Vec<f32>>>>,
-    stt_time_ms: &Arc<AtomicU64>,
+    stt: &StreamingSttContext,
     segment: Vec<f32>,
     segment_index: u32,
 ) {
     let stt_start = Instant::now();
+    let prompt = stt.dictionary_prompt.read().clone();
     let text = {
-        let engine_guard = whisper.lock();
+        let engine_guard = stt.whisper.lock();
         let Some(engine) = engine_guard.as_ref() else {
-            failed_segments.lock().push(segment);
+            stt.failed_segments.lock().push(segment);
             return;
         };
-        match engine.transcribe(&segment) {
+        match engine.transcribe(&segment, prompt.as_deref()) {
             Ok(text) => text,
             Err(err) => {
                 eprintln!("segment transcription failed: {err}");
-                failed_segments.lock().push(segment);
+                stt.failed_segments.lock().push(segment);
                 return;
             }
         }
     };
-    stt_time_ms.fetch_add(stt_start.elapsed().as_millis() as u64, Ordering::SeqCst);
+    stt.stt_time_ms
+        .fetch_add(stt_start.elapsed().as_millis() as u64, Ordering::SeqCst);
 
     if text.is_empty() {
         return;
     }
 
-    transcripts.lock().push(text.clone());
+    stt.transcripts.lock().push(text.clone());
 
     let _ = app.emit(
         "partial-transcript",
