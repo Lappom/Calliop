@@ -62,7 +62,9 @@ export function formatLatencyBreakdown(metrics: LatencyMetricsPayload): {
       : `${metrics.sttMs} ms`;
 
   let llm: string | null = null;
-  if (metrics.llmBlockedMs != null && metrics.llmBlockedMs > 0) {
+  if (metrics.llmStatus === "skipped" || metrics.llmStatus === "failed") {
+    llm = metrics.llmSkipReason ?? metrics.llmStatus;
+  } else if (metrics.llmBlockedMs != null && metrics.llmBlockedMs > 0) {
     llm = `${metrics.llmBlockedMs} ms`;
   } else if (metrics.llmMs > 0) {
     llm = `${metrics.llmMs} ms`;

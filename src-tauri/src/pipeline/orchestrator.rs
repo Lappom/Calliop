@@ -99,6 +99,15 @@ pub struct PartialTranscriptEvent {
     pub segment_index: u32,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum LlmStatus {
+    Applied,
+    Skipped,
+    Failed,
+    Disabled,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct LatencyMetricsEvent {
     /// Cumulative Whisper inference time (overlaps with recording when streaming).
@@ -116,6 +125,10 @@ pub struct LatencyMetricsEvent {
     pub inject_ms: u64,
     #[serde(rename = "totalMs")]
     pub total_ms: u64,
+    #[serde(rename = "llmStatus")]
+    pub llm_status: LlmStatus,
+    #[serde(rename = "llmSkipReason", skip_serializing_if = "Option::is_none")]
+    pub llm_skip_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -546,7 +559,7 @@ impl PipelineOrchestrator {
         }
 
         let mut llm_blocked_ms = 0_u64;
-        let (text_to_inject, llm_ms, llm_invalidated) =
+        let (text_to_inject, llm_ms, llm_invalidated, llm_status, llm_skip_reason) =
             if let Some((full_text, snippet_shields)) = llm_input {
                 if self.llm.lock().is_none() {
                     let text = if snippet_shields.is_empty() {
@@ -554,7 +567,13 @@ impl PipelineOrchestrator {
                     } else {
                         unshield_snippets(&full_text, &snippet_shields, &snippet_ctx)
                     };
-                    (text, 0, false)
+                    (
+                        text,
+                        0,
+                        false,
+                        LlmStatus::Skipped,
+                        Some("not_loaded".into()),
+                    )
                 } else {
                     let snippets_snapshot = snippets.clone();
                     let job = start_llm_cleanup(
@@ -569,6 +588,8 @@ impl PipelineOrchestrator {
                         text,
                         llm_ms,
                         invalidated,
+                        llm_status,
+                        llm_skip_reason,
                     } = job.wait_for_inject(LLM_CLEANUP_TIMEOUT);
                     let snippets = self.snippets.read().clone();
                     let text = if self.auto_edit.load(Ordering::SeqCst) {
@@ -592,12 +613,12 @@ impl PipelineOrchestrator {
                         snippet_fallback.clone()
                     };
                     llm_blocked_ms = llm_wait_start.elapsed().as_millis() as u64;
-                    (text, llm_ms, invalidated)
+                    (text, llm_ms, invalidated, llm_status, llm_skip_reason)
                 }
             } else if raw.is_empty() {
-                (String::new(), 0, false)
+                (String::new(), 0, false, LlmStatus::Disabled, None)
             } else {
-                (snippet_fallback, 0, false)
+                (snippet_fallback, 0, false, LlmStatus::Disabled, None)
             };
 
         if llm_invalidated && self.auto_edit.load(Ordering::SeqCst) {
@@ -623,8 +644,20 @@ impl PipelineOrchestrator {
                 llm_blocked_ms,
                 inject_ms,
                 total_ms,
+                llm_status,
+                llm_skip_reason: llm_skip_reason.clone(),
             },
         );
+
+        if matches!(llm_status, LlmStatus::Skipped | LlmStatus::Failed) {
+            let _ = app.emit(
+                "llm-skipped",
+                serde_json::json!({
+                    "status": llm_status,
+                    "reason": llm_skip_reason,
+                }),
+            );
+        }
 
         if !text_to_inject.is_empty() {
             if let Some(store) = &self.history_store {
@@ -784,6 +817,8 @@ enum LlmCleanupWait {
         text: String,
         llm_ms: u64,
         invalidated: bool,
+        llm_status: LlmStatus,
+        llm_skip_reason: Option<String>,
     },
 }
 
@@ -802,6 +837,8 @@ impl LlmCleanupJob {
                     text,
                     llm_ms: self.start.elapsed().as_millis() as u64,
                     invalidated: false,
+                    llm_status: LlmStatus::Applied,
+                    llm_skip_reason: None,
                 }
             }
             Ok(LlmCleanupOutcome::Failed) => {
@@ -812,6 +849,8 @@ impl LlmCleanupJob {
                     text: self.raw,
                     llm_ms: self.start.elapsed().as_millis() as u64,
                     invalidated,
+                    llm_status: LlmStatus::Failed,
+                    llm_skip_reason: Some("validation_failed".into()),
                 }
             }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
@@ -829,6 +868,8 @@ impl LlmCleanupJob {
                     text: self.raw,
                     llm_ms: self.start.elapsed().as_millis() as u64,
                     invalidated,
+                    llm_status: LlmStatus::Failed,
+                    llm_skip_reason: Some("timeout".into()),
                 }
             }
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
@@ -839,6 +880,8 @@ impl LlmCleanupJob {
                     text: self.raw,
                     llm_ms: self.start.elapsed().as_millis() as u64,
                     invalidated,
+                    llm_status: LlmStatus::Failed,
+                    llm_skip_reason: Some("worker_error".into()),
                 }
             }
         }

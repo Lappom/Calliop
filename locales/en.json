@@ -236,7 +236,15 @@
       "llm": "AI auto-edit",
       "inject": "Injection",
       "total": "Total",
-      "detail": "STT {{sttMs}} ms · injection {{injectMs}} ms · LLM {{llmMs}} ms"
+      "detail": "STT {{sttMs}} ms · injection {{injectMs}} ms · LLM {{llmMs}} ms",
+      "llmSkipped": "Skipped",
+      "llmSkipReasons": {
+        "not_loaded": "AI model not ready",
+        "timeout": "Timed out",
+        "validation_failed": "Invalid response",
+        "worker_error": "AI engine error",
+        "unknown": "Skipped"
+      }
     }
   },
   "onboarding": {
@@ -627,6 +635,18 @@
       "fr": "FR",
       "en": "EN",
       "auto": "AUTO"
+    }
+  },
+  "toasts": {
+    "llmSkipped": {
+      "title": "AI auto-edit skipped",
+      "reasons": {
+        "not_loaded": "The AI model was not loaded. Text was cleaned without AI.",
+        "timeout": "AI cleanup timed out. Post-processed text was injected.",
+        "validation_failed": "AI response was invalid. Post-processed text was injected.",
+        "worker_error": "The AI engine encountered an error. Post-processed text was injected.",
+        "unknown": "AI cleanup could not run."
+      }
     }
   },
   "window": {

@@ -7,18 +7,37 @@ interface LatencySummaryProps {
   metrics: LatencyMetricsPayload;
 }
 
+function formatLlmMetric(
+  metrics: LatencyMetricsPayload,
+  t: (key: string, options?: { defaultValue?: string }) => string,
+): string | null {
+  if (metrics.llmStatus === "skipped" || metrics.llmStatus === "failed") {
+    const reason = metrics.llmSkipReason ?? "unknown";
+    return t(`main.latency.llmSkipReasons.${reason}`, {
+      defaultValue: t("main.latency.llmSkipped"),
+    });
+  }
+  const breakdown = formatLatencyBreakdown(metrics);
+  return breakdown.llm;
+}
+
 export function LatencySummary({ metrics }: LatencySummaryProps) {
   const { t } = useTranslation();
   const breakdown = formatLatencyBreakdown(metrics);
+  const llmValue = formatLlmMetric(metrics, t);
 
   return (
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
       <MetricPill label={t("main.latency.stt")} value={breakdown.stt} glow="blue" />
-      {breakdown.llm && (
+      {llmValue && (
         <MetricPill
           label={t("main.latency.llm")}
-          value={breakdown.llm}
-          glow="orange"
+          value={llmValue}
+          glow={
+            metrics.llmStatus === "skipped" || metrics.llmStatus === "failed"
+              ? "orange"
+              : "orange"
+          }
         />
       )}
       <MetricPill

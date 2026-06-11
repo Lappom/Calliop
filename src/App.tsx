@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useTranslation } from "react-i18next";
 import { AppFrame } from "./components/layout/AppFrame";
 import { AppShell } from "./components/layout/AppShell";
+import { LlmSkipToast } from "./components/layout/LlmSkipToast";
 import { ModelDownloadToasts } from "./components/layout/ModelDownloadToasts";
 import { PageTransition } from "./components/motion/PageTransition";
 import { StyleView } from "./components/style/StyleView";
@@ -65,6 +66,7 @@ function App() {
           </div>
         </AppFrame>
         <ModelDownloadToasts />
+        <LlmSkipToast />
       </>
     );
   }
@@ -81,6 +83,7 @@ function App() {
           />
         </AppFrame>
         <ModelDownloadToasts />
+        <LlmSkipToast />
       </>
     );
   }
@@ -103,6 +106,7 @@ function App() {
         </AppShell>
       </AppFrame>
       <ModelDownloadToasts />
+      <LlmSkipToast />
     </>
   );
 }

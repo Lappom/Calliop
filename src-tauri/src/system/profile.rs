@@ -105,7 +105,9 @@ pub fn resolve_perf_config(
     if start_minimized {
         preload_whisper =
             !low_power && caps.avail_ram_bytes >= MINIMIZED_PRELOAD_MIN_AVAIL_RAM_BYTES;
-        preload_llm = false;
+        preload_llm = !low_power
+            && settings.auto_edit
+            && caps.avail_ram_bytes >= MINIMIZED_PRELOAD_MIN_AVAIL_RAM_BYTES;
     } else if preload_whisper {
         preload_whisper = caps.avail_ram_bytes >= PRELOAD_MIN_AVAIL_RAM_BYTES;
     }
@@ -239,9 +241,11 @@ mod tests {
     #[test]
     fn minimized_preloads_when_enough_ram() {
         let c = caps(16, 8, false, 8);
-        let cfg = resolve_perf_config(&settings("auto", "auto", false, true), &c, true);
+        let mut s = settings("auto", "auto", false, true);
+        s.auto_edit = true;
+        let cfg = resolve_perf_config(&s, &c, true);
         assert!(cfg.preload_whisper);
-        assert!(!cfg.preload_llm);
+        assert!(cfg.preload_llm);
     }
 
     #[test]

@@ -26,6 +26,8 @@ export interface PartialTranscriptPayload {
   segmentIndex: number;
 }
 
+export type LlmStatus = "applied" | "skipped" | "failed" | "disabled";
+
 export interface LatencyMetricsPayload {
   sttMs: number;
   sttWaitMs?: number;
@@ -33,6 +35,8 @@ export interface LatencyMetricsPayload {
   llmBlockedMs?: number;
   injectMs: number;
   totalMs: number;
+  llmStatus?: LlmStatus;
+  llmSkipReason?: string | null;
 }
 
 export function usePipelineState() {

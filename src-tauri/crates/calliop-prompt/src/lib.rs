@@ -955,6 +955,96 @@ fn is_identifier_char(ch: char) -> bool {
     ch.is_alphanumeric() || ch == '-' || ch == '_'
 }
 
+/// TLD tokens allowed when collapsing spaced dots in email/URL dictation.
+const KNOWN_TLDS: &[&str] = &[
+    "com", "fr", "org", "net", "io", "dev", "co", "uk", "de", "eu", "app", "rs", "ts", "js", "md",
+    "info", "biz", "me", "tv", "cc",
+];
+
+/// French function words that must never be glued after a period.
+const DOT_RIGHT_BLOCKWORDS: &[&str] = &[
+    "a", "à", "le", "la", "les", "des", "sur", "et", "un", "une", "de", "du", "en", "au", "aux",
+    "pour", "par", "avec", "sans", "dans", "ou", "on", "il", "je", "se", "ce", "sa", "son", "ses",
+    "leur", "nos", "vos", "qui", "que", "est", "sont", "pas", "mais", "donc", "car", "ni", "ne",
+    "the", "a", "an", "to", "of", "in", "on", "at", "by", "for",
+];
+
+/// Common French words that must not form fake domains with a TLD (e.g. « comme . com »).
+const DOT_LEFT_BLOCKWORDS: &[&str] = &[
+    "comme", "partie", "statistique", "affichage", "graphique", "sections", "problemes",
+    "problèmes", "largeur", "barre", "attence", "latence", "donc", "alors", "aussi", "encore",
+    "tres", "très", "bien", "tout", "tous", "toute", "cette", "cela", "ceci", "notre", "votre",
+];
+
+fn is_domain_label(token: &str) -> bool {
+    let token = token.trim();
+    token.len() >= 2
+        && token.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+        && token.chars().any(|c| c.is_ascii_alphabetic())
+}
+
+/// Whether spaced or glued dots between two tokens should collapse (e.g. gmail . com).
+fn should_collapse_dot(left: &str, right: &str, preceding: &str) -> bool {
+    let left = left.trim();
+    let right = right.trim();
+    if left.is_empty() || right.is_empty() {
+        return false;
+    }
+
+    let left_lower = left.to_ascii_lowercase();
+    let right_lower = right.to_ascii_lowercase();
+
+    if DOT_RIGHT_BLOCKWORDS.contains(&right_lower.as_str()) {
+        return false;
+    }
+
+    if right.chars().all(|c| c.is_ascii_digit()) {
+        return left.chars().last().is_some_and(|c| c.is_ascii_digit())
+            || (left_lower.starts_with('v') && left.len() <= 4);
+    }
+
+    if preceding.contains('@') {
+        return is_domain_label(left)
+            && (KNOWN_TLDS.contains(&right_lower.as_str()) || is_domain_label(right));
+    }
+
+    if KNOWN_TLDS.contains(&right_lower.as_str()) {
+        return is_domain_label(left) && !DOT_LEFT_BLOCKWORDS.contains(&left_lower.as_str());
+    }
+
+    false
+}
+
+fn token_before_dot(chars: &[char], dot_index: usize) -> Option<String> {
+    let mut end = dot_index;
+    while end > 0 && chars[end - 1].is_whitespace() {
+        end -= 1;
+    }
+    if end == 0 || !is_identifier_char(chars[end - 1]) {
+        return None;
+    }
+    let mut start = end;
+    while start > 0 && is_identifier_char(chars[start - 1]) {
+        start -= 1;
+    }
+    Some(chars[start..end].iter().collect())
+}
+
+fn token_after_dot(chars: &[char], dot_index: usize) -> Option<String> {
+    let mut start = dot_index + 1;
+    while start < chars.len() && chars[start].is_whitespace() {
+        start += 1;
+    }
+    if start >= chars.len() || !is_identifier_char(chars[start]) {
+        return None;
+    }
+    let mut end = start + 1;
+    while end < chars.len() && is_identifier_char(chars[end]) {
+        end += 1;
+    }
+    Some(chars[start..end].iter().collect())
+}
+
 /// Collapses spaced dots between identifier tokens (e.g. « gmail . com » → gmail.com).
 fn collapse_spaced_dots_in_identifiers(text: &str) -> String {
     let chars: Vec<char> = text.chars().collect();
@@ -967,20 +1057,20 @@ fn collapse_spaced_dots_in_identifiers(text: &str) -> String {
             && index + 1 < chars.len()
             && is_identifier_char(chars[index - 1])
         {
-            let mut left_end = index;
-            while left_end > 0 && chars[left_end - 1] == ' ' {
-                left_end -= 1;
-            }
-            if left_end > 0 && is_identifier_char(chars[left_end - 1]) {
-                let mut right_start = index + 1;
-                while right_start < chars.len() && chars[right_start] == ' ' {
-                    right_start += 1;
-                }
-                if right_start < chars.len() && is_identifier_char(chars[right_start]) {
+            if let (Some(left), Some(right)) = (
+                token_before_dot(&chars, index),
+                token_after_dot(&chars, index),
+            ) {
+                let preceding: String = out.chars().collect();
+                if should_collapse_dot(&left, &right, &preceding) {
                     while out.ends_with(' ') {
                         out.pop();
                     }
                     out.push('.');
+                    let mut right_start = index + 1;
+                    while right_start < chars.len() && chars[right_start].is_whitespace() {
+                        right_start += 1;
+                    }
                     index = right_start;
                     continue;
                 }
@@ -1021,7 +1111,14 @@ fn normalize_punctuation_spacing(text: &str) -> String {
             && is_identifier_char(chars[index + 1])
             && out.chars().next_back().is_some_and(is_identifier_char)
         {
-            // Keep gmail.com intact for email-style dictation.
+            if let (Some(left), Some(right)) = (
+                token_before_dot(&chars, index),
+                token_after_dot(&chars, index),
+            ) {
+                if !should_collapse_dot(&left, &right, &out) {
+                    out.push(' ');
+                }
+            }
         } else if matches!(ch, ',' | ';' | ':' | '.' | '!' | '?' | '…')
             && index + 1 < chars.len()
             && chars[index + 1] != ' '
@@ -1305,5 +1402,49 @@ mod tests {
         assert_eq!(json, "\"formal\"");
         let parsed: ToneProfile = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, ToneProfile::Formal);
+    }
+
+    #[test]
+    fn does_not_collapse_dot_before_french_article() {
+        let out = post_process_transcript("partie statistique point a des problèmes");
+        assert_eq!(out, "Partie statistique. a des problèmes");
+        assert!(!out.contains("statistique.a"));
+    }
+
+    #[test]
+    fn does_not_collapse_dot_before_preposition() {
+        let out = post_process_transcript("problèmes d'affichage point sur la largeur");
+        assert_eq!(out, "Problèmes d'affichage. sur la largeur");
+        assert!(!out.contains("affichage.sur"));
+    }
+
+    #[test]
+    fn does_not_form_fake_domain_from_common_word_and_tld() {
+        let out = interpret_oral_punctuation("comme point com");
+        assert_eq!(out, "comme. com");
+    }
+
+    #[test]
+    fn splits_glued_punctuation_before_word() {
+        let out = interpret_oral_punctuation("affichage.sur la largeur");
+        assert_eq!(out, "affichage. sur la largeur");
+    }
+
+    #[test]
+    fn splits_glued_punctuation_before_digit() {
+        let out = interpret_oral_punctuation("bar affiché.3 sections");
+        assert_eq!(out, "bar affiché. 3 sections");
+    }
+
+    #[test]
+    fn keeps_version_number_dots() {
+        let out = interpret_oral_punctuation("version v1.2");
+        assert_eq!(out, "version v1.2");
+    }
+
+    #[test]
+    fn still_collapses_email_domain_dots() {
+        let out = post_process_transcript("contact arobase gmail point com");
+        assert_eq!(out, "contact@gmail.com");
     }
 }

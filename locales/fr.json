@@ -236,7 +236,15 @@
       "llm": "Auto-édition IA",
       "inject": "Injection",
       "total": "Total",
-      "detail": "STT {{sttMs}} ms · injection {{injectMs}} ms · LLM {{llmMs}} ms"
+      "detail": "STT {{sttMs}} ms · injection {{injectMs}} ms · LLM {{llmMs}} ms",
+      "llmSkipped": "Ignorée",
+      "llmSkipReasons": {
+        "not_loaded": "Modèle IA non prêt",
+        "timeout": "Délai dépassé",
+        "validation_failed": "Réponse invalide",
+        "worker_error": "Erreur du moteur IA",
+        "unknown": "Ignorée"
+      }
     }
   },
   "onboarding": {
@@ -627,6 +635,18 @@
       "fr": "FR",
       "en": "EN",
       "auto": "AUTO"
+    }
+  },
+  "toasts": {
+    "llmSkipped": {
+      "title": "Auto-édition IA ignorée",
+      "reasons": {
+        "not_loaded": "Le modèle IA n'était pas chargé. Le texte a été nettoyé sans IA.",
+        "timeout": "Le nettoyage IA a dépassé le délai. Texte post-traité injecté.",
+        "validation_failed": "La réponse IA était invalide. Texte post-traité injecté.",
+        "worker_error": "Le moteur IA a rencontré une erreur. Texte post-traité injecté.",
+        "unknown": "Le nettoyage IA n'a pas pu s'exécuter."
+      }
     }
   },
   "window": {
