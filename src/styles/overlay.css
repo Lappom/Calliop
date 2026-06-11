@@ -1,0 +1,42 @@
+/* Overlay window: transparent shell, compact pill centered, no scroll */
+html,
+body {
+  margin: 0;
+  height: 100%;
+  min-height: unset;
+  overflow: hidden;
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+#root {
+  display: flex;
+  height: 100%;
+  min-height: unset;
+  margin: 0;
+  padding: 14px 16px;
+  overflow: visible;
+  align-items: center;
+  justify-content: center;
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+/* Glow wrapper: no overflow clip, hugs pill size */
+.overlay-glow {
+  display: inline-flex;
+  flex-shrink: 0;
+  border-radius: var(--rounded-full);
+}
+
+.overlay-pill {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: var(--rounded-full);
+  border: 1px solid var(--color-hairline-strong);
+  background: rgba(10, 10, 12, 0.94);
+  padding: 5px 14px;
+}
