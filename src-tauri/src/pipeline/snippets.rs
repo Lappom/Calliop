@@ -2,6 +2,110 @@ use crate::store::Snippet;
 
 const TRAILING_PUNCTUATION: [char; 6] = ['.', ',', ';', ':', '!', '?'];
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShieldedSnippet {
+    pub token: String,
+    pub content: String,
+}
+
+fn shield_token(index: usize) -> String {
+    format!("⟦CALLIOP{index}⟧")
+}
+
+/// Replaces matched snippet triggers with opaque tokens so LLM cleanup cannot alter
+/// the expanded content. Returns the shielded text and the token-to-content map.
+pub fn shield_snippet_triggers(text: &str, snippets: &[Snippet]) -> (String, Vec<ShieldedSnippet>) {
+    if snippets.is_empty() || text.is_empty() {
+        return (text.to_owned(), Vec::new());
+    }
+
+    let mut ordered: Vec<&Snippet> = snippets.iter().collect();
+    ordered.sort_by_key(|snippet| std::cmp::Reverse(normalize_for_match(&snippet.trigger)));
+
+    let mut result = String::with_capacity(text.len());
+    let mut shields = Vec::new();
+    let mut search_start = 0_usize;
+    let mut next_index = 0_usize;
+
+    while search_start < text.len() {
+        let slice = &text[search_start..];
+        let mut best_match: Option<(usize, usize, Option<char>, &Snippet)> = None;
+
+        for snippet in &ordered {
+            let Some((rel_start, rel_end, trailing)) = find_first_match(slice, &snippet.trigger)
+            else {
+                continue;
+            };
+
+            let should_take = match &best_match {
+                None => true,
+                Some((best_start, best_end, _, best_snippet)) => {
+                    rel_start < *best_start
+                        || (rel_start == *best_start
+                            && (rel_end - rel_start) > (best_end - best_start))
+                        || (rel_start == *best_start
+                            && (rel_end - rel_start) == (best_end - best_start)
+                            && normalize_for_match(&snippet.trigger).len()
+                                > normalize_for_match(&best_snippet.trigger).len())
+                }
+            };
+
+            if should_take {
+                best_match = Some((rel_start, rel_end, trailing, snippet));
+            }
+        }
+
+        let Some((rel_start, rel_end, trailing, snippet)) = best_match else {
+            result.push_str(slice);
+            break;
+        };
+
+        result.push_str(&slice[..rel_start]);
+        let token = shield_token(next_index);
+        next_index += 1;
+        shields.push(ShieldedSnippet {
+            token: token.clone(),
+            content: snippet.content.clone(),
+        });
+        result.push_str(&token);
+        if let Some(punctuation) = trailing {
+            result.push(punctuation);
+        }
+        search_start += rel_end;
+    }
+
+    (result, shields)
+}
+
+pub fn unshield_snippets(text: &str, shields: &[ShieldedSnippet]) -> String {
+    let mut result = text.to_string();
+    for shield in shields {
+        result = result.replace(&shield.token, &shield.content);
+    }
+    result
+}
+
+/// Applies LLM output while preserving configured snippet content.
+pub fn finalize_llm_with_snippets(
+    cleaned: &str,
+    shields: &[ShieldedSnippet],
+    full_text: &str,
+    snippets: &[Snippet],
+) -> String {
+    if shields.is_empty() {
+        return cleaned.to_string();
+    }
+    if shields.iter().all(|shield| cleaned.contains(&shield.token)) {
+        return unshield_snippets(cleaned, shields);
+    }
+
+    let from_cleaned = apply_snippets(cleaned, snippets);
+    if from_cleaned != cleaned {
+        return from_cleaned;
+    }
+    apply_snippets(full_text, snippets)
+}
+
 /// Expands voice snippet triggers into their full content (deterministic, offline).
 pub fn apply_snippets(text: &str, snippets: &[Snippet]) -> String {
     if snippets.is_empty() || text.is_empty() {
@@ -242,5 +346,27 @@ mod tests {
         let snippets = vec![snippet("signature", "Cordialement")];
         let result = apply_snippets("bonjour tout le monde", &snippets);
         assert_eq!(result, "bonjour tout le monde");
+    }
+
+    #[test]
+    fn shield_and_unshield_roundtrip() {
+        let snippets = vec![snippet("mon calendrier", "https://calendly.com/me")];
+        let (shielded, shields) =
+            shield_snippet_triggers("Voici mon calendrier demain.", &snippets);
+        assert!(shielded.contains("⟦CALLIOP0⟧"));
+        assert_eq!(shields.len(), 1);
+        let cleaned = shielded.replace("Voici", "Voici,");
+        assert_eq!(
+            unshield_snippets(&cleaned, &shields),
+            "Voici, https://calendly.com/me demain."
+        );
+    }
+
+    #[test]
+    fn finalize_llm_with_snippets_falls_back_when_tokens_missing() {
+        let snippets = vec![snippet("mon calendrier", "https://calendly.com/me")];
+        let (_, shields) = shield_snippet_triggers("mon calendrier", &snippets);
+        let result = finalize_llm_with_snippets("Mon agenda", &shields, "mon calendrier", &snippets);
+        assert_eq!(result, "https://calendly.com/me");
     }
 }

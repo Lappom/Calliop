@@ -15,7 +15,7 @@ use crate::observe::CorrectionHandler;
 use crate::store::Snippet;
 use crate::stt::{SttError, WhisperEngine};
 
-use super::snippets::apply_snippets;
+use super::snippets::{apply_snippets, finalize_llm_with_snippets, shield_snippet_triggers};
 
 /// Maximum time to wait for LLM cleanup (Qwen3 1.7B on CPU can take tens of seconds).
 const LLM_CLEANUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
@@ -346,22 +346,21 @@ impl PipelineOrchestrator {
 
         let stt_ms = streaming_stt_ms + fallback_stt_ms;
         let full_text = transcripts.join(" ").trim().to_string();
-        // Expand snippet triggers on raw Whisper output before LLM cleanup so
-        // paraphrasing cannot erase exact trigger phrases.
-        let text_after_snippets = self.apply_cached_snippets(&full_text);
+        let snippets = self.snippets.read().clone();
+        let (shielded_text, snippet_shields) = shield_snippet_triggers(&full_text, &snippets);
 
         let auto_edit = self.auto_edit.load(Ordering::SeqCst);
-        if !text_after_snippets.is_empty() && auto_edit && self.llm.lock().is_none() {
+        if !full_text.is_empty() && auto_edit && self.llm.lock().is_none() {
             wait_for_llm_engine(&self.llm, LLM_INJECT_WAIT);
         }
 
         let (text_to_inject, llm_ms, llm_invalidated) =
-            if !text_after_snippets.is_empty() && auto_edit && self.llm.lock().is_some() {
+            if !full_text.is_empty() && auto_edit && self.llm.lock().is_some() {
                 let job = start_llm_cleanup(
                     Arc::clone(&self.llm),
                     Arc::clone(&self.llm_ready),
                     Arc::clone(&self.auto_edit),
-                    &text_after_snippets,
+                    &shielded_text,
                 );
                 match job.wait_for_inject(LLM_INJECT_WAIT) {
                     LlmCleanupWait::Completed {
@@ -370,19 +369,24 @@ impl PipelineOrchestrator {
                         invalidated,
                     } => {
                         let text = if self.auto_edit.load(Ordering::SeqCst) {
-                            text
+                            finalize_llm_with_snippets(
+                                &text,
+                                &snippet_shields,
+                                &full_text,
+                                &snippets,
+                            )
                         } else {
-                            text_after_snippets.clone()
+                            apply_snippets(&full_text, &snippets)
                         };
                         (text, llm_ms, invalidated)
                     }
                     LlmCleanupWait::Pending(job) => {
                         job.finalize_in_background(app.clone());
-                        (text_after_snippets.clone(), 0, false)
+                        (apply_snippets(&full_text, &snippets), 0, false)
                     }
                 }
             } else {
-                (text_after_snippets.clone(), 0, false)
+                (apply_snippets(&full_text, &snippets), 0, false)
             };
 
         if llm_invalidated && self.auto_edit.load(Ordering::SeqCst) {

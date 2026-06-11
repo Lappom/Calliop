@@ -21,7 +21,7 @@ use store::{
     normalize_trigger, normalize_word, AppSettings, DictionarySource, DictionaryWord, Snippet,
     SnippetImport, Store,
 };
-use stt::build_initial_prompt;
+use stt::build_whisper_initial_prompt;
 use tauri::{
     menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -141,13 +141,12 @@ fn refresh_whisper_prompt(
     let words = store.list_words().map_err(|e| e.to_string())?;
     let snippets = store.list_snippets().map_err(|e| e.to_string())?;
 
-    let mut prompt_words: Vec<String> = snippets
+    let snippet_triggers: Vec<String> = snippets
         .iter()
         .map(|snippet| snippet.trigger.clone())
         .collect();
-    prompt_words.extend(words.into_iter().map(|entry| entry.word));
-
-    let prompt = build_initial_prompt(&prompt_words);
+    let dictionary_words: Vec<String> = words.into_iter().map(|entry| entry.word).collect();
+    let prompt = build_whisper_initial_prompt(&snippet_triggers, &dictionary_words);
     let mut pipeline = pipeline.lock();
     pipeline.set_dictionary_prompt(prompt);
     pipeline.set_snippets(snippets);

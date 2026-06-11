@@ -25,6 +25,7 @@ Ponctuation courante : « point » → . ; « virgule » → , ; « point-virgul
 « pourcent » → % ; « plus » → + ; « moins » → - ; « égal » / « égale » → =. \
 Place la ponctuation au bon endroit même si la transcription STT a omis ou décalé les espaces. \
 Reformule légèrement si nécessaire pour améliorer la fluidité, sans changer le sens. \
+Conserve les jetons ⟦CALLIOP0⟧, ⟦CALLIOP1⟧, etc. inchangés s'ils apparaissent dans la transcription. \
 Ne commente pas, ne pose pas de questions, ne reformate pas en liste. \
 Réponds uniquement avec le texte nettoyé final, sans guillemets ni préambule.";
 
