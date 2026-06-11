@@ -138,19 +138,30 @@ fn refresh_whisper_prompt(
     store: &Store,
     pipeline: &Arc<Mutex<PipelineOrchestrator>>,
 ) -> Result<(), String> {
-    let words = store.list_words().map_err(|e| e.to_string())?;
     let snippets = store.list_snippets().map_err(|e| e.to_string())?;
+    {
+        pipeline.lock().set_snippets(snippets.clone());
+    }
 
+    let words = store.list_words().map_err(|e| e.to_string())?;
     let snippet_triggers: Vec<String> = snippets
         .iter()
         .map(|snippet| snippet.trigger.clone())
         .collect();
     let dictionary_words: Vec<String> = words.into_iter().map(|entry| entry.word).collect();
     let prompt = build_whisper_initial_prompt(&snippet_triggers, &dictionary_words);
-    let mut pipeline = pipeline.lock();
-    pipeline.set_dictionary_prompt(prompt);
-    pipeline.set_snippets(snippets);
+    pipeline.lock().set_dictionary_prompt(prompt);
     Ok(())
+}
+
+fn ensure_pipeline_snippets_loaded(
+    store: &Store,
+    pipeline: &Arc<Mutex<PipelineOrchestrator>>,
+) {
+    match store.list_snippets() {
+        Ok(snippets) => pipeline.lock().set_snippets(snippets),
+        Err(err) => eprintln!("failed to load snippets cache: {err}"),
+    }
 }
 
 fn refresh_whisper_prompt_state(state: &AppState) -> Result<(), String> {
@@ -791,6 +802,7 @@ pub fn run() {
 
     if let Err(err) = refresh_whisper_prompt(&store, &pipeline) {
         eprintln!("failed to load whisper prompt and snippets cache: {err}");
+        ensure_pipeline_snippets_loaded(&store, &pipeline);
     }
 
     let whisper_engine = Arc::new(Mutex::new(None));

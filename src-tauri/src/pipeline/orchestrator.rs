@@ -346,8 +346,6 @@ impl PipelineOrchestrator {
 
         let stt_ms = streaming_stt_ms + fallback_stt_ms;
         let full_text = transcripts.join(" ").trim().to_string();
-        let snippets = self.snippets.read().clone();
-        let (shielded_text, snippet_shields) = shield_snippet_triggers(&full_text, &snippets);
 
         let auto_edit = self.auto_edit.load(Ordering::SeqCst);
         if !full_text.is_empty() && auto_edit && self.llm.lock().is_none() {
@@ -356,6 +354,9 @@ impl PipelineOrchestrator {
 
         let (text_to_inject, llm_ms, llm_invalidated) =
             if !full_text.is_empty() && auto_edit && self.llm.lock().is_some() {
+                let snippets_at_shield = self.snippets.read().clone();
+                let (shielded_text, snippet_shields) =
+                    shield_snippet_triggers(&full_text, &snippets_at_shield);
                 let job = start_llm_cleanup(
                     Arc::clone(&self.llm),
                     Arc::clone(&self.llm_ready),
@@ -368,13 +369,23 @@ impl PipelineOrchestrator {
                         llm_ms,
                         invalidated,
                     } => {
+                        let snippets = self.snippets.read().clone();
                         let text = if self.auto_edit.load(Ordering::SeqCst) {
-                            finalize_llm_with_snippets(
-                                &text,
-                                &snippet_shields,
-                                &full_text,
-                                &snippets,
-                            )
+                            if snippets == snippets_at_shield {
+                                finalize_llm_with_snippets(
+                                    &text,
+                                    &snippet_shields,
+                                    &full_text,
+                                    &snippets,
+                                )
+                            } else {
+                                let from_cleaned = apply_snippets(&text, &snippets);
+                                if from_cleaned != text {
+                                    from_cleaned
+                                } else {
+                                    apply_snippets(&full_text, &snippets)
+                                }
+                            }
                         } else {
                             apply_snippets(&full_text, &snippets)
                         };
@@ -382,10 +393,12 @@ impl PipelineOrchestrator {
                     }
                     LlmCleanupWait::Pending(job) => {
                         job.finalize_in_background(app.clone());
+                        let snippets = self.snippets.read().clone();
                         (apply_snippets(&full_text, &snippets), 0, false)
                     }
                 }
             } else {
+                let snippets = self.snippets.read().clone();
                 (apply_snippets(&full_text, &snippets), 0, false)
             };
 
