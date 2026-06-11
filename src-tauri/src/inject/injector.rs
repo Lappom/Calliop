@@ -52,6 +52,13 @@ impl TextInjector {
         Ok(SavedClipboard::from_text(text))
     }
 
+    pub fn copy_to_clipboard(text: &str) -> Result<(), InjectError> {
+        let mut clipboard = Self::open_clipboard()?;
+        clipboard
+            .set_text(text)
+            .map_err(|e| InjectError::Clipboard(e.to_string()))
+    }
+
     pub fn inject(&self, text: &str) -> Result<(), InjectError> {
         let saved = Self::save_clipboard()?;
         self.inject_with_saved(text, &saved)

@@ -126,6 +126,44 @@ pub(crate) fn init_schema(conn: &Connection) -> Result<(), StoreError> {
         )",
         [],
     )?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS dictations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            text TEXT NOT NULL,
+            word_count INTEGER NOT NULL,
+            audio_duration_ms INTEGER NOT NULL DEFAULT 0,
+            stt_ms INTEGER NOT NULL DEFAULT 0,
+            llm_ms INTEGER NOT NULL DEFAULT 0,
+            inject_ms INTEGER NOT NULL DEFAULT 0,
+            total_ms INTEGER NOT NULL DEFAULT 0,
+            app_exe TEXT,
+            app_title TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )",
+        [],
+    )?;
+    conn.execute(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS dictations_fts USING fts5(
+            text,
+            content='dictations',
+            content_rowid='id'
+        )",
+        [],
+    )?;
+    conn.execute_batch(
+        "CREATE TRIGGER IF NOT EXISTS dictations_ai AFTER INSERT ON dictations BEGIN
+            INSERT INTO dictations_fts(rowid, text) VALUES (new.id, new.text);
+        END;
+        CREATE TRIGGER IF NOT EXISTS dictations_ad AFTER DELETE ON dictations BEGIN
+            INSERT INTO dictations_fts(dictations_fts, rowid, text)
+            VALUES ('delete', old.id, old.text);
+        END;
+        CREATE TRIGGER IF NOT EXISTS dictations_au AFTER UPDATE ON dictations BEGIN
+            INSERT INTO dictations_fts(dictations_fts, rowid, text)
+            VALUES ('delete', old.id, old.text);
+            INSERT INTO dictations_fts(rowid, text) VALUES (new.id, new.text);
+        END;",
+    )?;
     Ok(())
 }
 

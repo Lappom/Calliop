@@ -3,6 +3,7 @@ export type AppView =
   | "dictionary"
   | "snippets"
   | "context"
+  | "history"
   | "insight"
   | "settings";
 
@@ -11,6 +12,7 @@ export const PRIMARY_VIEWS: { id: AppView; label: string }[] = [
   { id: "dictionary", label: "Dictionnaire" },
   { id: "snippets", label: "Snippets" },
   { id: "context", label: "Contexte" },
+  { id: "history", label: "Historique" },
   { id: "insight", label: "Insight" },
 ];
 

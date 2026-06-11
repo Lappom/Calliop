@@ -3,6 +3,7 @@
 mod app_context;
 mod db;
 mod dictionary;
+mod history;
 mod settings;
 mod snippets;
 
@@ -14,6 +15,10 @@ pub use db::{db_path, Store, StoreError};
 pub use dictionary::{
     extract_correction_words, is_valid_dictionary_word, normalize_word, DictionarySource,
     DictionaryWord,
+};
+pub use history::{
+    count_words, dictation_wpm, wpm_vs_typing_percent, AppUsageEntry, DictationEntry, Insights,
+    LatencySnapshot, NewDictation, DEFAULT_LIST_LIMIT, TYPING_SPEED_BASELINE_WPM,
 };
 pub use settings::{AppSettings, KEY_AUTO_EDIT, KEY_AUTO_LEARN, KEY_STT_LANGUAGE};
 pub use snippets::{

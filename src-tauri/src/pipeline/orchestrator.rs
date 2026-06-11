@@ -11,11 +11,11 @@ use thiserror::Error;
 use calliop_prompt::ToneProfile;
 
 use crate::app_context::{get_active_window, resolve_tone};
-use crate::audio::{AudioCapture, VadSegmenter};
+use crate::audio::{AudioCapture, VadSegmenter, TARGET_SAMPLE_RATE};
 use crate::inject::{InjectError, TextInjector};
 use crate::llm::LlamaEngine;
 use crate::observe::CorrectionHandler;
-use crate::store::{AppContextRule, Snippet};
+use crate::store::{AppContextRule, NewDictation, Snippet, Store};
 use crate::stt::{SttError, SttLanguage, WhisperEngine};
 
 use super::snippets::{apply_snippets, finalize_llm_with_snippets, shield_snippet_triggers};
@@ -134,6 +134,7 @@ pub struct PipelineOrchestrator {
     session_stt_language: Arc<RwLock<SttLanguage>>,
     session_detected_language: Arc<RwLock<Option<SttLanguage>>>,
     pending_detection: Arc<Mutex<Option<SttLanguage>>>,
+    history_store: Option<Arc<Store>>,
 }
 
 impl PipelineOrchestrator {
@@ -160,7 +161,12 @@ impl PipelineOrchestrator {
             session_stt_language: Arc::new(RwLock::new(SttLanguage::default_fixed())),
             session_detected_language: Arc::new(RwLock::new(None)),
             pending_detection: Arc::new(Mutex::new(None)),
+            history_store: None,
         })
+    }
+
+    pub fn set_history_store(&mut self, store: Arc<Store>) {
+        self.history_store = Some(store);
     }
 
     pub fn set_dictionary_prompt(&mut self, prompt: Option<String>) {
@@ -385,6 +391,8 @@ impl PipelineOrchestrator {
         let stop_instant = Instant::now();
 
         let samples = self.audio.stop()?;
+        let audio_duration_ms =
+            (samples.len() as u64).saturating_mul(1_000) / u64::from(TARGET_SAMPLE_RATE);
 
         if let Some(session) = self.streaming.take() {
             session.stop_flag.store(true, Ordering::SeqCst);
@@ -427,8 +435,11 @@ impl PipelineOrchestrator {
             if transcripts.is_empty() && !samples.is_empty() {
                 let fallback_start = Instant::now();
                 let fallback_language = *self.session_stt_language.read();
-                let result =
-                    engine.transcribe_with_language(&samples, prompt.as_deref(), fallback_language)?;
+                let result = engine.transcribe_with_language(
+                    &samples,
+                    prompt.as_deref(),
+                    fallback_language,
+                )?;
                 fallback_stt_ms += fallback_start.elapsed().as_millis() as u64;
                 if !result.text.is_empty() {
                     transcripts.push(result.text);
@@ -521,6 +532,27 @@ impl PipelineOrchestrator {
                 total_ms,
             },
         );
+
+        if !text_to_inject.is_empty() {
+            if let Some(store) = &self.history_store {
+                let window = get_active_window();
+                let entry = NewDictation {
+                    text: text_to_inject.clone(),
+                    audio_duration_ms,
+                    stt_ms,
+                    llm_ms,
+                    inject_ms,
+                    total_ms,
+                    app_exe: window.as_ref().map(|w| w.exe_name.clone()),
+                    app_title: window.as_ref().map(|w| w.title.clone()),
+                };
+                if let Err(err) = store.insert_dictation(&entry) {
+                    eprintln!("failed to persist dictation history: {err}");
+                } else {
+                    let _ = app.emit("history-updated", ());
+                }
+            }
+        }
 
         hide_overlay(app);
         self.set_state(app, PipelineState::Idle, Some(text_to_inject));
