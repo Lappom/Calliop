@@ -10,4 +10,4 @@ $env:PATH = "$cmakeBin;$env:PATH"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Set-Location $repoRoot
-pnpm tauri dev @args
+pnpm exec tauri dev @args

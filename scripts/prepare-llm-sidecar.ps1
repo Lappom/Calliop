@@ -10,7 +10,7 @@ $env:PATH = "$cmakeBin;$env:PATH"
 
 Push-Location $srcTauri
 try {
-    cargo build --features llm-worker --bin calliop-llm-worker
+    cargo build -p calliop-llm-worker
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
     $triple = & rustc --print host-tuple
@@ -26,7 +26,9 @@ try {
         $builtWorker = $builtWorker -replace '\.exe$', ''
     }
 
-    Copy-Item -Force $builtWorker $dest
+    $staging = "$dest.tmp"
+    Copy-Item -Force $builtWorker $staging
+    Move-Item -Force $staging $dest
     Write-Host "LLM sidecar ready: $dest"
 } finally {
     Pop-Location

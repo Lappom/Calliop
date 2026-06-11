@@ -68,6 +68,21 @@ fn shutdown_llm_engine(state: &AppState) {
     *state.llm_engine.lock() = None;
 }
 
+pub(crate) fn spawn_llm_recovery_if_needed(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        let state = app.state::<AppState>();
+        if !state.pipeline.lock().auto_edit_enabled() {
+            return;
+        }
+        if llm_engine_is_live(&state) {
+            return;
+        }
+        if let Err(err) = ensure_llm_model(app.clone(), state).await {
+            eprintln!("llm recovery after invalidation failed: {err}");
+        }
+    });
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SettingsPayload {
     auto_edit: bool,

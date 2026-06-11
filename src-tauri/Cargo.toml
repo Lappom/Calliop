@@ -1,3 +1,7 @@
+[workspace]
+members = [".", "crates/calliop-llm-worker", "crates/calliop-prompt"]
+resolver = "2"
+
 [package]
 name = "calliop"
 version = "0.1.0"
@@ -32,12 +36,10 @@ dirs = "6"
 parking_lot = "0.12"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
-llama-cpp-2 = { version = "0.1", optional = true }
-encoding_rs = { version = "0.8", optional = true }
+calliop-prompt = { path = "crates/calliop-prompt" }
 
 [features]
 default = []
-llm-worker = ["dep:llama-cpp-2", "dep:encoding_rs"]
 
 [[bin]]
 name = "calliop"
@@ -58,8 +60,3 @@ path = "src/bin/test-inject.rs"
 [[bin]]
 name = "test-llm"
 path = "src/bin/test-llm.rs"
-
-[[bin]]
-name = "calliop-llm-worker"
-path = "src/bin/llm-worker.rs"
-required-features = ["llm-worker"]

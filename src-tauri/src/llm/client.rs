@@ -188,7 +188,7 @@ fn resolve_worker_exe() -> Result<PathBuf, LlmError> {
     Err(LlmError::Worker(format!(
         "calliop-llm-worker executable not found (looked for {}); \
          run scripts/prepare-llm-sidecar or \
-         `cargo build --features llm-worker --bin calliop-llm-worker`",
+         `cargo build -p calliop-llm-worker`",
         worker_exe_basename()
     )))
 }

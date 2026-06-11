@@ -13,8 +13,10 @@ use crate::inject::{InjectError, TextInjector};
 use crate::llm::LlamaEngine;
 use crate::stt::{SttError, WhisperEngine};
 
-/// Maximum time to wait for LLM cleanup before falling back to raw transcript.
+/// Maximum time to wait for LLM cleanup before force-killing the sidecar.
 const LLM_CLEANUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(4);
+/// Max wait before injecting raw transcript while LLM cleanup continues in background.
+const LLM_INJECT_WAIT: std::time::Duration = std::time::Duration::from_millis(500);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -301,18 +303,29 @@ impl PipelineOrchestrator {
             && self.auto_edit.load(Ordering::SeqCst)
             && self.llm.lock().is_some()
         {
-            run_llm_cleanup(
+            let job = start_llm_cleanup(
                 Arc::clone(&self.llm),
                 Arc::clone(&self.llm_ready),
                 &full_text,
-                LLM_CLEANUP_TIMEOUT,
-            )
+            );
+            match job.wait_for_inject(LLM_INJECT_WAIT) {
+                LlmCleanupWait::Completed {
+                    text,
+                    llm_ms,
+                    invalidated,
+                } => (text, llm_ms, invalidated),
+                LlmCleanupWait::Pending(job) => {
+                    job.finalize_in_background(app.clone());
+                    (full_text.clone(), 0, false)
+                }
+            }
         } else {
             (full_text.clone(), 0, false)
         };
 
         if llm_invalidated {
             let _ = app.emit("llm-unready", ());
+            crate::spawn_llm_recovery_if_needed(app.clone());
         }
 
         self.set_state(app, PipelineState::Injecting, None);
@@ -388,6 +401,155 @@ fn invalidate_llm_engine(llm: &Arc<Mutex<Option<LlamaEngine>>>, llm_ready: &Arc<
     llm_ready.store(false, Ordering::SeqCst);
 }
 
+fn restore_llm_engine(llm: &Arc<Mutex<Option<LlamaEngine>>>, engine: LlamaEngine) {
+    let mut guard = llm.lock();
+    if guard.is_none() {
+        *guard = Some(engine);
+    }
+}
+
+enum LlmCleanupOutcome {
+    Success {
+        cleaned: String,
+        engine: LlamaEngine,
+    },
+    Failed,
+}
+
+struct LlmCleanupJob {
+    rx: std::sync::mpsc::Receiver<LlmCleanupOutcome>,
+    worker: thread::JoinHandle<()>,
+    llm: Arc<Mutex<Option<LlamaEngine>>>,
+    llm_ready: Arc<AtomicBool>,
+    raw: String,
+    worker_pid: Option<u32>,
+    start: Instant,
+}
+
+enum LlmCleanupWait {
+    Completed {
+        text: String,
+        llm_ms: u64,
+        invalidated: bool,
+    },
+    Pending(LlmCleanupJob),
+}
+
+impl LlmCleanupJob {
+    fn wait_for_inject(self, timeout: std::time::Duration) -> LlmCleanupWait {
+        match self.rx.recv_timeout(timeout) {
+            Ok(LlmCleanupOutcome::Success { cleaned, engine }) => {
+                restore_llm_engine(&self.llm, engine);
+                let _ = self.worker.join();
+                LlmCleanupWait::Completed {
+                    text: cleaned,
+                    llm_ms: self.start.elapsed().as_millis() as u64,
+                    invalidated: false,
+                }
+            }
+            Ok(LlmCleanupOutcome::Failed) => {
+                let _ = self.worker.join();
+                invalidate_llm_engine(&self.llm, &self.llm_ready);
+                LlmCleanupWait::Completed {
+                    text: self.raw,
+                    llm_ms: self.start.elapsed().as_millis() as u64,
+                    invalidated: true,
+                }
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => LlmCleanupWait::Pending(self),
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                let _ = self.worker.join();
+                invalidate_llm_engine(&self.llm, &self.llm_ready);
+                LlmCleanupWait::Completed {
+                    text: self.raw,
+                    llm_ms: self.start.elapsed().as_millis() as u64,
+                    invalidated: true,
+                }
+            }
+        }
+    }
+
+    fn finalize_in_background(self, app: AppHandle) {
+        thread::spawn(move || {
+            let remaining = LLM_CLEANUP_TIMEOUT.saturating_sub(self.start.elapsed());
+            let invalidated = match self.rx.recv_timeout(remaining) {
+                Ok(LlmCleanupOutcome::Success { engine, .. }) => {
+                    restore_llm_engine(&self.llm, engine);
+                    false
+                }
+                Ok(LlmCleanupOutcome::Failed) => {
+                    invalidate_llm_engine(&self.llm, &self.llm_ready);
+                    true
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    eprintln!(
+                        "llm cleanup timed out after {:?}, raw transcript already injected",
+                        LLM_CLEANUP_TIMEOUT
+                    );
+                    if let Some(pid) = self.worker_pid {
+                        force_kill_sidecar(pid);
+                    }
+                    let _ = self.worker.join();
+                    invalidate_llm_engine(&self.llm, &self.llm_ready);
+                    true
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    eprintln!("llm cleanup worker disconnected, raw transcript already injected");
+                    let _ = self.worker.join();
+                    invalidate_llm_engine(&self.llm, &self.llm_ready);
+                    true
+                }
+            };
+
+            if invalidated {
+                let _ = app.emit("llm-unready", ());
+                crate::spawn_llm_recovery_if_needed(app);
+            }
+        });
+    }
+}
+
+fn start_llm_cleanup(
+    llm: Arc<Mutex<Option<LlamaEngine>>>,
+    llm_ready: Arc<AtomicBool>,
+    raw: &str,
+) -> LlmCleanupJob {
+    let raw = raw.to_string();
+    let start = Instant::now();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let raw_for_worker = raw.clone();
+    let llm_for_worker = Arc::clone(&llm);
+    let worker_pid = llm.lock().as_ref().map(LlamaEngine::pid);
+
+    let worker = thread::spawn(move || {
+        let engine = llm_for_worker.lock().take();
+        let outcome = match engine {
+            Some(mut engine) => match engine.cleanup(&raw_for_worker) {
+                Ok(cleaned) => LlmCleanupOutcome::Success { cleaned, engine },
+                Err(err) => {
+                    eprintln!("llm cleanup failed, using raw transcript: {err}");
+                    LlmCleanupOutcome::Failed
+                }
+            },
+            None => {
+                eprintln!("llm cleanup failed: llm engine not loaded");
+                LlmCleanupOutcome::Failed
+            }
+        };
+        let _ = tx.send(outcome);
+    });
+
+    LlmCleanupJob {
+        rx,
+        worker,
+        llm,
+        llm_ready,
+        raw,
+        worker_pid,
+        start,
+    }
+}
+
 fn force_kill_sidecar(pid: u32) {
     #[cfg(windows)]
     {
@@ -400,60 +562,6 @@ fn force_kill_sidecar(pid: u32) {
         let _ = std::process::Command::new("kill")
             .args(["-9", &pid.to_string()])
             .output();
-    }
-}
-
-fn run_llm_cleanup(
-    llm: Arc<Mutex<Option<LlamaEngine>>>,
-    llm_ready: Arc<AtomicBool>,
-    raw: &str,
-    timeout: std::time::Duration,
-) -> (String, u64, bool) {
-    let raw = raw.to_string();
-    let start = Instant::now();
-    let (tx, rx) = std::sync::mpsc::channel();
-    let raw_for_worker = raw.clone();
-    let llm_for_worker = Arc::clone(&llm);
-    let worker_pid = llm.lock().as_ref().map(LlamaEngine::pid);
-
-    let worker = thread::spawn(move || {
-        let mut engine = llm_for_worker.lock().take();
-        let result = match engine.as_mut() {
-            Some(engine) => engine.cleanup(&raw_for_worker),
-            None => Err(crate::llm::LlmError::Worker("llm engine not loaded".into())),
-        };
-        if result.is_ok() {
-            if let Some(engine) = engine {
-                *llm_for_worker.lock() = Some(engine);
-            }
-        }
-        let _ = tx.send(result);
-    });
-
-    match rx.recv_timeout(timeout) {
-        Ok(Ok(cleaned)) => (cleaned, start.elapsed().as_millis() as u64, false),
-        Ok(Err(err)) => {
-            eprintln!("llm cleanup failed, using raw transcript: {err}");
-            invalidate_llm_engine(&llm, &llm_ready);
-            (raw, start.elapsed().as_millis() as u64, true)
-        }
-        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-            eprintln!(
-                "llm cleanup timed out after {:?}, using raw transcript",
-                timeout
-            );
-            if let Some(pid) = worker_pid {
-                force_kill_sidecar(pid);
-            }
-            let _ = worker.join();
-            invalidate_llm_engine(&llm, &llm_ready);
-            (raw, start.elapsed().as_millis() as u64, true)
-        }
-        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-            eprintln!("llm cleanup worker disconnected, using raw transcript");
-            invalidate_llm_engine(&llm, &llm_ready);
-            (raw, start.elapsed().as_millis() as u64, true)
-        }
     }
 }
 

@@ -22,7 +22,7 @@ cargo run --bin test-audio -- record 3s output.wav
 cargo run --bin test-stt -- input.wav
 cargo run --bin test-inject -- "Hello world"
 cargo run --bin test-llm -- "euh bonjour donc voilà"
-cargo build --features llm-worker --bin calliop-llm-worker
+cargo build -p calliop-llm-worker
 ```
 
 Each module ships tests in `mod.rs` or `tests/` subdirectory.

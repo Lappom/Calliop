@@ -38,7 +38,7 @@ Hotkey OFF / release (toggle or PTT)
 ## LLM sidecar (Phase 3a)
 
 - Main binary links **whisper-rs only** — no `llama-cpp-2` in-process (ggml symbol conflict).
-- Sidecar binary: `calliop-llm-worker` (feature `llm-worker`), spawned on `ensure_llm_model`.
+- Sidecar binary: `calliop-llm-worker` (workspace crate `crates/calliop-llm-worker`), spawned on `ensure_llm_model`.
 - Model: Qwen3 1.7B Instruct Q4_K_M GGUF, lazy download when `auto_edit` is enabled.
 - Verbatim mode: `auto_edit = false` in SQLite — inject raw Whisper transcript.
 - Dev: `pnpm tauri:dev` builds the sidecar via `scripts/dev.ps1`.

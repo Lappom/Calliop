@@ -6,13 +6,13 @@ use std::io::{self, BufRead, Write};
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 
+use calliop_prompt::{
+    build_cleanup_user_message, validate_cleanup_output, QWEN3_CHAT_TEMPLATE, SYSTEM_PROMPT,
+};
 use llama_cpp_2::context::params::LlamaContextParams;
 use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::model::params::LlamaModelParams;
-use calliop_lib::llm::{
-    build_cleanup_user_message, validate_cleanup_output, QWEN3_CHAT_TEMPLATE, SYSTEM_PROMPT,
-};
 use llama_cpp_2::model::{AddBos, LlamaChatMessage, LlamaChatTemplate, LlamaModel};
 use llama_cpp_2::sampling::LlamaSampler;
 use serde::{Deserialize, Serialize};

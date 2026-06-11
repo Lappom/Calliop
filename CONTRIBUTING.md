@@ -38,7 +38,7 @@ cargo run --bin test-audio -- record 3s output.wav
 cargo run --bin test-stt -- output.wav
 cargo run --bin test-inject -- "Hello world"
 cargo run --bin test-llm -- "euh bonjour donc voilà"
-cargo build --features llm-worker --bin calliop-llm-worker
+cargo build -p calliop-llm-worker
 ```
 
 ## Conventions

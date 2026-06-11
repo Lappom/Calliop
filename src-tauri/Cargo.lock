@@ -479,12 +479,11 @@ name = "calliop"
 version = "0.1.0"
 dependencies = [
  "arboard",
+ "calliop-prompt",
  "cpal",
  "dirs 6.0.0",
- "encoding_rs",
  "enigo",
  "hound",
- "llama-cpp-2",
  "parking_lot",
  "reqwest 0.12.28",
  "rusqlite",
@@ -499,6 +498,24 @@ dependencies = [
  "tokio",
  "voice_activity_detector",
  "whisper-rs",
+]
+
+[[package]]
+name = "calliop-llm-worker"
+version = "0.1.0"
+dependencies = [
+ "calliop-prompt",
+ "encoding_rs",
+ "llama-cpp-2",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "calliop-prompt"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.18",
 ]
 
 [[package]]
