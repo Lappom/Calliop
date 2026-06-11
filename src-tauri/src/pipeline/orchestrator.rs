@@ -305,8 +305,6 @@ impl PipelineOrchestrator {
 
     fn finish_dictation(&mut self, app: &AppHandle) -> Result<(), PipelineError> {
         let stop_instant = Instant::now();
-        // Capture tone while the dictation target app is still foreground.
-        let active_tone = self.resolve_active_tone();
 
         let samples = self.audio.stop()?;
 
@@ -360,6 +358,9 @@ impl PipelineOrchestrator {
 
         let stt_ms = streaming_stt_ms + fallback_stt_ms;
         let full_text = transcripts.join(" ").trim().to_string();
+
+        // After STT the user may return to the target app; resolve before LLM wait/inject.
+        let active_tone = self.resolve_active_tone();
 
         let auto_edit = self.auto_edit.load(Ordering::SeqCst);
         if !full_text.is_empty() && auto_edit && self.llm.lock().is_none() {

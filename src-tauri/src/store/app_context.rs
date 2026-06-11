@@ -46,6 +46,8 @@ pub struct NewAppContextRule {
     pub tone: ToneProfile,
 }
 
+const APP_CONTEXT_DEFAULTS_SEEDED_KEY: &str = "app_context_defaults_seeded";
+
 pub fn normalize_exe_pattern(pattern: &str) -> String {
     let trimmed = pattern.trim();
     let basename = std::path::Path::new(trimmed)
@@ -149,7 +151,11 @@ impl Store {
     }
 
     pub fn seed_default_app_context_rules(&self) -> Result<usize, StoreError> {
+        if self.get_bool(APP_CONTEXT_DEFAULTS_SEEDED_KEY, false)? {
+            return Ok(0);
+        }
         if !self.list_app_context_rules()?.is_empty() {
+            self.set_bool(APP_CONTEXT_DEFAULTS_SEEDED_KEY, true)?;
             return Ok(0);
         }
 
@@ -212,6 +218,7 @@ impl Store {
                 count += 1;
             }
         }
+        self.set_bool(APP_CONTEXT_DEFAULTS_SEEDED_KEY, true)?;
         Ok(count)
     }
 }
@@ -269,11 +276,22 @@ mod tests {
     }
 
     #[test]
-    fn seed_defaults_only_when_empty() {
+    fn seed_defaults_only_on_first_launch() {
         let store = test_store();
         assert_eq!(store.seed_default_app_context_rules().unwrap(), 10);
         assert_eq!(store.seed_default_app_context_rules().unwrap(), 0);
         assert!(store.list_app_context_rules().unwrap().len() >= 10);
+    }
+
+    #[test]
+    fn seed_defaults_not_restored_after_user_deletes_all() {
+        let store = test_store();
+        assert_eq!(store.seed_default_app_context_rules().unwrap(), 10);
+        for rule in store.list_app_context_rules().unwrap() {
+            store.remove_app_context_rule(rule.id).unwrap();
+        }
+        assert!(store.list_app_context_rules().unwrap().is_empty());
+        assert_eq!(store.seed_default_app_context_rules().unwrap(), 0);
     }
 
     #[test]

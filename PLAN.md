@@ -197,6 +197,14 @@ Application desktop qui permet de **dicter dans n'importe quelle application** a
 - [ ] Recherche full-text
 - [ ] Re-copie / réinjection
 
+#### 3g — Insight
+- [ ] Latence dernière dictée
+- [ ] Mots dictés aujourd'hui
+- [ ] Mots par minute (Pourcentage global comparaision au global typing speed)
+- [ ] Nombre total de mots dictés
+- [ ] Corrections apprises
+- [ ] Utilisation par application (contexte)
+
 **Critère de done :** dicter un message Slack poli, un commit message technique, un snippet « mon calendrier ».
 
 ---
