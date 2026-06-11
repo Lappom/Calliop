@@ -877,6 +877,57 @@ fn add_dictionary_word(
 }
 
 #[tauri::command]
+fn update_dictionary_word(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: i64,
+    word: String,
+) -> Result<bool, String> {
+    let normalized = normalize_word(&word);
+    if normalized.is_empty() {
+        return Err("Le mot ne peut pas être vide.".into());
+    }
+    if !is_valid_dictionary_word(&normalized) {
+        return Err(
+            "Le mot doit contenir au moins 2 caractères et ne peut pas être uniquement numérique."
+                .into(),
+        );
+    }
+
+    let previous = state
+        .store
+        .get_word_by_id(id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("Mot introuvable (id {id})."))?;
+
+    if previous.word == normalized {
+        return Ok(true);
+    }
+
+    let updated = state
+        .store
+        .update_word(id, &normalized)
+        .map_err(|e| e.to_string())?;
+
+    if updated {
+        if let Err(err) = refresh_whisper_prompt_full(&state) {
+            let _ = state.store.update_word(id, &previous.word);
+            return Err(err);
+        }
+        state.dictionary_notifier.emit_immediate(
+            &app,
+            DictionaryUpdatedPayload {
+                added: vec![normalized.clone()],
+                removed: vec![previous.word],
+                source: Some("manual".into()),
+            },
+        );
+    }
+
+    Ok(updated)
+}
+
+#[tauri::command]
 fn remove_dictionary_word(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -1832,6 +1883,7 @@ pub fn run() {
             set_autostart_enabled,
             list_dictionary_words,
             add_dictionary_word,
+            update_dictionary_word,
             remove_dictionary_word,
             learn_from_correction,
             list_snippets,

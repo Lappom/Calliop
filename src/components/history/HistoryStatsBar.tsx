@@ -1,4 +1,5 @@
 import type { DictationEntry } from "../../hooks/useHistory";
+import { glowSurfaceClasses } from "../layout/glowSurface";
 import { computeHistoryStats } from "./historyUtils";
 
 interface HistoryStatsBarProps {
@@ -31,9 +32,14 @@ export function HistoryStatsBar({ entries, totalCount }: HistoryStatsBarProps) {
 
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-hairline-strong bg-surface-card px-4 py-3">
-      <p className="text-caption m-0 text-charcoal">{label}</p>
-      <p className="text-heading-sm m-0 mt-1 text-ink">{value}</p>
+    <div
+      className={[
+        glowSurfaceClasses("blue"),
+        "rounded-lg border border-hairline-strong bg-surface-card px-4 py-3",
+      ].join(" ")}
+    >
+      <p className="text-caption relative m-0 text-charcoal">{label}</p>
+      <p className="text-heading-sm relative m-0 mt-1 text-ink">{value}</p>
     </div>
   );
 }

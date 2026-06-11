@@ -3,6 +3,7 @@ import type { LatencyMetricsPayload } from "../../hooks/usePipelineState";
 import { useInsights } from "../../hooks/useInsights";
 import { Card } from "../ui/Card";
 import { SectionGlow } from "../layout/SectionGlow";
+import { glowSurfaceClasses } from "../layout/glowSurface";
 import { ActivityChart } from "./charts/ActivityChart";
 import { AppUsageDonut } from "./charts/AppUsageDonut";
 import { LatencyChart } from "./charts/LatencyChart";
@@ -16,17 +17,22 @@ function MetricCard({
   label,
   value,
   detail,
+  glow = "blue",
 }: {
   label: string;
   value: string;
   detail?: string;
+  glow?: "green" | "blue" | "red" | "orange";
 }) {
   return (
-    <Card variant="bordered" className="p-5">
-      <p className="text-caption mb-2 text-charcoal">{label}</p>
-      <p className="text-heading-md m-0 text-ink">{value}</p>
+    <Card
+      variant="bordered"
+      className={[glowSurfaceClasses(glow), "p-5"].join(" ")}
+    >
+      <p className="text-caption relative mb-2 text-charcoal">{label}</p>
+      <p className="text-heading-md relative m-0 text-ink">{value}</p>
       {detail && (
-        <p className="text-body-sm mt-2 text-ash">{detail}</p>
+        <p className="text-body-sm relative mt-2 text-ash">{detail}</p>
       )}
     </Card>
   );
@@ -134,37 +140,35 @@ export function InsightView({ latencyMetrics }: InsightViewProps) {
         <p className="text-body-sm text-accent-red">{errorMessage}</p>
       )}
 
-      <SectionGlow glow="blue">
-        <div className="grid gap-4 sm:grid-cols-3">
-          <MetricCard
-            label="Latence dernière dictée"
-            value={hasLatency ? `${activeLatency.totalMs} ms` : "—"}
-            detail={
-              hasLatency
-                ? formatLatencyDetail(activeLatency)
-                : "Effectuez une dictée pour mesurer la latence."
-            }
-          />
-          <MetricCard
-            label="Mots dictés aujourd'hui"
-            value={loaded ? String(wordsToday) : "—"}
-            detail={
-              wordsToday > 0
-                ? "Comptés depuis minuit (heure locale)."
-                : "Vos dictées du jour apparaîtront ici."
-            }
-          />
-          <MetricCard
-            label="Corrections apprises"
-            value={loaded ? String(learnedCount) : "—"}
-            detail={
-              learnedCount > 0
-                ? `${learnedCount} mot${learnedCount > 1 ? "s" : ""} ajouté${learnedCount > 1 ? "s" : ""} automatiquement au dictionnaire.`
-                : "Les corrections manuelles enrichissent le dictionnaire."
-            }
-          />
-        </div>
-      </SectionGlow>
+      <div className="grid gap-4 sm:grid-cols-3">
+        <MetricCard
+          label="Latence dernière dictée"
+          value={hasLatency ? `${activeLatency.totalMs} ms` : "—"}
+          detail={
+            hasLatency
+              ? formatLatencyDetail(activeLatency)
+              : "Effectuez une dictée pour mesurer la latence."
+          }
+        />
+        <MetricCard
+          label="Mots dictés aujourd'hui"
+          value={loaded ? String(wordsToday) : "—"}
+          detail={
+            wordsToday > 0
+              ? "Comptés depuis minuit (heure locale)."
+              : "Vos dictées du jour apparaîtront ici."
+          }
+        />
+        <MetricCard
+          label="Corrections apprises"
+          value={loaded ? String(learnedCount) : "—"}
+          detail={
+            learnedCount > 0
+              ? `${learnedCount} mot${learnedCount > 1 ? "s" : ""} ajouté${learnedCount > 1 ? "s" : ""} automatiquement au dictionnaire.`
+              : "Les corrections manuelles enrichissent le dictionnaire."
+          }
+        />
+      </div>
 
       <div className="grid gap-4 lg:grid-cols-2 lg:items-stretch">
         <SectionGlow glow="blue" className="h-full">
@@ -205,13 +209,16 @@ export function InsightView({ latencyMetrics }: InsightViewProps) {
 
         <Card
           variant="bordered"
-          className="flex h-full min-h-[280px] flex-col justify-between p-4 sm:min-h-[320px] sm:p-6"
+          className={[
+            glowSurfaceClasses("orange"),
+            "flex h-full min-h-[280px] flex-col justify-between p-4 sm:min-h-[320px] sm:p-6",
+          ].join(" ")}
         >
-          <h2 className="text-heading-sm m-0 text-ink">Vitesse vs frappe</h2>
-          <div className="flex flex-1 flex-col items-center justify-center overflow-visible py-4">
+          <h2 className="text-heading-sm relative m-0 text-ink">Vitesse vs frappe</h2>
+          <div className="relative flex flex-1 flex-col items-center justify-center overflow-visible py-4">
             <WpmGauge percent={wpmPercent} averageWpm={averageWpm} />
           </div>
-          <p className="text-body-sm m-0 text-center text-charcoal">
+          <p className="text-body-sm relative m-0 text-center text-charcoal">
             Total :{" "}
             <span className="text-ink">
               {loaded ? totalWords.toLocaleString("fr-FR") : "—"}

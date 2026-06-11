@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use rusqlite::params;
+use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 
 use super::db::{Store, StoreError};
@@ -153,6 +154,32 @@ impl Store {
     pub fn remove_word(&self, id: i64) -> Result<bool, StoreError> {
         let conn = self.connection().lock().expect("store mutex poisoned");
         let changed = conn.execute("DELETE FROM dictionary WHERE id = ?1", params![id])?;
+        Ok(changed > 0)
+    }
+
+    pub fn update_word(&self, id: i64, word: &str) -> Result<bool, StoreError> {
+        let normalized = normalize_word(word);
+        if !is_valid_dictionary_word(&normalized) {
+            return Ok(false);
+        }
+
+        let conn = self.connection().lock().expect("store mutex poisoned");
+        let conflict: Option<i64> = conn
+            .query_row(
+                "SELECT id FROM dictionary WHERE word = ?1 COLLATE NOCASE AND id != ?2",
+                params![normalized, id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if conflict.is_some() {
+            return Ok(false);
+        }
+
+        let changed = conn.execute(
+            "UPDATE dictionary SET word = ?1 WHERE id = ?2",
+            params![normalized, id],
+        )?;
+
         Ok(changed > 0)
     }
 
@@ -434,6 +461,34 @@ mod tests {
             .unwrap();
         assert_eq!(added, vec!["Alpha".to_string(), "Beta".to_string()]);
         assert_eq!(store.list_words().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn update_word_changes_spelling() {
+        let store = test_store();
+        assert!(store.add_word("Calliop", DictionarySource::Manual).unwrap());
+        let id = store.list_words().unwrap()[0].id;
+
+        assert!(store.update_word(id, "Calliope").unwrap());
+        let words = store.list_words().unwrap();
+        assert_eq!(words.len(), 1);
+        assert_eq!(words[0].word, "Calliope");
+    }
+
+    #[test]
+    fn update_word_rejects_duplicate() {
+        let store = test_store();
+        store.add_word("Alpha", DictionarySource::Manual).unwrap();
+        store.add_word("Beta", DictionarySource::Manual).unwrap();
+        let beta_id = store
+            .list_words()
+            .unwrap()
+            .into_iter()
+            .find(|entry| entry.word == "Beta")
+            .unwrap()
+            .id;
+
+        assert!(!store.update_word(beta_id, "alpha").unwrap());
     }
 
     #[test]

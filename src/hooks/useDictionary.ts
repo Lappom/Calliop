@@ -102,12 +102,41 @@ export function useDictionary() {
     [loadWords],
   );
 
+  const updateWord = useCallback(
+    async (id: number, word: string) => {
+      const trimmed = word.trim();
+      if (!trimmed) {
+        return false;
+      }
+
+      setBusy(true);
+      setErrorMessage(null);
+      try {
+        const updated = await invoke<boolean>("update_dictionary_word", {
+          id,
+          word: trimmed,
+        });
+        if (updated) {
+          await loadWords();
+        }
+        return updated;
+      } catch (err) {
+        setErrorMessage(String(err));
+        throw err;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [loadWords],
+  );
+
   return {
     words,
     loaded,
     busy,
     errorMessage,
     addWord,
+    updateWord,
     removeWord,
     reload: loadWords,
   };

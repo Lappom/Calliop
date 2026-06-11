@@ -1,0 +1,121 @@
+import type { ReactNode } from "react";
+import { Pencil, Trash2 } from "lucide-react";
+import type { DictionaryWord } from "../../hooks/useDictionary";
+import { DictionarySourceBadge } from "./DictionarySourceBadge";
+import { formatDictionaryDate } from "./dictionaryUtils";
+
+interface DictionaryTableProps {
+  words: DictionaryWord[];
+  busy: boolean;
+  onEdit: (entry: DictionaryWord) => void;
+  onDelete: (id: number) => void;
+}
+
+function IconActionButton({
+  label,
+  disabled,
+  onClick,
+  children,
+  tone = "default",
+}: {
+  label: string;
+  disabled?: boolean;
+  onClick: () => void;
+  children: ReactNode;
+  tone?: "default" | "danger";
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      disabled={disabled}
+      onClick={onClick}
+      className={[
+        "inline-flex size-8 items-center justify-center rounded-md border border-transparent",
+        "transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-40",
+        tone === "danger"
+          ? "text-charcoal hover:border-hairline-strong hover:bg-surface-elevated hover:text-accent-red"
+          : "text-charcoal hover:border-hairline-strong hover:bg-surface-elevated hover:text-ink",
+      ].join(" ")}
+    >
+      {children}
+    </button>
+  );
+}
+
+export function DictionaryTable({
+  words,
+  busy,
+  onEdit,
+  onDelete,
+}: DictionaryTableProps) {
+  return (
+    <div className="overflow-hidden rounded-lg border border-hairline-strong bg-surface-card">
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[480px] border-collapse">
+          <thead>
+            <tr className="border-b border-divider-soft text-left">
+              <th className="text-caption px-4 py-3 font-medium text-ash">
+                Mot
+              </th>
+              <th className="text-caption hidden px-4 py-3 font-medium text-ash sm:table-cell">
+                Source
+              </th>
+              <th className="text-caption hidden px-4 py-3 font-medium text-ash md:table-cell">
+                Ajouté le
+              </th>
+              <th className="text-caption w-20 px-2 py-3 font-medium text-ash sm:w-24">
+                <span className="sr-only">Actions</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {words.map((entry) => (
+              <tr
+                key={entry.id}
+                className="group border-b border-divider-soft transition-colors last:border-b-0 hover:bg-surface-elevated/50"
+              >
+                <td className="min-w-0 px-4 py-3.5">
+                  <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+                    <span className="truncate font-[family-name:var(--font-body)] text-body-md text-ink">
+                      {entry.word}
+                    </span>
+                    <DictionarySourceBadge
+                      source={entry.source}
+                      className="sm:hidden"
+                    />
+                  </div>
+                </td>
+                <td className="hidden px-4 py-3.5 sm:table-cell">
+                  <DictionarySourceBadge source={entry.source} />
+                </td>
+                <td className="text-body-sm hidden px-4 py-3.5 text-charcoal md:table-cell">
+                  {formatDictionaryDate(entry.created_at)}
+                </td>
+                <td className="w-20 px-2 py-2 sm:w-24">
+                  <div className="flex items-center justify-end gap-0.5 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
+                    <IconActionButton
+                      label={`Modifier ${entry.word}`}
+                      disabled={busy}
+                      onClick={() => onEdit(entry)}
+                    >
+                      <Pencil size={15} strokeWidth={1.75} />
+                    </IconActionButton>
+                    <IconActionButton
+                      label={`Supprimer ${entry.word}`}
+                      disabled={busy}
+                      tone="danger"
+                      onClick={() => onDelete(entry.id)}
+                    >
+                      <Trash2 size={15} strokeWidth={1.75} />
+                    </IconActionButton>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}

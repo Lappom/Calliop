@@ -62,9 +62,7 @@ export function HistoryView() {
       </header>
 
       {hasEntries && (
-        <SectionGlow glow="blue">
-          <HistoryStatsBar entries={entries} totalCount={totalCount} />
-        </SectionGlow>
+        <HistoryStatsBar entries={entries} totalCount={totalCount} />
       )}
 
       <div className="flex flex-wrap items-center justify-between gap-3">
