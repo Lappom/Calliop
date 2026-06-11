@@ -85,6 +85,14 @@ impl Store {
         let changed = conn.execute("DELETE FROM dictionary WHERE id = ?1", params![id])?;
         Ok(changed > 0)
     }
+
+    pub fn remove_word_by_normalized(&self, word: &str) -> Result<bool, StoreError> {
+        let normalized = normalize_word(word);
+        let conn = self.connection().lock().expect("store mutex poisoned");
+        let changed =
+            conn.execute("DELETE FROM dictionary WHERE word = ?1 COLLATE NOCASE", params![normalized])?;
+        Ok(changed > 0)
+    }
 }
 
 pub fn normalize_word(word: &str) -> String {

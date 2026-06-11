@@ -1,3 +1,4 @@
+use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
 use super::db::{Store, StoreError};
@@ -38,8 +39,20 @@ impl Store {
     }
 
     pub fn save_settings(&self, settings: &AppSettings) -> Result<(), StoreError> {
-        self.set_bool(KEY_AUTO_EDIT, settings.auto_edit)?;
-        self.set_bool(KEY_AUTO_LEARN, settings.auto_learn)
+        let conn = self.connection().lock().expect("store mutex poisoned");
+        let tx = conn.unchecked_transaction()?;
+        tx.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![KEY_AUTO_EDIT, if settings.auto_edit { "true" } else { "false" }],
+        )?;
+        tx.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![KEY_AUTO_LEARN, if settings.auto_learn { "true" } else { "false" }],
+        )?;
+        tx.commit()?;
+        Ok(())
     }
 }
 

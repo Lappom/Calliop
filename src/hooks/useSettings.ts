@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export interface AppSettings {
   autoEdit: boolean;
@@ -43,6 +43,9 @@ export function useSettings() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [llmReady, setLlmReady] = useState(false);
   const [llmProgress, setLlmProgress] = useState<number | null>(null);
+  const settingsRef = useRef(settings);
+  const llmReadyRef = useRef(llmReady);
+  const llmProgressRef = useRef(llmProgress);
 
   useEffect(() => {
     let cancelled = false;
@@ -51,7 +54,9 @@ export function useSettings() {
       try {
         const payload = await invoke<SettingsPayload>("get_settings");
         if (!cancelled) {
-          setSettings(fromPayload(payload));
+          const loaded = fromPayload(payload);
+          settingsRef.current = loaded;
+          setSettings(loaded);
           setLoaded(true);
         }
       } catch (err) {
@@ -65,14 +70,19 @@ export function useSettings() {
 
     const unlisteners = Promise.all([
       listen("llm-ready", () => {
+        llmReadyRef.current = true;
+        llmProgressRef.current = null;
         setLlmReady(true);
         setLlmProgress(null);
       }),
       listen("llm-unready", () => {
+        llmReadyRef.current = false;
+        llmProgressRef.current = null;
         setLlmReady(false);
         setLlmProgress(null);
       }),
       listen<LlmModelDownloadProgress>("llm-model-download-progress", (event) => {
+        llmProgressRef.current = event.payload.percent;
         setLlmProgress(event.payload.percent);
       }),
     ]);
@@ -86,24 +96,33 @@ export function useSettings() {
   const saveSettings = useCallback(async (next: AppSettings) => {
     setSaving(true);
     setErrorMessage(null);
-    const previousSettings = settings;
-    const previousLlmReady = llmReady;
-    const previousLlmProgress = llmProgress;
+    const previousSettings = settingsRef.current;
+    const previousLlmReady = llmReadyRef.current;
+    const previousLlmProgress = llmProgressRef.current;
+    settingsRef.current = next;
     setSettings(next);
 
     try {
       if (next.autoEdit) {
+        llmProgressRef.current = 0;
+        llmReadyRef.current = false;
         setLlmProgress(0);
         setLlmReady(false);
       } else {
+        llmReadyRef.current = false;
+        llmProgressRef.current = null;
         setLlmReady(false);
         setLlmProgress(null);
       }
       await invoke("set_settings", { settings: toPayload(next) });
       if (!next.autoEdit) {
+        llmProgressRef.current = null;
         setLlmProgress(null);
       }
     } catch (err) {
+      settingsRef.current = previousSettings;
+      llmReadyRef.current = previousLlmReady;
+      llmProgressRef.current = previousLlmProgress;
       setSettings(previousSettings);
       setLlmReady(previousLlmReady);
       setLlmProgress(previousLlmProgress);
@@ -112,20 +131,20 @@ export function useSettings() {
     } finally {
       setSaving(false);
     }
-  }, [settings, llmReady, llmProgress]);
+  }, []);
 
   const setAutoEdit = useCallback(
     async (enabled: boolean) => {
-      await saveSettings({ ...settings, autoEdit: enabled });
+      await saveSettings({ ...settingsRef.current, autoEdit: enabled });
     },
-    [saveSettings, settings],
+    [saveSettings],
   );
 
   const setAutoLearn = useCallback(
     async (enabled: boolean) => {
-      await saveSettings({ ...settings, autoLearn: enabled });
+      await saveSettings({ ...settingsRef.current, autoLearn: enabled });
     },
-    [saveSettings, settings],
+    [saveSettings],
   );
 
   return {

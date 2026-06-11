@@ -358,7 +358,10 @@ fn add_dictionary_word(
         .map_err(|e| e.to_string())?;
 
     if inserted {
-        refresh_dictionary_prompt_state(&state)?;
+        if let Err(err) = refresh_dictionary_prompt_state(&state) {
+            let _ = state.store.remove_word_by_normalized(&normalized);
+            return Err(err);
+        }
         emit_dictionary_updated(&app);
     }
 
