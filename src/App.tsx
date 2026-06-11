@@ -2,6 +2,7 @@ import { useState } from "react";
 import { AppShell } from "./components/layout/AppShell";
 import { ContexteView } from "./components/context/ContexteView";
 import { DictionaryView } from "./components/dictionary/DictionaryView";
+import { HistoryView } from "./components/history/HistoryView";
 import { InsightView } from "./components/insight/InsightView";
 import { MainView } from "./components/main/MainView";
 import { SettingsView } from "./components/settings/SettingsView";
@@ -19,6 +20,7 @@ function App() {
       {currentView === "dictionary" && <DictionaryView />}
       {currentView === "snippets" && <SnippetsView />}
       {currentView === "context" && <ContexteView />}
+      {currentView === "history" && <HistoryView />}
       {currentView === "insight" && (
         <InsightView latencyMetrics={pipeline.latencyMetrics} />
       )}

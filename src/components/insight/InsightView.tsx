@@ -1,7 +1,12 @@
+import type { ReactNode } from "react";
 import type { LatencyMetricsPayload } from "../../hooks/usePipelineState";
-import { useDictionary } from "../../hooks/useDictionary";
+import { useInsights } from "../../hooks/useInsights";
 import { Card } from "../ui/Card";
 import { SectionGlow } from "../layout/SectionGlow";
+import { ActivityChart } from "./charts/ActivityChart";
+import { AppUsageDonut } from "./charts/AppUsageDonut";
+import { LatencyChart } from "./charts/LatencyChart";
+import { WpmGauge } from "./charts/WpmGauge";
 
 interface InsightViewProps {
   latencyMetrics: LatencyMetricsPayload | null;
@@ -27,11 +32,85 @@ function MetricCard({
   );
 }
 
+function formatLatencyDetail(
+  latency: { sttMs: number; llmMs: number; injectMs: number },
+): string {
+  const parts = [
+    `STT ${latency.sttMs} ms`,
+    `injection ${latency.injectMs} ms`,
+  ];
+  if (latency.llmMs > 0) {
+    parts.push(`LLM ${latency.llmMs} ms`);
+  }
+  return parts.join(" · ");
+}
+
+function ChartPanel({
+  title,
+  description,
+  children,
+  empty,
+  emptyMessage,
+  className = "",
+}: {
+  title: string;
+  description: string;
+  children: ReactNode;
+  empty: boolean;
+  emptyMessage: string;
+  className?: string;
+}) {
+  return (
+    <Card
+      variant="bordered"
+      className={[
+        "flex h-full min-h-[360px] flex-col gap-4 p-6",
+        className,
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
+      <div className="shrink-0">
+        <h2 className="text-heading-sm m-0 text-ink">{title}</h2>
+        <p className="text-body-sm mt-2 text-charcoal">{description}</p>
+      </div>
+      {empty ? (
+        <p className="text-body-sm flex-1 text-charcoal">{emptyMessage}</p>
+      ) : (
+        <div className="flex flex-1 flex-col justify-end">{children}</div>
+      )}
+    </Card>
+  );
+}
+
 export function InsightView({ latencyMetrics }: InsightViewProps) {
-  const { words, loaded } = useDictionary();
-  const learnedCount = words.filter((w) => w.source === "learned").length;
-  const hasLatency = latencyMetrics !== null;
-  const hasAnyData = hasLatency || learnedCount > 0;
+  const { insights, loaded, errorMessage } = useInsights();
+
+  const sessionLatency = latencyMetrics;
+  const storedLatency = insights?.lastLatency ?? null;
+  const activeLatency =
+    sessionLatency ??
+    (storedLatency
+      ? {
+          sttMs: storedLatency.sttMs,
+          llmMs: storedLatency.llmMs,
+          injectMs: storedLatency.injectMs,
+          totalMs: storedLatency.totalMs,
+        }
+      : null);
+
+  const hasLatency = activeLatency !== null;
+  const wordsToday = insights?.wordsToday ?? 0;
+  const totalWords = insights?.totalWords ?? 0;
+  const learnedCount = insights?.learnedCorrections ?? 0;
+  const averageWpm = insights?.averageWpm ?? 0;
+  const wpmPercent = insights?.wpmVsTypingPercent ?? 0;
+  const appUsage = insights?.appUsage ?? [];
+  const dailyActivity = insights?.dailyActivity ?? [];
+  const recentLatency = insights?.recentLatency ?? [];
+  const hasActivityData = dailyActivity.some((d) => d.wordCount > 0);
+  const hasAnyData =
+    hasLatency || wordsToday > 0 || totalWords > 0 || learnedCount > 0;
 
   return (
     <div className="flex flex-col gap-8">
@@ -42,29 +121,29 @@ export function InsightView({ latencyMetrics }: InsightViewProps) {
         </p>
       </header>
 
+      {errorMessage && (
+        <p className="text-body-sm text-accent-red">{errorMessage}</p>
+      )}
+
       <SectionGlow glow="blue">
         <div className="grid gap-4 sm:grid-cols-3">
           <MetricCard
             label="Latence dernière dictée"
-            value={
-              hasLatency
-                ? `${latencyMetrics.totalMs} ms`
-                : "—"
-            }
+            value={hasLatency ? `${activeLatency.totalMs} ms` : "—"}
             detail={
               hasLatency
-                ? `STT ${latencyMetrics.sttMs} ms · injection ${latencyMetrics.injectMs} ms${
-                    latencyMetrics.llmMs > 0
-                      ? ` · LLM ${latencyMetrics.llmMs} ms`
-                      : ""
-                  }`
+                ? formatLatencyDetail(activeLatency)
                 : "Effectuez une dictée pour mesurer la latence."
             }
           />
           <MetricCard
             label="Mots dictés aujourd'hui"
-            value="0"
-            detail="Historique SQLite — Phase 3f."
+            value={loaded ? String(wordsToday) : "—"}
+            detail={
+              wordsToday > 0
+                ? "Comptés depuis minuit (heure locale)."
+                : "Vos dictées du jour apparaîtront ici."
+            }
           />
           <MetricCard
             label="Corrections apprises"
@@ -76,13 +155,68 @@ export function InsightView({ latencyMetrics }: InsightViewProps) {
             }
           />
         </div>
-
-        {!hasAnyData && (
-          <p className="text-body-sm mt-6 text-charcoal">
-            Les statistiques apparaîtront après vos premières dictées.
-          </p>
-        )}
       </SectionGlow>
+
+      <div className="grid gap-4 lg:grid-cols-2 lg:items-stretch">
+        <SectionGlow glow="blue" className="h-full">
+          <ChartPanel
+            title="Activité — 7 jours"
+            description="Nombre de mots dictés par jour."
+            empty={!loaded || !hasActivityData}
+            emptyMessage="Les barres apparaîtront après vos premières dictées."
+          >
+            <ActivityChart data={dailyActivity} />
+          </ChartPanel>
+        </SectionGlow>
+
+        <SectionGlow glow="orange" className="h-full">
+          <ChartPanel
+            title="Latence — dernières dictées"
+            description="Décomposition STT, LLM et injection (empilé)."
+            empty={!loaded || recentLatency.length === 0}
+            emptyMessage="Aucune mesure de latence enregistrée."
+          >
+            <LatencyChart data={recentLatency} />
+          </ChartPanel>
+        </SectionGlow>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-[1fr_240px] lg:items-stretch">
+        <SectionGlow glow="green" className="h-full">
+          <ChartPanel
+            title="Utilisation par application"
+            description="Répartition des mots dictés selon la fenêtre active."
+            empty={!loaded || appUsage.length === 0}
+            emptyMessage="Aucune donnée de contexte pour le moment."
+            className="min-h-[320px]"
+          >
+            <AppUsageDonut data={appUsage} />
+          </ChartPanel>
+        </SectionGlow>
+
+        <Card
+          variant="bordered"
+          className="flex h-full min-h-[320px] flex-col justify-between p-6"
+        >
+          <h2 className="text-heading-sm m-0 text-ink">Vitesse vs frappe</h2>
+          <div className="flex flex-1 flex-col items-center justify-center overflow-visible py-4">
+            <WpmGauge percent={wpmPercent} averageWpm={averageWpm} />
+          </div>
+          <p className="text-body-sm m-0 text-center text-charcoal">
+            Total :{" "}
+            <span className="text-ink">
+              {loaded ? totalWords.toLocaleString("fr-FR") : "—"}
+            </span>{" "}
+            mots dictés
+          </p>
+        </Card>
+      </div>
+
+      {!hasAnyData && loaded && (
+        <p className="text-body-sm text-charcoal">
+          Les statistiques apparaîtront après vos premières dictées.
+        </p>
+      )}
     </div>
   );
 }

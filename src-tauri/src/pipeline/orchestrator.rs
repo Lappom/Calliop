@@ -8,17 +8,42 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize};
 use thiserror::Error;
 
-use calliop_prompt::ToneProfile;
+use calliop_prompt::{post_process_transcript, ToneProfile};
 
-use crate::app_context::{get_active_window, resolve_tone};
-use crate::audio::{AudioCapture, VadSegmenter};
+use crate::app_context::{get_active_window, resolve_tone, ActiveWindow};
+use crate::audio::{AudioCapture, VadSegmenter, TARGET_SAMPLE_RATE};
 use crate::inject::{InjectError, TextInjector};
 use crate::llm::LlamaEngine;
 use crate::observe::CorrectionHandler;
-use crate::store::{AppContextRule, Snippet};
+use crate::store::{AppContextRule, NewDictation, Snippet, Store};
 use crate::stt::{SttError, SttLanguage, WhisperEngine};
 
-use super::snippets::{apply_snippets, finalize_llm_with_snippets, shield_snippet_triggers};
+use super::snippets::{
+    apply_snippets, finalize_llm_with_snippets, shield_snippet_triggers, unshield_snippets,
+};
+
+fn prepare_display_transcript(raw: &str, snippets: &[Snippet]) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let (shielded, shields) = shield_snippet_triggers(trimmed, snippets);
+    let processed = post_process_transcript(&shielded);
+    if shields.is_empty() {
+        processed
+    } else {
+        unshield_snippets(&processed, &shields)
+    }
+}
+
+/// Live overlay only: expand snippets without oral punctuation (avoids premature « point » → « . »).
+fn prepare_partial_transcript(raw: &str, snippets: &[Snippet]) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    apply_snippets(trimmed, snippets)
+}
 
 /// Maximum time to wait for LLM cleanup (Qwen3 1.7B on CPU can take tens of seconds).
 const LLM_CLEANUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
@@ -134,6 +159,7 @@ pub struct PipelineOrchestrator {
     session_stt_language: Arc<RwLock<SttLanguage>>,
     session_detected_language: Arc<RwLock<Option<SttLanguage>>>,
     pending_detection: Arc<Mutex<Option<SttLanguage>>>,
+    history_store: Option<Arc<Store>>,
 }
 
 impl PipelineOrchestrator {
@@ -160,7 +186,12 @@ impl PipelineOrchestrator {
             session_stt_language: Arc::new(RwLock::new(SttLanguage::default_fixed())),
             session_detected_language: Arc::new(RwLock::new(None)),
             pending_detection: Arc::new(Mutex::new(None)),
+            history_store: None,
         })
+    }
+
+    pub fn set_history_store(&mut self, store: Arc<Store>) {
+        self.history_store = Some(store);
     }
 
     pub fn set_dictionary_prompt(&mut self, prompt: Option<String>) {
@@ -175,11 +206,14 @@ impl PipelineOrchestrator {
         *self.app_context_rules.write() = rules;
     }
 
-    fn resolve_active_tone(&self) -> ToneProfile {
+    fn resolve_active_context(&self) -> (ToneProfile, Option<ActiveWindow>) {
         let rules = self.app_context_rules.read().clone();
         match get_active_window() {
-            Some(window) => resolve_tone(&window, &rules),
-            None => ToneProfile::Default,
+            Some(window) => {
+                let tone = resolve_tone(&window, &rules);
+                (tone, Some(window))
+            }
+            None => (ToneProfile::Default, None),
         }
     }
 
@@ -338,6 +372,7 @@ impl PipelineOrchestrator {
         let session_stt_language = Arc::clone(&self.session_stt_language);
         let session_detected_language = Arc::clone(&self.session_detected_language);
         let pending_detection = Arc::clone(&self.pending_detection);
+        let snippets = Arc::clone(&self.snippets);
         let worker = thread::spawn(move || {
             streaming_worker(
                 app_worker,
@@ -352,6 +387,7 @@ impl PipelineOrchestrator {
                     session_stt_language,
                     session_detected_language,
                     pending_detection,
+                    snippets,
                 },
             );
         });
@@ -385,6 +421,8 @@ impl PipelineOrchestrator {
         let stop_instant = Instant::now();
 
         let samples = self.audio.stop()?;
+        let audio_duration_ms =
+            (samples.len() as u64).saturating_mul(1_000) / u64::from(TARGET_SAMPLE_RATE);
 
         if let Some(session) = self.streaming.take() {
             session.stop_flag.store(true, Ordering::SeqCst);
@@ -427,8 +465,11 @@ impl PipelineOrchestrator {
             if transcripts.is_empty() && !samples.is_empty() {
                 let fallback_start = Instant::now();
                 let fallback_language = *self.session_stt_language.read();
-                let result =
-                    engine.transcribe_with_language(&samples, prompt.as_deref(), fallback_language)?;
+                let result = engine.transcribe_with_language(
+                    &samples,
+                    prompt.as_deref(),
+                    fallback_language,
+                )?;
                 fallback_stt_ms += fallback_start.elapsed().as_millis() as u64;
                 if !result.text.is_empty() {
                     transcripts.push(result.text);
@@ -437,26 +478,30 @@ impl PipelineOrchestrator {
         }
 
         let stt_ms = streaming_stt_ms + fallback_stt_ms;
-        let full_text = transcripts.join(" ").trim().to_string();
+        let raw = transcripts.join(" ").trim().to_string();
 
-        // After STT the user may return to the target app; resolve before LLM wait/inject.
-        let active_tone = self.resolve_active_tone();
+        // After STT the user may return to the target app; capture before LLM wait/inject.
+        let (active_tone, active_window) = self.resolve_active_context();
 
         let auto_edit = self.auto_edit.load(Ordering::SeqCst);
-        if !full_text.is_empty() && auto_edit && self.llm.lock().is_none() {
+        if !raw.is_empty() && auto_edit && self.llm.lock().is_none() {
             wait_for_llm_engine(&self.llm, LLM_INJECT_WAIT);
         }
 
+        let snippets = self.snippets.read().clone();
+        let snippet_fallback = prepare_display_transcript(&raw, &snippets);
+
         let (text_to_inject, llm_ms, llm_invalidated) =
-            if !full_text.is_empty() && auto_edit && self.llm.lock().is_some() {
-                let snippets_at_shield = self.snippets.read().clone();
-                let (shielded_text, snippet_shields) =
-                    shield_snippet_triggers(&full_text, &snippets_at_shield);
+            if !raw.is_empty() && auto_edit && self.llm.lock().is_some() {
+                let snippets_at_shield = snippets.clone();
+                let (shielded_raw, snippet_shields) =
+                    shield_snippet_triggers(&raw, &snippets_at_shield);
+                let full_text = post_process_transcript(shielded_raw.trim());
                 let job = start_llm_cleanup(
                     Arc::clone(&self.llm),
                     Arc::clone(&self.llm_ready),
                     Arc::clone(&self.auto_edit),
-                    &shielded_text,
+                    &full_text,
                     active_tone,
                 );
                 match job.wait_for_inject(LLM_INJECT_WAIT) {
@@ -471,7 +516,7 @@ impl PipelineOrchestrator {
                                 finalize_llm_with_snippets(
                                     &text,
                                     &snippet_shields,
-                                    &full_text,
+                                    &snippet_fallback,
                                     &snippets,
                                 )
                             } else {
@@ -479,23 +524,28 @@ impl PipelineOrchestrator {
                                 if from_cleaned != text {
                                     from_cleaned
                                 } else {
-                                    apply_snippets(&full_text, &snippets)
+                                    snippet_fallback.clone()
                                 }
                             }
                         } else {
-                            apply_snippets(&full_text, &snippets)
+                            snippet_fallback.clone()
                         };
                         (text, llm_ms, invalidated)
                     }
                     LlmCleanupWait::Pending(job) => {
                         job.finalize_in_background(app.clone());
-                        let snippets = self.snippets.read().clone();
-                        (apply_snippets(&full_text, &snippets), 0, false)
+                        let text = if snippet_shields.is_empty() {
+                            full_text
+                        } else {
+                            unshield_snippets(&full_text, &snippet_shields)
+                        };
+                        (text, 0, false)
                     }
                 }
+            } else if raw.is_empty() {
+                (String::new(), 0, false)
             } else {
-                let snippets = self.snippets.read().clone();
-                (apply_snippets(&full_text, &snippets), 0, false)
+                (snippet_fallback, 0, false)
             };
 
         if llm_invalidated && self.auto_edit.load(Ordering::SeqCst) {
@@ -521,6 +571,26 @@ impl PipelineOrchestrator {
                 total_ms,
             },
         );
+
+        if !text_to_inject.is_empty() {
+            if let Some(store) = &self.history_store {
+                let entry = NewDictation {
+                    text: text_to_inject.clone(),
+                    audio_duration_ms,
+                    stt_ms,
+                    llm_ms,
+                    inject_ms,
+                    total_ms,
+                    app_exe: active_window.as_ref().map(|w| w.exe_name.clone()),
+                    app_title: active_window.as_ref().map(|w| w.title.clone()),
+                };
+                if let Err(err) = store.insert_dictation(&entry) {
+                    eprintln!("failed to persist dictation history: {err}");
+                } else {
+                    let _ = app.emit("history-updated", ());
+                }
+            }
+        }
 
         hide_overlay(app);
         self.set_state(app, PipelineState::Idle, Some(text_to_inject));
@@ -810,6 +880,7 @@ struct StreamingSttContext {
     session_stt_language: Arc<RwLock<SttLanguage>>,
     session_detected_language: Arc<RwLock<Option<SttLanguage>>>,
     pending_detection: Arc<Mutex<Option<SttLanguage>>>,
+    snippets: Arc<RwLock<Vec<Snippet>>>,
 }
 
 fn streaming_worker(
@@ -899,11 +970,13 @@ fn transcribe_segment(
     }
 
     stt.transcripts.lock().push(text.text.clone());
+    let raw = stt.transcripts.lock().join(" ");
+    let display = prepare_partial_transcript(&raw, &stt.snippets.read());
 
     let _ = app.emit(
         "partial-transcript",
         PartialTranscriptEvent {
-            text: text.text,
+            text: display,
             segment_index,
         },
     );
@@ -1051,5 +1124,17 @@ mod tests {
         let orchestrator = PipelineOrchestrator::new().expect("orchestrator");
         assert_eq!(orchestrator.state(), PipelineState::Idle);
         assert!(!orchestrator.is_model_loaded());
+    }
+
+    #[test]
+    fn prepare_display_transcript_preserves_snippet_body() {
+        let snippets = vec![Snippet {
+            id: 1,
+            trigger: "mon email".into(),
+            content: "contact at gmail point com".into(),
+            created_at: "now".into(),
+        }];
+        let result = prepare_display_transcript("voici mon email", &snippets);
+        assert_eq!(result, "voici contact at gmail point com");
     }
 }

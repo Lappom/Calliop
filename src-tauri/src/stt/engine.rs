@@ -6,6 +6,8 @@ use whisper_rs::{
     WhisperState,
 };
 
+use calliop_prompt::{whisper_oral_vocabulary_word_count, WHISPER_ORAL_VOCABULARY_HINT};
+
 use super::language::SttLanguage;
 
 pub const DEFAULT_LANGUAGE: &str = "fr";
@@ -117,21 +119,33 @@ impl WhisperEngine {
     }
 }
 
-/// Merges snippet triggers and dictionary words into a capped Whisper initial prompt.
+/// Merges oral-symbol hint, snippet triggers, and dictionary words into a capped Whisper prompt.
 pub fn build_whisper_initial_prompt(
     snippet_triggers: &[String],
     dictionary_words: &[String],
 ) -> Option<String> {
-    let mut words = Vec::with_capacity(MAX_INITIAL_PROMPT_WORDS);
-    words.extend(
+    let hint_words = whisper_oral_vocabulary_word_count();
+    let user_budget = MAX_INITIAL_PROMPT_WORDS.saturating_sub(hint_words);
+
+    let mut user_words = Vec::with_capacity(user_budget);
+    user_words.extend(
         snippet_triggers
             .iter()
             .take(MAX_SNIPPET_PROMPT_WORDS)
             .cloned(),
     );
-    let remaining = MAX_INITIAL_PROMPT_WORDS.saturating_sub(words.len());
-    words.extend(dictionary_words.iter().take(remaining).cloned());
-    build_initial_prompt(&words)
+    let remaining = user_budget.saturating_sub(user_words.len());
+    user_words.extend(dictionary_words.iter().take(remaining).cloned());
+
+    if user_words.is_empty() {
+        Some(WHISPER_ORAL_VOCABULARY_HINT.to_string())
+    } else {
+        Some(format!(
+            "{} {}",
+            WHISPER_ORAL_VOCABULARY_HINT,
+            user_words.join(", ")
+        ))
+    }
 }
 
 pub fn build_initial_prompt(words: &[String]) -> Option<String> {
@@ -224,6 +238,14 @@ mod tests {
     }
 
     #[test]
+    fn build_whisper_initial_prompt_always_includes_oral_hint() {
+        let prompt = build_whisper_initial_prompt(&[], &[]).expect("prompt");
+        assert!(prompt.starts_with(WHISPER_ORAL_VOCABULARY_HINT));
+        assert!(prompt.contains("arobase"));
+        assert!(prompt.contains("slash"));
+    }
+
+    #[test]
     fn build_whisper_initial_prompt_reserves_dictionary_slots() {
         let snippets: Vec<String> = (0..MAX_SNIPPET_PROMPT_WORDS + 20)
             .map(|i| format!("snippet{i}"))
@@ -233,8 +255,15 @@ mod tests {
             .collect();
 
         let prompt = build_whisper_initial_prompt(&snippets, &dictionary).expect("prompt");
-        let entries: Vec<&str> = prompt.split(", ").collect();
-        assert_eq!(entries.len(), MAX_INITIAL_PROMPT_WORDS);
+        assert!(prompt.starts_with(WHISPER_ORAL_VOCABULARY_HINT));
+        let user_part = prompt
+            .strip_prefix(WHISPER_ORAL_VOCABULARY_HINT)
+            .expect("hint prefix")
+            .trim_start();
+        let entries: Vec<&str> = user_part.split(", ").collect();
+        let hint_words = whisper_oral_vocabulary_word_count();
+        let expected_user_words = MAX_INITIAL_PROMPT_WORDS.saturating_sub(hint_words);
+        assert_eq!(entries.len(), expected_user_words);
         assert_eq!(entries[0], "snippet0");
         assert_eq!(entries[MAX_SNIPPET_PROMPT_WORDS - 1], "snippet49");
         assert_eq!(entries[MAX_SNIPPET_PROMPT_WORDS], "word0");

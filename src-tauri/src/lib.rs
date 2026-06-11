@@ -13,6 +13,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use calliop_prompt::ToneProfile;
+use inject::TextInjector;
 use parking_lot::Mutex;
 use pipeline::{
     spawn_start, spawn_stop, spawn_toggle, PipelineOrchestrator, PipelineState, PipelineStateEvent,
@@ -21,8 +22,8 @@ use serde::{Deserialize, Serialize};
 use store::{
     extract_correction_words, is_valid_app_context_pattern, is_valid_dictionary_word,
     is_valid_snippet_content, is_valid_trigger, normalize_trigger, normalize_word,
-    AppContextMatchType, AppContextRule, AppSettings, DictionarySource, DictionaryWord,
-    NewAppContextRule, Snippet, SnippetImport, Store,
+    AppContextMatchType, AppContextRule, AppSettings, DictationEntry, DictionarySource,
+    DictionaryWord, Insights, NewAppContextRule, Snippet, SnippetImport, Store, DEFAULT_LIST_LIMIT,
 };
 use stt::{build_whisper_initial_prompt, SttLanguage};
 use tauri::{
@@ -743,6 +744,59 @@ fn remove_app_context_rule(
 }
 
 #[tauri::command]
+fn list_dictations(
+    state: State<'_, AppState>,
+    limit: Option<usize>,
+    offset: Option<usize>,
+) -> Result<Vec<DictationEntry>, String> {
+    let limit = limit.unwrap_or(DEFAULT_LIST_LIMIT).clamp(1, 200);
+    let offset = offset.unwrap_or(0);
+    state
+        .store
+        .list_dictations(limit, offset)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn search_dictations(
+    state: State<'_, AppState>,
+    query: String,
+    limit: Option<usize>,
+) -> Result<Vec<DictationEntry>, String> {
+    let limit = limit.unwrap_or(DEFAULT_LIST_LIMIT).clamp(1, 200);
+    state
+        .store
+        .search_dictations(&query, limit)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn copy_dictation(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+    let entry = state
+        .store
+        .get_dictation(id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("Dictée introuvable (id {id})."))?;
+    TextInjector::copy_to_clipboard(&entry.text).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn reinject_dictation(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+    let entry = state
+        .store
+        .get_dictation(id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("Dictée introuvable (id {id})."))?;
+    let injector = TextInjector::new().map_err(|e| e.to_string())?;
+    injector.inject(&entry.text).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_insights(state: State<'_, AppState>) -> Result<Insights, String> {
+    state.store.get_insights().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn is_autostart_enabled(app: AppHandle) -> Result<bool, String> {
     app.autolaunch().is_enabled().map_err(|e| e.to_string())
 }
@@ -991,6 +1045,7 @@ pub fn run() {
         eprintln!("failed to load whisper prompt and snippets cache: {err}");
         ensure_pipeline_snippets_loaded(&store, &pipeline);
     }
+    pipeline.lock().set_history_store(Arc::clone(&store));
 
     let whisper_engine = Arc::new(Mutex::new(None));
     let llm_engine = Arc::new(Mutex::new(None));
@@ -1095,7 +1150,12 @@ pub fn run() {
             get_active_window,
             list_app_context_rules,
             add_app_context_rule,
-            remove_app_context_rule
+            remove_app_context_rule,
+            list_dictations,
+            search_dictations,
+            copy_dictation,
+            reinject_dictation,
+            get_insights
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")

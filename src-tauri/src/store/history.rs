@@ -1,0 +1,490 @@
+use rusqlite::params;
+use serde::{Deserialize, Serialize};
+
+use super::db::{Store, StoreError};
+use super::DictionarySource;
+
+pub const TYPING_SPEED_BASELINE_WPM: f64 = 40.0;
+pub const DEFAULT_LIST_LIMIT: usize = 50;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DictationEntry {
+    pub id: i64,
+    pub text: String,
+    #[serde(rename = "wordCount")]
+    pub word_count: i64,
+    #[serde(rename = "audioDurationMs")]
+    pub audio_duration_ms: i64,
+    #[serde(rename = "sttMs")]
+    pub stt_ms: i64,
+    #[serde(rename = "llmMs")]
+    pub llm_ms: i64,
+    #[serde(rename = "injectMs")]
+    pub inject_ms: i64,
+    #[serde(rename = "totalMs")]
+    pub total_ms: i64,
+    #[serde(rename = "appExe")]
+    pub app_exe: Option<String>,
+    #[serde(rename = "appTitle")]
+    pub app_title: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NewDictation {
+    pub text: String,
+    pub audio_duration_ms: u64,
+    pub stt_ms: u64,
+    pub llm_ms: u64,
+    pub inject_ms: u64,
+    pub total_ms: u64,
+    pub app_exe: Option<String>,
+    pub app_title: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LatencySnapshot {
+    #[serde(rename = "sttMs")]
+    pub stt_ms: i64,
+    #[serde(rename = "llmMs")]
+    pub llm_ms: i64,
+    #[serde(rename = "injectMs")]
+    pub inject_ms: i64,
+    #[serde(rename = "totalMs")]
+    pub total_ms: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppUsageEntry {
+    #[serde(rename = "exeName")]
+    pub exe_name: String,
+    #[serde(rename = "dictationCount")]
+    pub dictation_count: i64,
+    #[serde(rename = "wordCount")]
+    pub word_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DailyActivityEntry {
+    pub date: String,
+    #[serde(rename = "wordCount")]
+    pub word_count: i64,
+    #[serde(rename = "dictationCount")]
+    pub dictation_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecentLatencyEntry {
+    #[serde(rename = "sttMs")]
+    pub stt_ms: i64,
+    #[serde(rename = "llmMs")]
+    pub llm_ms: i64,
+    #[serde(rename = "injectMs")]
+    pub inject_ms: i64,
+    #[serde(rename = "totalMs")]
+    pub total_ms: i64,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Insights {
+    #[serde(rename = "lastLatency")]
+    pub last_latency: Option<LatencySnapshot>,
+    #[serde(rename = "wordsToday")]
+    pub words_today: i64,
+    #[serde(rename = "totalWords")]
+    pub total_words: i64,
+    #[serde(rename = "averageWpm")]
+    pub average_wpm: f64,
+    #[serde(rename = "wpmVsTypingPercent")]
+    pub wpm_vs_typing_percent: i64,
+    #[serde(rename = "learnedCorrections")]
+    pub learned_corrections: i64,
+    #[serde(rename = "appUsage")]
+    pub app_usage: Vec<AppUsageEntry>,
+    #[serde(rename = "dailyActivity")]
+    pub daily_activity: Vec<DailyActivityEntry>,
+    #[serde(rename = "recentLatency")]
+    pub recent_latency: Vec<RecentLatencyEntry>,
+}
+
+pub fn count_words(text: &str) -> usize {
+    text.split_whitespace()
+        .filter(|token| !token.is_empty())
+        .count()
+}
+
+pub fn dictation_wpm(word_count: usize, audio_duration_ms: u64) -> f64 {
+    if word_count == 0 || audio_duration_ms == 0 {
+        return 0.0;
+    }
+    let minutes = audio_duration_ms as f64 / 60_000.0;
+    if minutes <= 0.0 {
+        return 0.0;
+    }
+    word_count as f64 / minutes
+}
+
+pub fn wpm_vs_typing_percent(wpm: f64) -> i64 {
+    if wpm <= 0.0 {
+        return 0;
+    }
+    ((wpm / TYPING_SPEED_BASELINE_WPM) * 100.0).round() as i64
+}
+
+impl Store {
+    pub fn insert_dictation(&self, entry: &NewDictation) -> Result<i64, StoreError> {
+        let word_count = count_words(&entry.text) as i64;
+        let conn = self.connection().lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO dictations (
+                text, word_count, audio_duration_ms, stt_ms, llm_ms, inject_ms, total_ms,
+                app_exe, app_title
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                entry.text,
+                word_count,
+                entry.audio_duration_ms as i64,
+                entry.stt_ms as i64,
+                entry.llm_ms as i64,
+                entry.inject_ms as i64,
+                entry.total_ms as i64,
+                entry.app_exe,
+                entry.app_title,
+            ],
+        )?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    pub fn list_dictations(
+        &self,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<DictationEntry>, StoreError> {
+        let conn = self.connection().lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT id, text, word_count, audio_duration_ms, stt_ms, llm_ms, inject_ms,
+                    total_ms, app_exe, app_title, created_at
+             FROM dictations
+             ORDER BY datetime(created_at) DESC, id DESC
+             LIMIT ?1 OFFSET ?2",
+        )?;
+        let rows = stmt.query_map(params![limit as i64, offset as i64], map_dictation_row)?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StoreError::from)
+    }
+
+    pub fn search_dictations(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<DictationEntry>, StoreError> {
+        let trimmed = query.trim();
+        if trimmed.is_empty() {
+            return self.list_dictations(limit, 0);
+        }
+
+        let conn = self.connection().lock().expect("store mutex poisoned");
+        let fts_query = build_fts_query(trimmed);
+        let mut stmt = conn.prepare(
+            "SELECT d.id, d.text, d.word_count, d.audio_duration_ms, d.stt_ms, d.llm_ms,
+                    d.inject_ms, d.total_ms, d.app_exe, d.app_title, d.created_at
+             FROM dictations_fts fts
+             JOIN dictations d ON d.id = fts.rowid
+             WHERE dictations_fts MATCH ?1
+             ORDER BY datetime(d.created_at) DESC, d.id DESC
+             LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![fts_query, limit as i64], map_dictation_row)?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StoreError::from)
+    }
+
+    pub fn get_dictation(&self, id: i64) -> Result<Option<DictationEntry>, StoreError> {
+        let conn = self.connection().lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT id, text, word_count, audio_duration_ms, stt_ms, llm_ms, inject_ms,
+                    total_ms, app_exe, app_title, created_at
+             FROM dictations
+             WHERE id = ?1",
+        )?;
+        let mut rows = stmt.query(params![id])?;
+        match rows.next()? {
+            Some(row) => Ok(Some(map_dictation_row(row)?)),
+            None => Ok(None),
+        }
+    }
+
+    pub fn get_insights(&self) -> Result<Insights, StoreError> {
+        let conn = self.connection().lock().expect("store mutex poisoned");
+
+        let words_today: i64 = conn.query_row(
+            "SELECT COALESCE(SUM(word_count), 0)
+             FROM dictations
+             WHERE date(created_at, 'localtime') = date('now', 'localtime')",
+            [],
+            |row| row.get(0),
+        )?;
+
+        let total_words: i64 = conn.query_row(
+            "SELECT COALESCE(SUM(word_count), 0) FROM dictations",
+            [],
+            |row| row.get(0),
+        )?;
+
+        let (weighted_words, weighted_duration_ms): (i64, i64) = conn.query_row(
+            "SELECT COALESCE(SUM(word_count), 0), COALESCE(SUM(audio_duration_ms), 0)
+             FROM dictations
+             WHERE audio_duration_ms > 0",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+
+        let average_wpm = if weighted_duration_ms > 0 {
+            dictation_wpm(weighted_words as usize, weighted_duration_ms as u64)
+        } else {
+            0.0
+        };
+
+        let learned_corrections: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM dictionary WHERE source = ?1",
+            params![DictionarySource::Learned.as_str()],
+            |row| row.get(0),
+        )?;
+
+        let last_latency = conn
+            .query_row(
+                "SELECT stt_ms, llm_ms, inject_ms, total_ms
+                 FROM dictations
+                 ORDER BY datetime(created_at) DESC, id DESC
+                 LIMIT 1",
+                [],
+                |row| {
+                    Ok(LatencySnapshot {
+                        stt_ms: row.get(0)?,
+                        llm_ms: row.get(1)?,
+                        inject_ms: row.get(2)?,
+                        total_ms: row.get(3)?,
+                    })
+                },
+            )
+            .ok();
+
+        let mut app_stmt = conn.prepare(
+            "SELECT COALESCE(app_exe, 'autre') AS exe_name,
+                    COUNT(*) AS dictation_count,
+                    COALESCE(SUM(word_count), 0) AS word_count
+             FROM dictations
+             GROUP BY exe_name
+             ORDER BY word_count DESC, dictation_count DESC
+             LIMIT 5",
+        )?;
+        let app_rows = app_stmt.query_map([], |row| {
+            Ok(AppUsageEntry {
+                exe_name: row.get(0)?,
+                dictation_count: row.get(1)?,
+                word_count: row.get(2)?,
+            })
+        })?;
+        let app_usage = app_rows.collect::<Result<Vec<_>, _>>()?;
+        let daily_activity = fetch_daily_activity(&conn)?;
+        let recent_latency = fetch_recent_latency(&conn)?;
+
+        Ok(Insights {
+            last_latency,
+            words_today,
+            total_words,
+            average_wpm,
+            wpm_vs_typing_percent: wpm_vs_typing_percent(average_wpm),
+            learned_corrections,
+            app_usage,
+            daily_activity,
+            recent_latency,
+        })
+    }
+}
+
+fn fetch_daily_activity(conn: &rusqlite::Connection) -> Result<Vec<DailyActivityEntry>, StoreError> {
+    let mut stmt = conn.prepare(
+        "WITH RECURSIVE days(day) AS (
+            SELECT date('now', 'localtime', '-6 days')
+            UNION ALL
+            SELECT date(day, '+1 day') FROM days WHERE day < date('now', 'localtime')
+        )
+        SELECT days.day,
+               COALESCE(SUM(d.word_count), 0),
+               COALESCE(COUNT(d.id), 0)
+        FROM days
+        LEFT JOIN dictations d ON date(d.created_at, 'localtime') = days.day
+        GROUP BY days.day
+        ORDER BY days.day ASC",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(DailyActivityEntry {
+            date: row.get(0)?,
+            word_count: row.get(1)?,
+            dictation_count: row.get(2)?,
+        })
+    })?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(StoreError::from)
+}
+
+fn fetch_recent_latency(conn: &rusqlite::Connection) -> Result<Vec<RecentLatencyEntry>, StoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT stt_ms, llm_ms, inject_ms, total_ms, created_at
+         FROM dictations
+         ORDER BY datetime(created_at) DESC, id DESC
+         LIMIT 8",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(RecentLatencyEntry {
+            stt_ms: row.get(0)?,
+            llm_ms: row.get(1)?,
+            inject_ms: row.get(2)?,
+            total_ms: row.get(3)?,
+            created_at: row.get(4)?,
+        })
+    })?;
+    let mut entries: Vec<RecentLatencyEntry> = rows.collect::<Result<Vec<_>, _>>()?;
+    entries.reverse();
+    Ok(entries)
+}
+
+fn map_dictation_row(row: &rusqlite::Row<'_>) -> Result<DictationEntry, rusqlite::Error> {
+    Ok(DictationEntry {
+        id: row.get(0)?,
+        text: row.get(1)?,
+        word_count: row.get(2)?,
+        audio_duration_ms: row.get(3)?,
+        stt_ms: row.get(4)?,
+        llm_ms: row.get(5)?,
+        inject_ms: row.get(6)?,
+        total_ms: row.get(7)?,
+        app_exe: row.get(8)?,
+        app_title: row.get(9)?,
+        created_at: row.get(10)?,
+    })
+}
+
+fn build_fts_query(query: &str) -> String {
+    query
+        .split_whitespace()
+        .filter(|token| !token.is_empty())
+        .map(|token| {
+            let escaped = token.replace('"', "\"\"");
+            format!("\"{escaped}\"*")
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    use crate::store::db::init_schema;
+
+    fn test_store() -> Store {
+        let conn = Connection::open_in_memory().unwrap();
+        init_schema(&conn).unwrap();
+        Store::from_connection(conn)
+    }
+
+    fn sample_dictation(text: &str) -> NewDictation {
+        NewDictation {
+            text: text.to_string(),
+            audio_duration_ms: 6_000,
+            stt_ms: 800,
+            llm_ms: 1_200,
+            inject_ms: 150,
+            total_ms: 2_500,
+            app_exe: Some("notepad.exe".into()),
+            app_title: Some("Untitled - Notepad".into()),
+        }
+    }
+
+    #[test]
+    fn count_words_splits_on_whitespace() {
+        assert_eq!(count_words("bonjour le monde"), 3);
+        assert_eq!(count_words("  one   two  "), 2);
+        assert_eq!(count_words(""), 0);
+    }
+
+    #[test]
+    fn dictation_wpm_computes_rate() {
+        assert!((dictation_wpm(10, 60_000) - 10.0).abs() < f64::EPSILON);
+        assert_eq!(dictation_wpm(0, 1_000), 0.0);
+        assert_eq!(dictation_wpm(5, 0), 0.0);
+    }
+
+    #[test]
+    fn wpm_vs_typing_percent_uses_baseline() {
+        assert_eq!(wpm_vs_typing_percent(80.0), 200);
+        assert_eq!(wpm_vs_typing_percent(0.0), 0);
+    }
+
+    #[test]
+    fn insert_and_list_roundtrip() {
+        let store = test_store();
+        let id = store
+            .insert_dictation(&sample_dictation("bonjour Calliop"))
+            .unwrap();
+        assert!(id > 0);
+
+        let entries = store.list_dictations(10, 0).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].text, "bonjour Calliop");
+        assert_eq!(entries[0].word_count, 2);
+        assert_eq!(entries[0].app_exe.as_deref(), Some("notepad.exe"));
+    }
+
+    #[test]
+    fn fts_search_finds_matching_text() {
+        let store = test_store();
+        store
+            .insert_dictation(&sample_dictation("message Slack pour l equipe"))
+            .unwrap();
+        store
+            .insert_dictation(&sample_dictation("commit message technique"))
+            .unwrap();
+
+        let hits = store.search_dictations("Slack", 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].text.contains("Slack"));
+    }
+
+    #[test]
+    fn get_insights_aggregates_counts() {
+        let store = test_store();
+        store
+            .insert_dictation(&sample_dictation("un deux trois"))
+            .unwrap();
+        store
+            .insert_dictation(&NewDictation {
+                text: "quatre cinq".into(),
+                audio_duration_ms: 3_000,
+                stt_ms: 400,
+                llm_ms: 0,
+                inject_ms: 100,
+                total_ms: 600,
+                app_exe: Some("code.exe".into()),
+                app_title: None,
+            })
+            .unwrap();
+        store
+            .add_word("Calliope", DictionarySource::Learned)
+            .unwrap();
+
+        let insights = store.get_insights().unwrap();
+        assert_eq!(insights.total_words, 5);
+        assert_eq!(insights.words_today, 5);
+        assert!(insights.average_wpm > 0.0);
+        assert_eq!(insights.learned_corrections, 1);
+        assert_eq!(insights.app_usage.len(), 2);
+        assert!(insights.last_latency.is_some());
+        assert_eq!(insights.daily_activity.len(), 7);
+        assert_eq!(insights.recent_latency.len(), 2);
+    }
+}

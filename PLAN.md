@@ -193,17 +193,17 @@ Application desktop qui permet de **dicter dans n'importe quelle application** a
 - [x] Switch mid-dictée
 
 #### 3f — Historique
-- [ ] Toutes les dictées en SQLite
-- [ ] Recherche full-text
-- [ ] Re-copie / réinjection
+- [x] Toutes les dictées en SQLite
+- [x] Recherche full-text
+- [x] Re-copie / réinjection
 
 #### 3g — Insight
-- [ ] Latence dernière dictée
-- [ ] Mots dictés aujourd'hui
-- [ ] Mots par minute (Pourcentage global comparaision au global typing speed)
-- [ ] Nombre total de mots dictés
-- [ ] Corrections apprises
-- [ ] Utilisation par application (contexte)
+- [x] Latence dernière dictée
+- [x] Mots dictés aujourd'hui
+- [x] Mots par minute (Pourcentage global comparaision au global typing speed)
+- [x] Nombre total de mots dictés
+- [x] Corrections apprises
+- [x] Utilisation par application (contexte)
 
 **Critère de done :** dicter un message Slack poli, un commit message technique, un snippet « mon calendrier ».
 

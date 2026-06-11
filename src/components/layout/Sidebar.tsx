@@ -3,6 +3,7 @@ import {
   BarChart3,
   BookOpen,
   Braces,
+  History,
   Layers,
   Mic,
   Settings,
@@ -31,6 +32,7 @@ const primaryItems: NavItem[] = [
   { id: "dictionary", label: "Dictionnaire", icon: BookOpen },
   { id: "snippets", label: "Snippets", icon: Braces },
   { id: "context", label: "Contexte", icon: Layers },
+  { id: "history", label: "Historique", icon: History },
   { id: "insight", label: "Insight", icon: BarChart3 },
 ];
 
