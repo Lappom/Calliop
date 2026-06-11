@@ -233,26 +233,13 @@ export function useSettings() {
 
       try {
         const autoEditChanged = next.autoEdit !== previousSettings.autoEdit;
-        const llmModelChanged = next.llmModel !== previousSettings.llmModel;
 
-        if (autoEditChanged) {
-          if (next.autoEdit) {
-            llmProgressRef.current = 0;
-            llmReadyRef.current = false;
-            setLlmProgress(0);
-            setLlmReady(false);
-          } else {
-            llmReadyRef.current = false;
-            llmProgressRef.current = null;
-            setLlmReady(false);
-            setLlmProgress(null);
-            setLlmProgressModel(null);
-          }
-        } else if (llmModelChanged && next.autoEdit) {
-          llmProgressRef.current = 0;
+        if (autoEditChanged && !next.autoEdit) {
           llmReadyRef.current = false;
-          setLlmProgress(0);
+          llmProgressRef.current = null;
           setLlmReady(false);
+          setLlmProgress(null);
+          setLlmProgressModel(null);
         }
 
         const whisperChanged =
@@ -263,12 +250,6 @@ export function useSettings() {
         }
 
         await invoke("set_settings", { settings: toPayload(next) });
-
-        if (autoEditChanged && !next.autoEdit) {
-          llmProgressRef.current = null;
-          setLlmProgress(null);
-          setLlmProgressModel(null);
-        }
 
         await Promise.all([refreshModelsStatus(), refreshInferenceInfo()]);
       } catch (err) {
