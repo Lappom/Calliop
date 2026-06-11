@@ -188,9 +188,9 @@ Application desktop qui permet de **dicter dans n'importe quelle application** a
 - [x] Mapping configurable par app
 
 #### 3e — Multilingue
-- [ ] Auto-détection langue (Whisper)
-- [ ] Langue par défaut configurable
-- [ ] Switch mid-dictée
+- [x] Auto-détection langue (Whisper)
+- [x] Langue par défaut configurable
+- [x] Switch mid-dictée
 
 #### 3f — Historique
 - [ ] Toutes les dictées en SQLite

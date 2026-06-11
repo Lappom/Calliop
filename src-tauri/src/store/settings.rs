@@ -3,13 +3,17 @@ use serde::{Deserialize, Serialize};
 
 use super::db::{Store, StoreError};
 
+use crate::stt::{SttLanguage, DEFAULT_STT_LANGUAGE};
+
 pub const KEY_AUTO_EDIT: &str = "auto_edit";
 pub const KEY_AUTO_LEARN: &str = "auto_learn";
+pub const KEY_STT_LANGUAGE: &str = "stt_language";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AppSettings {
     pub auto_edit: bool,
     pub auto_learn: bool,
+    pub stt_language: String,
 }
 
 impl Default for AppSettings {
@@ -17,6 +21,7 @@ impl Default for AppSettings {
         Self {
             auto_edit: false,
             auto_learn: true,
+            stt_language: DEFAULT_STT_LANGUAGE.to_string(),
         }
     }
 }
@@ -26,7 +31,12 @@ impl AppSettings {
         Self {
             auto_edit: false,
             auto_learn: true,
+            stt_language: DEFAULT_STT_LANGUAGE.to_string(),
         }
+    }
+
+    pub fn stt_language_mode(&self) -> SttLanguage {
+        SttLanguage::parse(&self.stt_language).unwrap_or_default()
     }
 }
 
@@ -35,6 +45,9 @@ impl Store {
         Ok(AppSettings {
             auto_edit: self.get_bool(KEY_AUTO_EDIT, false)?,
             auto_learn: self.get_bool(KEY_AUTO_LEARN, true)?,
+            stt_language: self
+                .get_string(KEY_STT_LANGUAGE, DEFAULT_STT_LANGUAGE)?
+                .to_string(),
         })
     }
 
@@ -57,6 +70,11 @@ impl Store {
                 if settings.auto_learn { "true" } else { "false" }
             ],
         )?;
+        tx.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![KEY_STT_LANGUAGE, settings.stt_language.as_str()],
+        )?;
         tx.commit()?;
         Ok(())
     }
@@ -72,6 +90,7 @@ mod tests {
         let settings = AppSettings::default();
         assert!(!settings.auto_edit);
         assert!(settings.auto_learn);
+        assert_eq!(settings.stt_language, DEFAULT_STT_LANGUAGE);
     }
 
     #[test]
@@ -101,11 +120,13 @@ mod tests {
             .save_settings(&AppSettings {
                 auto_edit: true,
                 auto_learn: false,
+                stt_language: "en".into(),
             })
             .expect("save");
         let loaded = store.load_settings().expect("load");
         assert!(loaded.auto_edit);
         assert!(!loaded.auto_learn);
+        assert_eq!(loaded.stt_language, "en");
 
         let _ = std::fs::remove_dir_all(dir);
     }

@@ -26,6 +26,7 @@ export function SettingsView() {
     llmProgress,
     setAutoEdit,
     setAutoLearn,
+    setSttLanguage,
   } = useSettings();
 
   return (
@@ -69,8 +70,15 @@ export function SettingsView() {
             </label>
             <select
               id="language"
-              defaultValue="fr"
-              className="h-10 rounded-md border border-hairline-strong bg-surface-card px-3.5 text-ink"
+              value={settings.sttLanguage}
+              disabled={!loaded || saving}
+              onChange={(e) => {
+                const value = e.target.value;
+                if (value === "fr" || value === "en" || value === "auto") {
+                  void setSttLanguage(value);
+                }
+              }}
+              className="h-10 rounded-md border border-hairline-strong bg-surface-card px-3.5 text-ink disabled:opacity-50"
             >
               <option value="fr">Français</option>
               <option value="en">Anglais</option>

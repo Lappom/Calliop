@@ -6,7 +6,7 @@ mod snippets;
 pub use orchestrator::{
     hide_overlay, show_overlay, spawn_start, spawn_stop, spawn_toggle, AudioLevelEvent,
     LatencyMetricsEvent, PartialTranscriptEvent, PipelineError, PipelineOrchestrator,
-    PipelineState, PipelineStateEvent,
+    PipelineState, PipelineStateEvent, SttLanguageChangedEvent,
 };
 pub use snippets::apply_snippets;
 

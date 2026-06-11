@@ -24,7 +24,7 @@ use store::{
     AppContextMatchType, AppContextRule, AppSettings, DictionarySource, DictionaryWord,
     NewAppContextRule, Snippet, SnippetImport, Store,
 };
-use stt::build_whisper_initial_prompt;
+use stt::{build_whisper_initial_prompt, SttLanguage};
 use tauri::{
     menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -100,6 +100,11 @@ pub(crate) fn spawn_llm_recovery_if_needed(app: AppHandle) {
 struct SettingsPayload {
     auto_edit: bool,
     auto_learn: bool,
+    stt_language: String,
+}
+
+fn parse_stt_language(value: &str) -> Result<SttLanguage, String> {
+    SttLanguage::parse(value).ok_or_else(|| format!("unsupported STT language: {value}"))
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -321,7 +326,30 @@ fn get_settings(state: State<'_, AppState>) -> Result<SettingsPayload, String> {
     Ok(SettingsPayload {
         auto_edit: settings.auto_edit,
         auto_learn: settings.auto_learn,
+        stt_language: settings.stt_language,
     })
+}
+
+#[tauri::command]
+fn get_stt_language(state: State<'_, AppState>) -> Result<String, String> {
+    Ok(state
+        .pipeline
+        .lock()
+        .effective_stt_language()
+        .as_setting_value())
+}
+
+#[tauri::command]
+fn cycle_dictation_language(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let language = state
+        .pipeline
+        .lock()
+        .cycle_session_language(&app)
+        .map_err(|e| e.to_string())?;
+    Ok(language.as_setting_value())
 }
 
 #[tauri::command]
@@ -331,46 +359,50 @@ async fn set_settings(
     settings: SettingsPayload,
 ) -> Result<(), String> {
     let previous = state.store.load_settings().map_err(|e| e.to_string())?;
+    let stt_language = parse_stt_language(&settings.stt_language)?;
+
+    let rollback = || {
+        state
+            .pipeline
+            .lock()
+            .set_default_stt_language(previous.stt_language_mode());
+        state.pipeline.lock().set_auto_learn(previous.auto_learn);
+        state.pipeline.lock().set_auto_edit(previous.auto_edit);
+        if !previous.auto_edit {
+            shutdown_llm_engine(&state);
+        }
+    };
 
     state.pipeline.lock().set_auto_learn(settings.auto_learn);
+    state
+        .pipeline
+        .lock()
+        .set_default_stt_language(stt_language);
 
     if settings.auto_edit {
         state.pipeline.lock().set_auto_edit(true);
 
         if let Err(err) = ensure_llm_model(app, state.clone()).await {
-            state.pipeline.lock().set_auto_learn(previous.auto_learn);
-            state.pipeline.lock().set_auto_edit(previous.auto_edit);
-            shutdown_llm_engine(&state);
-            return Err(err);
-        }
-
-        if let Err(err) = state
-            .store
-            .save_settings(&AppSettings {
-                auto_edit: true,
-                auto_learn: settings.auto_learn,
-            })
-            .map_err(|e| e.to_string())
-        {
-            state.pipeline.lock().set_auto_learn(previous.auto_learn);
-            state.pipeline.lock().set_auto_edit(previous.auto_edit);
+            rollback();
             shutdown_llm_engine(&state);
             return Err(err);
         }
     } else {
-        if let Err(err) = state
-            .store
-            .save_settings(&AppSettings {
-                auto_edit: false,
-                auto_learn: settings.auto_learn,
-            })
-            .map_err(|e| e.to_string())
-        {
-            state.pipeline.lock().set_auto_learn(previous.auto_learn);
-            return Err(err);
-        }
         state.pipeline.lock().set_auto_edit(false);
         shutdown_llm_engine(&state);
+    }
+
+    if let Err(err) = state
+        .store
+        .save_settings(&AppSettings {
+            auto_edit: settings.auto_edit,
+            auto_learn: settings.auto_learn,
+            stt_language: settings.stt_language,
+        })
+        .map_err(|e| e.to_string())
+    {
+        rollback();
+        return Err(err);
     }
 
     Ok(())
@@ -742,8 +774,14 @@ async fn ensure_model(app: AppHandle, state: State<'_, AppState>) -> Result<(), 
         *state.whisper_engine.lock() = Some(engine);
     }
     {
+        let stt_language = state
+            .store
+            .load_settings()
+            .map_err(|e| e.to_string())?
+            .stt_language_mode();
         let mut pipeline = state.pipeline.lock();
         pipeline.set_whisper_engine(Arc::clone(&state.whisper_engine));
+        pipeline.set_default_stt_language(stt_language);
     }
 
     state.model_ready.store(true, Ordering::SeqCst);
@@ -908,6 +946,9 @@ pub fn run() {
         .expect("failed to load initial settings");
     pipeline.lock().set_auto_edit(initial_settings.auto_edit);
     pipeline.lock().set_auto_learn(initial_settings.auto_learn);
+    pipeline
+        .lock()
+        .set_default_stt_language(initial_settings.stt_language_mode());
 
     {
         let store = Arc::clone(&store);
@@ -1024,6 +1065,8 @@ pub fn run() {
             ensure_llm_model,
             get_settings,
             set_settings,
+            get_stt_language,
+            cycle_dictation_language,
             is_autostart_enabled,
             set_autostart_enabled,
             list_dictionary_words,

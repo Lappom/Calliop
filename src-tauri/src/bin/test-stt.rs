@@ -24,8 +24,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let engine = WhisperEngine::new(&model_path)?;
-    let text = engine.transcribe(&samples, None)?;
-    println!("Transcription: {text}");
+    let result = engine.transcribe(&samples, None)?;
+    println!("Transcription: {}", result.text);
+    if let Some(lang) = result.detected_language {
+        println!("Detected language: {lang}");
+    }
     Ok(())
 }
 
