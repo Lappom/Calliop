@@ -20,6 +20,19 @@ export const SOURCE_FILTER_LABELS: Record<DictionarySourceFilter, string> = {
   learned: "Appris",
 };
 
+export const DICTIONARY_SORT_ORDER: DictionarySort[] = [
+  "alpha-asc",
+  "alpha-desc",
+  "recent",
+  "source",
+];
+
+export const SOURCE_FILTER_ORDER: DictionarySourceFilter[] = [
+  "all",
+  "manual",
+  "learned",
+];
+
 export const SOURCE_META: Record<
   DictionarySource,
   { label: string; accent: string; description: string }

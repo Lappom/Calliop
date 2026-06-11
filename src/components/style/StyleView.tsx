@@ -14,6 +14,7 @@ import { SnippetListToolbarButton } from "../snippets/SnippetListToolbarButton";
 import { SectionGlow } from "../layout/SectionGlow";
 import { Button } from "../ui/Button";
 import { TextInput } from "../ui/TextInput";
+import { toolbarMenuOptions } from "../ui/toolbarMenu";
 import { ActiveWindowCard } from "./ActiveWindowCard";
 import { StyleRuleModal } from "./StyleRuleModal";
 import { StyleRulesTable } from "./StyleRulesTable";
@@ -22,6 +23,7 @@ import {
   nextStyleSort,
   sortStyleRules,
   STYLE_SORT_LABELS,
+  STYLE_SORT_ORDER,
   type StyleRuleSort,
 } from "./styleUtils";
 
@@ -145,6 +147,13 @@ export function StyleView() {
               label={STYLE_SORT_LABELS[sort]}
               disabled={busy}
               onClick={() => setSort((current) => nextStyleSort(current))}
+              onMenuSelect={setSort}
+              menuTitle="Tri"
+              menuOptions={toolbarMenuOptions(
+                STYLE_SORT_LABELS,
+                STYLE_SORT_ORDER,
+              )}
+              activeMenuValue={sort}
             >
               <ArrowDownUp size={16} strokeWidth={1.75} />
             </SnippetListToolbarButton>

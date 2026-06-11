@@ -149,3 +149,10 @@ export const STYLE_SORT_LABELS: Record<StyleRuleSort, string> = {
   tone: "Par ton",
   recent: "Plus récents",
 };
+
+export const STYLE_SORT_ORDER: StyleRuleSort[] = [
+  "pattern-asc",
+  "pattern-desc",
+  "tone",
+  "recent",
+];

@@ -1,5 +1,11 @@
 export type SnippetSort = "trigger-asc" | "trigger-desc" | "recent";
 
+export const SNIPPET_SORT_ORDER: SnippetSort[] = [
+  "trigger-asc",
+  "trigger-desc",
+  "recent",
+];
+
 export function sortSnippets<T extends { trigger: string; created_at: string }>(
   entries: T[],
   sort: SnippetSort,

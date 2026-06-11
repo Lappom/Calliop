@@ -12,14 +12,17 @@ import { SectionGlow } from "../layout/SectionGlow";
 import { SnippetListToolbarButton } from "../snippets/SnippetListToolbarButton";
 import { Button } from "../ui/Button";
 import { TextInput } from "../ui/TextInput";
+import { toolbarMenuOptions } from "../ui/toolbarMenu";
 import { DictionaryTable } from "./DictionaryTable";
 import { DictionaryWordModal } from "./DictionaryWordModal";
 import {
   DICTIONARY_SORT_LABELS,
+  DICTIONARY_SORT_ORDER,
   filterDictionaryWords,
   nextDictionarySort,
   sortDictionaryWords,
   SOURCE_FILTER_LABELS,
+  SOURCE_FILTER_ORDER,
   type DictionarySort,
   type DictionarySourceFilter,
 } from "./dictionaryUtils";
@@ -134,6 +137,13 @@ export function DictionaryView() {
               active={sourceFilter !== "all"}
               disabled={busy}
               onClick={cycleSourceFilter}
+              onMenuSelect={setSourceFilter}
+              menuTitle="Filtres"
+              menuOptions={toolbarMenuOptions(
+                SOURCE_FILTER_LABELS,
+                SOURCE_FILTER_ORDER,
+              )}
+              activeMenuValue={sourceFilter}
             >
               <Filter size={16} strokeWidth={1.75} />
             </SnippetListToolbarButton>
@@ -141,6 +151,13 @@ export function DictionaryView() {
               label={DICTIONARY_SORT_LABELS[sort]}
               disabled={busy}
               onClick={() => setSort((current) => nextDictionarySort(current))}
+              onMenuSelect={setSort}
+              menuTitle="Tri"
+              menuOptions={toolbarMenuOptions(
+                DICTIONARY_SORT_LABELS,
+                DICTIONARY_SORT_ORDER,
+              )}
+              activeMenuValue={sort}
             >
               <ArrowDownUp size={16} strokeWidth={1.75} />
             </SnippetListToolbarButton>

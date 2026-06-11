@@ -8,6 +8,12 @@ export const HISTORY_SORT_LABELS: Record<HistorySort, string> = {
   longest: "Plus longues",
 };
 
+export const HISTORY_SORT_ORDER: HistorySort[] = [
+  "recent",
+  "oldest",
+  "longest",
+];
+
 export function nextHistorySort(current: HistorySort): HistorySort {
   if (current === "recent") return "oldest";
   if (current === "oldest") return "longest";

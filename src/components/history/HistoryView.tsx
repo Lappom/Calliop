@@ -5,12 +5,14 @@ import { SnippetListToolbarButton } from "../snippets/SnippetListToolbarButton";
 import { SectionGlow } from "../layout/SectionGlow";
 import { Kbd } from "../ui/Kbd";
 import { TextInput } from "../ui/TextInput";
+import { toolbarMenuOptions } from "../ui/toolbarMenu";
 import { HistoryList } from "./HistoryList";
 import { HistoryPagination } from "./HistoryPagination";
 import { HistoryStatsBar } from "./HistoryStatsBar";
 import {
   groupHistoryEntries,
   HISTORY_SORT_LABELS,
+  HISTORY_SORT_ORDER,
   nextHistorySort,
   sortHistoryEntries,
   type HistorySort,
@@ -95,6 +97,13 @@ export function HistoryView() {
                   label={HISTORY_SORT_LABELS[sort]}
                   disabled={busy}
                   onClick={() => setSort((current) => nextHistorySort(current))}
+                  onMenuSelect={setSort}
+                  menuTitle="Tri"
+                  menuOptions={toolbarMenuOptions(
+                    HISTORY_SORT_LABELS,
+                    HISTORY_SORT_ORDER,
+                  )}
+                  activeMenuValue={sort}
                 >
                   <ArrowDownUp size={16} strokeWidth={1.75} />
                 </SnippetListToolbarButton>

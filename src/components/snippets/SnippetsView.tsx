@@ -10,10 +10,12 @@ import { useSnippets } from "../../hooks/useSnippets";
 import { SectionGlow } from "../layout/SectionGlow";
 import { Button } from "../ui/Button";
 import { TextInput } from "../ui/TextInput";
+import { toolbarMenuOptions } from "../ui/toolbarMenu";
 import { SnippetModal } from "./SnippetModal";
 import { SnippetListToolbarButton } from "./SnippetListToolbarButton";
 import {
   filterSnippets,
+  SNIPPET_SORT_ORDER,
   sortSnippets,
   type SnippetSort,
 } from "./snippetListUtils";
@@ -165,6 +167,10 @@ export function SnippetsView() {
               label={SORT_LABELS[sort]}
               disabled={busy}
               onClick={() => setSort((current) => nextSort(current))}
+              onMenuSelect={setSort}
+              menuTitle="Tri"
+              menuOptions={toolbarMenuOptions(SORT_LABELS, SNIPPET_SORT_ORDER)}
+              activeMenuValue={sort}
             >
               <ArrowDownUp size={16} strokeWidth={1.75} />
             </SnippetListToolbarButton>
