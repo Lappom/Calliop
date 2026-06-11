@@ -123,11 +123,8 @@ fn map_normalized_span_to_original(
             }
         }
 
-        if norm_pos < normalized.len() {
-            let expected = normalized.chars().nth(norm_pos)?;
-            if ch == expected {
-                norm_pos += 1;
-            }
+        if norm_pos < normalized.len() && normalized[norm_pos..].starts_with(ch) {
+            norm_pos += ch.len_utf8();
         }
 
         if norm_pos == norm_start + norm_len {
@@ -175,6 +172,15 @@ mod tests {
         let doc = "Hello world Calliop test";
         let bounds = find_injection_bounds(doc, "Calliop").expect("bounds");
         assert_eq!(bounds, (12, 19));
+    }
+
+    #[test]
+    fn find_injection_bounds_handles_accented_whitespace_normalization() {
+        let doc = "Bonjour   à   tous,  ceci est un test.";
+        let injected = "à tous";
+        let bounds = find_injection_bounds(doc, injected).expect("bounds");
+        let matched = &doc[bounds.0..bounds.1];
+        assert_eq!(normalize_whitespace(matched), "à tous");
     }
 
     #[test]

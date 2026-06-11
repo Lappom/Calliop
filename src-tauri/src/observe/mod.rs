@@ -20,6 +20,10 @@ pub fn read_focused_text() -> Option<String> {
     reader::read_focused_text()
 }
 
+pub fn supports_correction_watcher() -> bool {
+    cfg!(windows)
+}
+
 pub fn module_name() -> &'static str {
     "observe"
 }

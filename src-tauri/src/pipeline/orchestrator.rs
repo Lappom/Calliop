@@ -396,7 +396,8 @@ impl PipelineOrchestrator {
     }
 
     fn maybe_spawn_correction_watcher(&self, app: &AppHandle, injected_text: &str) {
-        if !self.auto_learn.load(Ordering::SeqCst) {
+        if !self.auto_learn.load(Ordering::SeqCst) || !crate::observe::supports_correction_watcher()
+        {
             return;
         }
 

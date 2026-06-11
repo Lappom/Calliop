@@ -247,13 +247,17 @@ async fn set_settings(
             return Err(err);
         }
     } else {
-        state
+        if let Err(err) = state
             .store
             .save_settings(&AppSettings {
                 auto_edit: false,
                 auto_learn: settings.auto_learn,
             })
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())
+        {
+            state.pipeline.lock().set_auto_learn(previous.auto_learn);
+            return Err(err);
+        }
         state.pipeline.lock().set_auto_edit(false);
         shutdown_llm_engine(&state);
     }
