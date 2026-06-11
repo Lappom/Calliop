@@ -78,6 +78,15 @@ impl WhisperEngine {
         audio: &[f32],
         initial_prompt: Option<&str>,
     ) -> Result<TranscriptResult, SttError> {
+        self.transcribe_with_language(audio, initial_prompt, self.language)
+    }
+
+    pub fn transcribe_with_language(
+        &self,
+        audio: &[f32],
+        initial_prompt: Option<&str>,
+        language: SttLanguage,
+    ) -> Result<TranscriptResult, SttError> {
         if audio.is_empty() {
             return Err(SttError::EmptyAudio);
         }
@@ -88,13 +97,13 @@ impl WhisperEngine {
             .map_err(|e| SttError::CreateState(e.to_string()))?;
 
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-        configure_full_params(&mut params, self.language, self.n_threads(), initial_prompt);
+        configure_full_params(&mut params, language, self.n_threads(), initial_prompt);
         state
             .full(params, audio)
             .map_err(|e| SttError::Transcribe(e.to_string()))?;
 
         let text = collect_transcript(&state)?;
-        let detected_language = if matches!(self.language, SttLanguage::Auto) {
+        let detected_language = if matches!(language, SttLanguage::Auto) {
             let lang_id = state.full_lang_id_from_state();
             get_lang_str(lang_id).map(str::to_string)
         } else {

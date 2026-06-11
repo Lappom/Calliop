@@ -357,6 +357,10 @@ async fn set_settings(
 ) -> Result<(), String> {
     let previous = state.store.load_settings().map_err(|e| e.to_string())?;
     let stt_language = parse_stt_language(&settings.stt_language)?;
+    let prev_stt = previous.stt_language.clone();
+    let next_stt = settings.stt_language.clone();
+    let app_for_notify = app.clone();
+    let stt_language_changed = prev_stt != next_stt;
 
     let rollback = || {
         state
@@ -367,6 +371,12 @@ async fn set_settings(
         state.pipeline.lock().set_auto_edit(previous.auto_edit);
         if !previous.auto_edit {
             shutdown_llm_engine(&state);
+        }
+        if stt_language_changed {
+            state
+                .pipeline
+                .lock()
+                .notify_stt_language_changed(&app_for_notify);
         }
     };
 
@@ -391,12 +401,19 @@ async fn set_settings(
         .save_settings(&AppSettings {
             auto_edit: settings.auto_edit,
             auto_learn: settings.auto_learn,
-            stt_language: settings.stt_language,
+            stt_language: next_stt,
         })
         .map_err(|e| e.to_string())
     {
         rollback();
         return Err(err);
+    }
+
+    if stt_language_changed {
+        state
+            .pipeline
+            .lock()
+            .notify_stt_language_changed(&app_for_notify);
     }
 
     Ok(())

@@ -49,10 +49,14 @@ export function useSttLanguage() {
     const unlisten = listen<SttLanguageChangedPayload>(
       "stt-language-changed",
       (event) => {
-        const { language: next } = event.payload;
-        if (isSttLanguageCode(next)) {
-          setLanguage(next);
+        const { language: next, detected } = event.payload;
+        if (!isSttLanguageCode(next)) {
+          return;
         }
+        if (detected && next === "auto") {
+          return;
+        }
+        setLanguage(next);
       },
     );
 
