@@ -10,7 +10,7 @@ use thiserror::Error;
 
 use calliop_prompt::{post_process_transcript, ToneProfile};
 
-use crate::app_context::{get_active_window, resolve_tone, ActiveWindow};
+use crate::app_context::{get_active_window, resolve_tone};
 use crate::audio::{AudioCapture, VadSegmenter, AUDIO_CHUNK_CHANNEL_CAPACITY, TARGET_SAMPLE_RATE};
 use crate::inject::{InjectError, TextInjector};
 use crate::llm::LlamaEngine;
@@ -212,17 +212,6 @@ impl PipelineOrchestrator {
 
     pub fn set_app_context_rules(&mut self, rules: Vec<AppContextRule>) {
         *self.app_context_rules.write() = rules;
-    }
-
-    fn resolve_active_context(&self) -> (ToneProfile, Option<ActiveWindow>) {
-        let rules = self.app_context_rules.read().clone();
-        match get_active_window() {
-            Some(window) => {
-                let tone = resolve_tone(&window, &rules);
-                (tone, Some(window))
-            }
-            None => (ToneProfile::Default, None),
-        }
     }
 
     pub fn state(&self) -> PipelineState {
@@ -496,72 +485,86 @@ impl PipelineOrchestrator {
         let raw = transcripts.join(" ").trim().to_string();
         let stt_wait_ms = stop_instant.elapsed().as_millis() as u64;
 
+        let auto_edit = self.auto_edit.load(Ordering::SeqCst);
+        let snippets = self.snippets.read().clone();
+        let snippet_fallback = prepare_display_transcript(&raw, &snippets);
+        let llm_input = if !raw.is_empty() && auto_edit {
+            let (shielded_raw, snippet_shields) = shield_snippet_triggers(&raw, &snippets);
+            let full_text = post_process_transcript(shielded_raw.trim());
+            Some((full_text, snippet_shields))
+        } else {
+            None
+        };
+
         let (active_tone, active_window) = context_handle.join().map_err(|_| {
             PipelineError::Background("failed to resolve active window context".into())
         })?;
 
-        let auto_edit = self.auto_edit.load(Ordering::SeqCst);
         if !raw.is_empty() && auto_edit && self.llm.lock().is_none() {
             wait_for_llm_engine(&self.llm, LLM_INJECT_WAIT);
         }
 
-        let snippets = self.snippets.read().clone();
-        let snippet_fallback = prepare_display_transcript(&raw, &snippets);
-
         let mut llm_blocked_ms = 0_u64;
         let (text_to_inject, llm_ms, llm_invalidated) =
-            if !raw.is_empty() && auto_edit && self.llm.lock().is_some() {
-                let snippets_snapshot = snippets.clone();
-                let (shielded_raw, snippet_shields) = shield_snippet_triggers(&raw, &snippets);
-                let full_text = post_process_transcript(shielded_raw.trim());
-                let job = start_llm_cleanup(
-                    Arc::clone(&self.llm),
-                    Arc::clone(&self.llm_ready),
-                    Arc::clone(&self.auto_edit),
-                    &full_text,
-                    active_tone,
-                );
-                let llm_wait_start = Instant::now();
-                let outcome = match job.wait_for_inject(LLM_INJECT_WAIT) {
-                    LlmCleanupWait::Completed {
-                        text,
-                        llm_ms,
-                        invalidated,
-                    } => {
-                        let snippets = self.snippets.read().clone();
-                        let text = if self.auto_edit.load(Ordering::SeqCst) {
-                            if snippets == snippets_snapshot {
-                                finalize_llm_with_snippets(
-                                    &text,
-                                    &snippet_shields,
-                                    &snippet_fallback,
-                                    &snippets,
-                                )
-                            } else {
-                                let from_cleaned = apply_snippets(&text, &snippets);
-                                if from_cleaned != text {
-                                    from_cleaned
+            if let Some((full_text, snippet_shields)) = llm_input {
+                if self.llm.lock().is_none() {
+                    let text = if snippet_shields.is_empty() {
+                        full_text
+                    } else {
+                        unshield_snippets(&full_text, &snippet_shields)
+                    };
+                    (text, 0, false)
+                } else {
+                    let snippets_snapshot = snippets.clone();
+                    let job = start_llm_cleanup(
+                        Arc::clone(&self.llm),
+                        Arc::clone(&self.llm_ready),
+                        Arc::clone(&self.auto_edit),
+                        &full_text,
+                        active_tone,
+                    );
+                    let llm_wait_start = Instant::now();
+                    let outcome = match job.wait_for_inject(LLM_INJECT_WAIT) {
+                        LlmCleanupWait::Completed {
+                            text,
+                            llm_ms,
+                            invalidated,
+                        } => {
+                            let snippets = self.snippets.read().clone();
+                            let text = if self.auto_edit.load(Ordering::SeqCst) {
+                                if snippets == snippets_snapshot {
+                                    finalize_llm_with_snippets(
+                                        &text,
+                                        &snippet_shields,
+                                        &snippet_fallback,
+                                        &snippets,
+                                    )
                                 } else {
-                                    snippet_fallback.clone()
+                                    let from_cleaned = apply_snippets(&text, &snippets);
+                                    if from_cleaned != text {
+                                        from_cleaned
+                                    } else {
+                                        snippet_fallback.clone()
+                                    }
                                 }
-                            }
-                        } else {
-                            snippet_fallback.clone()
-                        };
-                        (text, llm_ms, invalidated)
-                    }
-                    LlmCleanupWait::Pending(job) => {
-                        job.finalize_in_background(app.clone());
-                        let text = if snippet_shields.is_empty() {
-                            full_text
-                        } else {
-                            unshield_snippets(&full_text, &snippet_shields)
-                        };
-                        (text, 0, false)
-                    }
-                };
-                llm_blocked_ms = llm_wait_start.elapsed().as_millis() as u64;
-                outcome
+                            } else {
+                                snippet_fallback.clone()
+                            };
+                            (text, llm_ms, invalidated)
+                        }
+                        LlmCleanupWait::Pending(job) => {
+                            job.finalize_in_background(app.clone());
+                            let text = if snippet_shields.is_empty() {
+                                full_text
+                            } else {
+                                unshield_snippets(&full_text, &snippet_shields)
+                            };
+                            (text, 0, false)
+                        }
+                    };
+                    llm_blocked_ms = llm_wait_start.elapsed().as_millis() as u64;
+                    outcome
+                }
             } else if raw.is_empty() {
                 (String::new(), 0, false)
             } else {

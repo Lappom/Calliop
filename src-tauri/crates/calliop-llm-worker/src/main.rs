@@ -17,11 +17,11 @@ use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::model::params::LlamaModelParams;
 use llama_cpp_2::model::{AddBos, LlamaChatMessage, LlamaChatTemplate, LlamaModel};
 use llama_cpp_2::sampling::LlamaSampler;
+use llama_cpp_2::token::LlamaToken;
 use serde::{Deserialize, Serialize};
 
 const CLEANUP_CONTEXT_TOKENS: u32 = 2048;
-const CLEANUP_MAX_OUTPUT_TOKENS: i32 = 128;
-const DEFAULT_SEED: u32 = 42;
+const CLEANUP_MAX_OUTPUT_TOKENS: i32 = 96;
 
 fn resolve_chat_template(model: &LlamaModel) -> Result<LlamaChatTemplate, String> {
     match model.chat_template(None) {
@@ -48,10 +48,18 @@ struct WorkerResponse {
     error: Option<String>,
 }
 
+#[derive(Default)]
+struct ToneKvCache {
+    tone: Option<ToneProfile>,
+    system_token_len: usize,
+}
+
 struct InferenceEngine {
     backend: LlamaBackend,
     model: LlamaModel,
     n_threads: i32,
+    chat_template: LlamaChatTemplate,
+    system_prompts: [String; 4],
 }
 
 impl InferenceEngine {
@@ -63,18 +71,37 @@ impl InferenceEngine {
             .min(8);
         let model = LlamaModel::load_from_file(&backend, model_path, &LlamaModelParams::default())
             .map_err(|err| err.to_string())?;
+        let chat_template = resolve_chat_template(&model)?;
+        let system_prompts = [
+            build_system_prompt(ToneProfile::Default),
+            build_system_prompt(ToneProfile::Casual),
+            build_system_prompt(ToneProfile::Formal),
+            build_system_prompt(ToneProfile::Technical),
+        ];
         Ok(Self {
             backend,
             model,
             n_threads,
+            chat_template,
+            system_prompts,
         })
+    }
+
+    fn system_prompt(&self, tone: ToneProfile) -> &str {
+        match tone {
+            ToneProfile::Default => &self.system_prompts[0],
+            ToneProfile::Casual => &self.system_prompts[1],
+            ToneProfile::Formal => &self.system_prompts[2],
+            ToneProfile::Technical => &self.system_prompts[3],
+        }
     }
 
     fn new_session_context(&self) -> Result<(LlamaContext<'_>, LlamaBatch), String> {
         let ctx_size = NonZeroU32::new(CLEANUP_CONTEXT_TOKENS).expect("non-zero context");
         let ctx_params = LlamaContextParams::default()
             .with_n_ctx(Some(ctx_size))
-            .with_n_threads(self.n_threads);
+            .with_n_threads(self.n_threads)
+            .with_n_threads_batch(self.n_threads);
         let ctx = self
             .model
             .new_context(&self.backend, ctx_params)
@@ -83,10 +110,57 @@ impl InferenceEngine {
         Ok((ctx, batch))
     }
 
+    fn tokenize_prompt(&self, messages: &[LlamaChatMessage]) -> Result<Vec<LlamaToken>, String> {
+        let prompt = self
+            .model
+            .apply_chat_template(&self.chat_template, messages, true)
+            .map_err(|err| err.to_string())?;
+        self.model
+            .str_to_token(&prompt, AddBos::Never)
+            .map_err(|err| err.to_string())
+    }
+
+    fn tokenize_system_prefix(&self, tone: ToneProfile) -> Result<Vec<LlamaToken>, String> {
+        let system_prompt = self.system_prompt(tone);
+        let messages = vec![
+            LlamaChatMessage::new("system".into(), system_prompt.to_string())
+                .map_err(|err| err.to_string())?,
+        ];
+        let prompt = self
+            .model
+            .apply_chat_template(&self.chat_template, &messages, false)
+            .map_err(|err| err.to_string())?;
+        self.model
+            .str_to_token(&prompt, AddBos::Never)
+            .map_err(|err| err.to_string())
+    }
+
+    fn decode_prompt_tokens(
+        &self,
+        ctx: &mut LlamaContext<'_>,
+        batch: &mut LlamaBatch,
+        tokens: &[LlamaToken],
+        start_pos: i32,
+    ) -> Result<(), String> {
+        if tokens.is_empty() {
+            return Ok(());
+        }
+        batch.clear();
+        let last_index = tokens.len().saturating_sub(1);
+        for (offset, token) in tokens.iter().enumerate() {
+            let pos = start_pos + offset as i32;
+            batch
+                .add(*token, pos, &[0], offset == last_index)
+                .map_err(|err| err.to_string())?;
+        }
+        ctx.decode(batch).map_err(|err| err.to_string())
+    }
+
     fn cleanup_with_context(
         &self,
         ctx: &mut LlamaContext<'_>,
         batch: &mut LlamaBatch,
+        tone_cache: &mut ToneKvCache,
         raw: &str,
         tone: ToneProfile,
     ) -> Result<String, String> {
@@ -95,49 +169,53 @@ impl InferenceEngine {
             return Err("empty input text".into());
         }
 
-        ctx.clear_kv_cache();
-
-        let system_prompt = build_system_prompt(tone);
         let user_message = build_cleanup_user_message(raw).map_err(|err| err.to_string())?;
         let messages = vec![
-            LlamaChatMessage::new("system".into(), system_prompt).map_err(|err| err.to_string())?,
+            LlamaChatMessage::new("system".into(), self.system_prompt(tone).to_string())
+                .map_err(|err| err.to_string())?,
             LlamaChatMessage::new("user".into(), user_message).map_err(|err| err.to_string())?,
         ];
 
-        let template = resolve_chat_template(&self.model)?;
-        let prompt = self
-            .model
-            .apply_chat_template(&template, &messages, true)
-            .map_err(|err| err.to_string())?;
-        let tokens = self
-            .model
-            .str_to_token(&prompt, AddBos::Never)
-            .map_err(|err| err.to_string())?;
+        let full_tokens = self.tokenize_prompt(&messages)?;
+        let system_tokens = self.tokenize_system_prefix(tone)?;
+        let system_prefix_matches = full_tokens.len() >= system_tokens.len()
+            && full_tokens[..system_tokens.len()] == system_tokens[..];
+
+        let reuse_system_kv = tone_cache.tone == Some(tone)
+            && tone_cache.system_token_len > 0
+            && tone_cache.system_token_len == system_tokens.len()
+            && system_prefix_matches;
+
+        if reuse_system_kv {
+            ctx.clear_kv_cache_seq(Some(0), Some(tone_cache.system_token_len as u32), None)
+                .map_err(|err| err.to_string())?;
+            let suffix = &full_tokens[tone_cache.system_token_len..];
+            self.decode_prompt_tokens(ctx, batch, suffix, tone_cache.system_token_len as i32)?;
+        } else {
+            ctx.clear_kv_cache();
+            self.decode_prompt_tokens(ctx, batch, &full_tokens, 0)?;
+            tone_cache.tone = Some(tone);
+            tone_cache.system_token_len = if system_prefix_matches {
+                system_tokens.len()
+            } else {
+                0
+            };
+        }
 
         let max_tokens =
-            (tokens.len() as i32 + CLEANUP_MAX_OUTPUT_TOKENS).min(CLEANUP_CONTEXT_TOKENS as i32);
-        if tokens.len() >= max_tokens as usize {
+            (full_tokens.len() as i32 + CLEANUP_MAX_OUTPUT_TOKENS).min(CLEANUP_CONTEXT_TOKENS as i32);
+        if full_tokens.len() >= max_tokens as usize {
             return Err("prompt too long".into());
         }
-
-        batch.clear();
-        let last_index = (tokens.len().saturating_sub(1)) as i32;
-        for (i, token) in (0_i32..).zip(tokens) {
-            batch
-                .add(token, i, &[0], i == last_index)
-                .map_err(|err| err.to_string())?;
-        }
-        ctx.decode(batch).map_err(|err| err.to_string())?;
 
         let mut decoder = encoding_rs::UTF_8.new_decoder();
         let mut output = String::new();
         let mut n_cur = batch.n_tokens();
-        let mut sampler =
-            LlamaSampler::chain_simple([LlamaSampler::dist(DEFAULT_SEED), LlamaSampler::greedy()]);
+        let mut sampler = LlamaSampler::greedy();
 
         let mut generated = 0_i32;
         while n_cur < max_tokens && generated < CLEANUP_MAX_OUTPUT_TOKENS {
-            let token = sampler.sample(&ctx, batch.n_tokens() - 1);
+            let token = sampler.sample(ctx, batch.n_tokens() - 1);
             sampler.accept(token);
             if self.model.is_eog_token(token) {
                 break;
@@ -218,6 +296,7 @@ fn parse_oneshot_text(args: &[String]) -> Result<String, String> {
 fn serve(model_path: PathBuf) -> Result<(), String> {
     let engine = InferenceEngine::load(&model_path)?;
     let (mut ctx, mut batch) = engine.new_session_context()?;
+    let mut tone_cache = ToneKvCache::default();
     write_response(&WorkerResponse {
         text: Some(String::new()),
         error: None,
@@ -241,7 +320,7 @@ fn serve(model_path: PathBuf) -> Result<(), String> {
         };
 
         let tone = request.tone.unwrap_or_default();
-        match engine.cleanup_with_context(&mut ctx, &mut batch, &text, tone) {
+        match engine.cleanup_with_context(&mut ctx, &mut batch, &mut tone_cache, &text, tone) {
             Ok(cleaned) => write_response(&WorkerResponse {
                 text: Some(cleaned),
                 error: None,
@@ -259,7 +338,9 @@ fn serve(model_path: PathBuf) -> Result<(), String> {
 fn oneshot(model_path: PathBuf, text: String) -> Result<(), String> {
     let engine = InferenceEngine::load(&model_path)?;
     let (mut ctx, mut batch) = engine.new_session_context()?;
-    let cleaned = engine.cleanup_with_context(&mut ctx, &mut batch, &text, ToneProfile::Default)?;
+    let mut tone_cache = ToneKvCache::default();
+    let cleaned =
+        engine.cleanup_with_context(&mut ctx, &mut batch, &mut tone_cache, &text, ToneProfile::Default)?;
     println!("{cleaned}");
     Ok(())
 }

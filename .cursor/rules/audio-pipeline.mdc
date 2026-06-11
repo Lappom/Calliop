@@ -19,7 +19,7 @@ Hotkey (toggle ON / push-to-talk hold)
 Hotkey OFF / release (toggle or PTT)
   -> flush VAD tail + concat segments
   -> get_active_window + resolve_tone (app_context/, SQLite rules cache)
-  -> optional LlamaEngine cleanup (sidecar, tone-aware system prompt, 1.2s fast-path, fallback post-processed)
+  -> optional LlamaEngine cleanup (sidecar, tone-aware system prompt, 4s wait, KV-cached system prefix, fallback post-processed)
   -> apply_snippets (deterministic trigger expansion, verbatim + auto-edit)
   -> TextInjector (inject/)
   -> optional CorrectionWatcher (observe/, Windows UIA, if auto_learn)
