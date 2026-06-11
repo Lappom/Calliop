@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { translateError } from "../lib/translateError";
 
 export type AppContextMatchType = "exe" | "title_contains";
 export type ToneProfile = "default" | "casual" | "formal" | "technical";
@@ -20,6 +22,7 @@ export interface AppContextRule {
 }
 
 export function useAppContext() {
+  const { t } = useTranslation();
   const [rules, setRules] = useState<AppContextRule[]>([]);
   const [activeWindow, setActiveWindow] = useState<ActiveWindow | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -33,19 +36,19 @@ export function useAppContext() {
       setLoaded(true);
       setErrorMessage(null);
     } catch (err) {
-      setErrorMessage(String(err));
+      setErrorMessage(translateError(err, t));
       setLoaded(true);
     }
-  }, []);
+  }, [t]);
 
   const refreshActiveWindow = useCallback(async () => {
     try {
       const window = await invoke<ActiveWindow | null>("get_active_window");
       setActiveWindow(window);
     } catch (err) {
-      setErrorMessage(String(err));
+      setErrorMessage(translateError(err, t));
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     let cancelled = false;
@@ -86,17 +89,17 @@ export function useAppContext() {
         if (inserted) {
           await loadRules();
         } else {
-          setErrorMessage("Impossible d'ajouter cette règle.");
+          setErrorMessage(t("style.errors.cannotAdd"));
         }
         return inserted;
       } catch (err) {
-        setErrorMessage(String(err));
+        setErrorMessage(translateError(err, t));
         throw err;
       } finally {
         setBusy(false);
       }
     },
-    [loadRules],
+    [loadRules, t],
   );
 
   const removeRule = useCallback(
@@ -107,13 +110,13 @@ export function useAppContext() {
         await invoke("remove_app_context_rule", { id });
         await loadRules();
       } catch (err) {
-        setErrorMessage(String(err));
+        setErrorMessage(translateError(err, t));
         throw err;
       } finally {
         setBusy(false);
       }
     },
-    [loadRules],
+    [loadRules, t],
   );
 
   return {

@@ -1,5 +1,7 @@
+import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import type { ToneProfile } from "../../hooks/useAppContext";
-import { TONE_META, TONE_PROFILES } from "./styleUtils";
+import { getToneMeta, TONE_PROFILES } from "./styleUtils";
 
 interface ToneProfilePickerProps {
   value: ToneProfile;
@@ -12,12 +14,17 @@ export function ToneProfilePicker({
   disabled,
   onChange,
 }: ToneProfilePickerProps) {
+  const { t } = useTranslation();
+  const toneMeta = useMemo(() => getToneMeta(t), [t]);
+
   return (
     <fieldset className="m-0 border-0 p-0">
-      <legend className="text-body-sm mb-3 text-charcoal">Style de dictée</legend>
+      <legend className="text-body-sm mb-3 text-charcoal">
+        {t("style.modal.toneLegend")}
+      </legend>
       <div className="grid gap-2 sm:grid-cols-2">
         {TONE_PROFILES.map((tone) => {
-          const meta = TONE_META[tone];
+          const meta = toneMeta[tone];
           const selected = value === tone;
           return (
             <button

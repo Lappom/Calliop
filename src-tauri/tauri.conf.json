@@ -57,7 +57,8 @@
     ],
     "windows": {
       "nsis": {
-        "displayLanguageSelector": false,
+        "displayLanguageSelector": true,
+        "languages": ["French", "English"],
         "installerIcon": "icons/icon.ico",
         "installMode": "currentUser"
       }

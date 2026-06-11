@@ -1,3 +1,4 @@
+import { useUiLocale } from "../../../i18n/useUiLocale";
 import { CHART_COLORS } from "./chartTheme";
 
 interface WpmGaugeProps {
@@ -20,15 +21,20 @@ export function WpmGauge({
   averageWpm,
   baselineWpm = 40,
 }: WpmGaugeProps) {
+  const { t } = useUiLocale();
   const clamped = Math.min(Math.max(percent, 0), 200);
   const progress = (clamped / 200) * ARC_LENGTH;
   const arcStartX = CX - RADIUS;
   const arcEndX = CX + RADIUS;
+  const roundedWpm = Math.round(averageWpm);
 
   return (
     <figure
       className="m-0 flex w-full flex-col items-center gap-4"
-      aria-label={`Vitesse de dictée : ${Math.round(averageWpm)} mots par minute, ${percent} pour cent de la frappe moyenne`}
+      aria-label={t("insight.wpm.aria", {
+        wpm: roundedWpm,
+        percent,
+      })}
     >
       <svg
         width={WIDTH}
@@ -57,14 +63,14 @@ export function WpmGauge({
 
       <div className="flex flex-col items-center gap-1 text-center">
         <p className="text-heading-md m-0 leading-none text-ink">
-          {percent > 0 ? `${percent}%` : "—"}
+          {percent > 0 ? `${percent}%` : t("common.emDash")}
         </p>
         <p className="text-caption m-0 text-charcoal">
-          vs {baselineWpm} mots/min
+          {t("insight.wpm.vsBaseline", { baseline: baselineWpm })}
         </p>
         {averageWpm > 0 && (
           <p className="text-caption m-0 text-ash">
-            {Math.round(averageWpm)} mots/min en moyenne
+            {t("insight.wpm.average", { wpm: roundedWpm })}
           </p>
         )}
       </div>

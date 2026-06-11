@@ -1,4 +1,6 @@
+import { useMemo } from "react";
 import type { RecentLatencyEntry } from "../../../hooks/useInsights";
+import { useUiLocale } from "../../../i18n/useUiLocale";
 import { ChartFrame } from "./ChartFrame";
 import { CHART_COLORS, formatShortTime } from "./chartTheme";
 import {
@@ -14,13 +16,22 @@ interface LatencyChartProps {
   data: RecentLatencyEntry[];
 }
 
-const SEGMENTS = [
-  { key: "sttMs" as const, label: "STT", color: CHART_COLORS.blue },
-  { key: "llmMs" as const, label: "LLM", color: CHART_COLORS.orange },
-  { key: "injectMs" as const, label: "Injection", color: CHART_COLORS.green },
-];
-
 export function LatencyChart({ data }: LatencyChartProps) {
+  const { t, intlLocale } = useUiLocale();
+
+  const segments = useMemo(
+    () => [
+      { key: "sttMs" as const, label: t("insight.charts.latency.stt"), color: CHART_COLORS.blue },
+      { key: "llmMs" as const, label: t("insight.charts.latency.llm"), color: CHART_COLORS.orange },
+      {
+        key: "injectMs" as const,
+        label: t("insight.charts.latency.inject"),
+        color: CHART_COLORS.green,
+      },
+    ],
+    [t],
+  );
+
   const maxTotal = Math.max(...data.map((d) => d.totalMs), 1);
   const { plotWidth, plotHeight } = plotDimensions();
   const { barWidth, gap, groupOffset } = computeBarLayout(data.length, plotWidth, {
@@ -35,7 +46,7 @@ export function LatencyChart({ data }: LatencyChartProps) {
 
   const legend = (
     <ul className="m-0 flex list-none flex-wrap gap-4 p-0">
-      {SEGMENTS.map((segment) => (
+      {segments.map((segment) => (
         <li
           key={segment.key}
           className="flex items-center gap-2 text-caption text-charcoal"
@@ -52,7 +63,7 @@ export function LatencyChart({ data }: LatencyChartProps) {
 
   return (
     <ChartFrame
-      ariaLabel="Graphique de latence des dernières dictées"
+      ariaLabel={t("insight.charts.latency.aria")}
       legend={legend}
     >
       <svg
@@ -100,7 +111,7 @@ export function LatencyChart({ data }: LatencyChartProps) {
 
           return (
             <g key={`${entry.created_at}-${index}`}>
-              {SEGMENTS.map((segment) => {
+              {segments.map((segment) => {
                 const value = entry[segment.key];
                 const height = (value / maxTotal) * plotHeight;
                 stackY -= height;
@@ -126,7 +137,7 @@ export function LatencyChart({ data }: LatencyChartProps) {
                 textAnchor="middle"
                 className="fill-charcoal font-[family-name:var(--font-mono)] text-[10px]"
               >
-                {formatShortTime(entry.created_at)}
+                {formatShortTime(entry.created_at, intlLocale)}
               </text>
             </g>
           );

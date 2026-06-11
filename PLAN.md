@@ -309,7 +309,7 @@ Application desktop qui permet de **dicter dans n'importe quelle application** a
 | Framework desktop | **Tauri 2** (Rust + React/TS) |
 | Plateformes v1 | **Windows uniquement** — macOS/Linux en v2+ |
 | Licence | **AGPL-3.0** |
-| Langue UI | **Français uniquement** (v1) |
+| Langue UI | **Français + anglais** (v1.1, i18next + SQLite `ui_language`) |
 | Langue STT / tests | **Français d'abord** — multilingue en Phase 3+ |
 | Approche | **100 % custom** — repo Calliop from scratch ; libs éprouvées (whisper.cpp, cpal) sans fork |
 | GPU | **Optionnel** — CUDA/Vulkan sur Windows si disponible, **fallback CPU** obligatoire |

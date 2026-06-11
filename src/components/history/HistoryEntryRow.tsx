@@ -1,5 +1,7 @@
 import { Check, Copy, RotateCcw } from "lucide-react";
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
+import { useUiLocale } from "../../i18n/useUiLocale";
 import type { DictationEntry } from "../../hooks/useHistory";
 import { BadgePill } from "../ui/BadgePill";
 import {
@@ -23,6 +25,8 @@ export function HistoryEntryRow({
   onCopy,
   onReinject,
 }: HistoryEntryRowProps) {
+  const { t } = useTranslation();
+  const { intlLocale } = useUiLocale();
   const appLabel = formatAppLabel(entry);
 
   return (
@@ -38,7 +42,7 @@ export function HistoryEntryRow({
             dateTime={entry.created_at}
             className="text-caption tabular-nums text-ash"
           >
-            {formatEntryClock(entry.created_at)}
+            {formatEntryClock(entry.created_at, intlLocale)}
           </time>
         </div>
 
@@ -51,16 +55,16 @@ export function HistoryEntryRow({
               dateTime={entry.created_at}
               className="text-caption text-ash sm:hidden"
             >
-              {formatEntryTime(entry.created_at)}
+              {formatEntryTime(entry.created_at, intlLocale)}
             </time>
             <span className="hidden text-caption text-ash sm:inline">
-              {formatEntryTime(entry.created_at)}
+              {formatEntryTime(entry.created_at, intlLocale)}
             </span>
             {appLabel && (
               <BadgePill className="max-w-[200px] truncate">{appLabel}</BadgePill>
             )}
             <BadgePill>
-              {entry.wordCount} mot{entry.wordCount > 1 ? "s" : ""}
+              {t("history.entry.wordCount", { count: entry.wordCount })}
             </BadgePill>
             {entry.totalMs > 0 && (
               <span className="text-caption text-ash">{entry.totalMs} ms</span>
@@ -68,13 +72,13 @@ export function HistoryEntryRow({
             {feedback === "copied" && (
               <span className="inline-flex items-center gap-1 text-caption text-accent-green">
                 <Check size={12} aria-hidden />
-                Copié
+                {t("common.copied")}
               </span>
             )}
             {feedback === "injected" && (
               <span className="inline-flex items-center gap-1 text-caption text-accent-green">
                 <Check size={12} aria-hidden />
-                Réinjecté
+                {t("common.reinjected")}
               </span>
             )}
           </div>
@@ -82,14 +86,14 @@ export function HistoryEntryRow({
 
         <div className="flex shrink-0 items-center gap-1 sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
           <ActionButton
-            label="Copier le texte"
+            label={t("history.entry.copy")}
             disabled={busy}
             onClick={() => onCopy(entry.id)}
           >
             <Copy size={15} strokeWidth={1.75} />
           </ActionButton>
           <ActionButton
-            label="Réinjecter dans l'application active"
+            label={t("history.entry.reinject")}
             disabled={busy}
             onClick={() => onReinject(entry.id)}
           >

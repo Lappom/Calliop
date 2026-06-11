@@ -1,6 +1,7 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isTauri } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 
 function MinimizeIcon() {
   return (
@@ -87,6 +88,7 @@ function WindowControl({
 }
 
 export function WindowTitleBar() {
+  const { t } = useTranslation();
   const [maximized, setMaximized] = useState(false);
 
   const syncMaximized = useCallback(async () => {
@@ -138,14 +140,14 @@ export function WindowTitleBar() {
             className="size-4 shrink-0"
           />
           <span className="text-display-serif text-sm leading-none text-ink">
-            Calliop
+            {t("window.title")}
           </span>
         </div>
       </div>
 
       <div className="flex h-full shrink-0">
         <WindowControl
-          label="Réduire"
+          label={t("window.minimize")}
           onClick={() => {
             void win.minimize();
           }}
@@ -153,7 +155,7 @@ export function WindowTitleBar() {
           <MinimizeIcon />
         </WindowControl>
         <WindowControl
-          label={maximized ? "Restaurer" : "Agrandir"}
+          label={maximized ? t("window.restore") : t("window.maximize")}
           onClick={() => {
             void win.toggleMaximize();
           }}
@@ -161,7 +163,7 @@ export function WindowTitleBar() {
           {maximized ? <RestoreIcon /> : <MaximizeIcon />}
         </WindowControl>
         <WindowControl
-          label="Fermer"
+          label={t("window.close")}
           variant="close"
           onClick={() => {
             void win.close();

@@ -1,3 +1,4 @@
+import type { TFunction } from "i18next";
 import type {
   DailyActivityEntry,
   Insights,
@@ -10,16 +11,20 @@ export function formatLatencyDetail(
     LatencyMetricsPayload,
     "sttMs" | "sttWaitMs" | "llmMs" | "llmBlockedMs" | "injectMs"
   >,
+  t: TFunction,
 ): string {
-  const sttLabel =
+  const sttMs =
     latency.sttWaitMs != null
-      ? `STT ${latency.sttWaitMs + latency.sttMs} ms`
-      : `STT ${latency.sttMs} ms`;
-  const parts = [sttLabel, `injection ${latency.injectMs} ms`];
+      ? latency.sttWaitMs + latency.sttMs
+      : latency.sttMs;
+  const parts = [
+    `${t("insight.charts.latency.stt")} ${sttMs} ms`,
+    `${t("insight.charts.latency.inject")} ${latency.injectMs} ms`,
+  ];
   if (latency.llmBlockedMs != null && latency.llmBlockedMs > 0) {
-    parts.push(`LLM ${latency.llmBlockedMs} ms`);
+    parts.push(`${t("insight.charts.latency.llm")} ${latency.llmBlockedMs} ms`);
   } else if (latency.llmMs > 0) {
-    parts.push(`LLM ${latency.llmMs} ms`);
+    parts.push(`${t("insight.charts.latency.llm")} ${latency.llmMs} ms`);
   }
   return parts.join(" · ");
 }
@@ -79,12 +84,12 @@ export function computeWeekSummary(
   };
 }
 
-export function formatWeekdayLabel(isoDate: string): string {
+export function formatWeekdayLabel(isoDate: string, intlLocale: string): string {
   const date = new Date(`${isoDate}T12:00:00`);
   if (Number.isNaN(date.getTime())) {
     return isoDate;
   }
-  return new Intl.DateTimeFormat("fr-FR", { weekday: "long" }).format(date);
+  return new Intl.DateTimeFormat(intlLocale, { weekday: "long" }).format(date);
 }
 
 export function hasInsightData(insights: Insights | null): boolean {
@@ -99,14 +104,16 @@ export function hasInsightData(insights: Insights | null): boolean {
   );
 }
 
-export function formatAudioDuration(minutes: number): string {
+export function formatAudioDuration(minutes: number, t: TFunction): string {
   if (minutes <= 0) {
-    return "—";
+    return t("common.emDash");
   }
   if (minutes < 60) {
-    return `${minutes} min`;
+    return `${minutes} ${t("common.minutesShort")}`;
   }
   const hours = Math.floor(minutes / 60);
   const remainder = minutes % 60;
-  return remainder > 0 ? `${hours} h ${remainder} min` : `${hours} h`;
+  return remainder > 0
+    ? `${hours} ${t("common.hoursShort")} ${remainder} ${t("common.minutesShort")}`
+    : `${hours} ${t("common.hoursShort")}`;
 }

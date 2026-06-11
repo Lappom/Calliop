@@ -1,3 +1,4 @@
+import type { TFunction } from "i18next";
 import type { LucideIcon } from "lucide-react";
 import {
   BarChart3,
@@ -21,27 +22,29 @@ export interface NavSection {
   items: NavItem[];
 }
 
-export const NAV_SECTIONS: NavSection[] = [
-  {
-    items: [{ id: "main", label: "Accueil", icon: Home }],
-  },
-  {
-    label: "Activité",
-    items: [
-      { id: "history", label: "Historique", icon: History },
-      { id: "insight", label: "Statistiques", icon: BarChart3 },
-    ],
-  },
-  {
-    label: "Personnalisation",
-    items: [
-      { id: "dictionary", label: "Dictionnaire", icon: BookOpen },
-      { id: "snippets", label: "Snippets", icon: Braces },
-      { id: "style", label: "Style", icon: Palette },
-    ],
-  },
-];
+export function getNavSections(t: TFunction): NavSection[] {
+  return [
+    {
+      items: [{ id: "main", label: t("nav.items.main"), icon: Home }],
+    },
+    {
+      label: t("nav.sections.activity"),
+      items: [
+        { id: "history", label: t("nav.items.history"), icon: History },
+        { id: "insight", label: t("nav.items.insight"), icon: BarChart3 },
+      ],
+    },
+    {
+      label: t("nav.sections.personalization"),
+      items: [
+        { id: "dictionary", label: t("nav.items.dictionary"), icon: BookOpen },
+        { id: "snippets", label: t("nav.items.snippets"), icon: Braces },
+        { id: "style", label: t("nav.items.style"), icon: Palette },
+      ],
+    },
+  ];
+}
 
-export const BOTTOM_NAV_ITEMS: NavItem[] = [
-  { id: "settings", label: "Paramètres", icon: Settings },
-];
+export function getBottomNavItems(t: TFunction): NavItem[] {
+  return [{ id: "settings", label: t("nav.items.settings"), icon: Settings }];
+}

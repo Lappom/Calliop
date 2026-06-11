@@ -1,4 +1,5 @@
 import type { DailyActivityEntry } from "../../../hooks/useInsights";
+import { useUiLocale } from "../../../i18n/useUiLocale";
 import { ChartFrame } from "./ChartFrame";
 import { CHART_COLORS, formatShortDate } from "./chartTheme";
 import {
@@ -15,6 +16,7 @@ interface ActivityChartProps {
 }
 
 export function ActivityChart({ data }: ActivityChartProps) {
+  const { t, intlLocale } = useUiLocale();
   const maxWords = Math.max(...data.map((d) => d.wordCount), 1);
   const { plotWidth, plotHeight } = plotDimensions();
   const { barWidth, gap, groupOffset } = computeBarLayout(
@@ -29,7 +31,7 @@ export function ActivityChart({ data }: ActivityChartProps) {
   }));
 
   return (
-    <ChartFrame ariaLabel="Graphique des mots dictés sur les sept derniers jours">
+    <ChartFrame ariaLabel={t("insight.charts.activity.aria")}>
       <svg
         viewBox={`0 0 ${CHART_VIEW_WIDTH} ${CHART_VIEW_HEIGHT}`}
         preserveAspectRatio="xMidYMid meet"
@@ -93,7 +95,7 @@ export function ActivityChart({ data }: ActivityChartProps) {
                 textAnchor="middle"
                 className="fill-charcoal font-[family-name:var(--font-ui)] text-[10px]"
               >
-                {formatShortDate(entry.date)}
+                {formatShortDate(entry.date, intlLocale)}
               </text>
             </g>
           );

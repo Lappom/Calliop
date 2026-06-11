@@ -35,14 +35,6 @@ export interface LatencyMetricsPayload {
   totalMs: number;
 }
 
-export const STATE_LABELS: Record<PipelineState, string> = {
-  idle: "En attente",
-  recording: "Écoute en cours…",
-  transcribing: "Transcription…",
-  injecting: "Injection du texte…",
-  error: "Erreur",
-};
-
 export function usePipelineState() {
   const [pipelineState, setPipelineState] = useState<PipelineState>("idle");
   const [lastTranscript, setLastTranscript] = useState<string | null>(null);
@@ -76,7 +68,7 @@ export function usePipelineState() {
       listen<PipelineStatePayload>("pipeline-state", (event) => {
         setPipelineState(event.payload.state);
         if (event.payload.state === "error") {
-          setErrorMessage(event.payload.message ?? "Erreur inconnue");
+          setErrorMessage(event.payload.message ?? null);
           setPartialTranscript("");
         } else {
           setErrorMessage(null);

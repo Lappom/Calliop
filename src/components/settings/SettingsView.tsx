@@ -1,6 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import type { UiLanguageCode } from "../../i18n/locale";
 import { useSettings } from "../../hooks/useSettings";
+import { translateError } from "../../lib/translateError";
 import { Button } from "../ui/Button";
 import { Kbd } from "../ui/Kbd";
 import { ProgressBar } from "../ui/ProgressBar";
@@ -12,12 +15,14 @@ import { SettingsToggleRow } from "./SettingsToggleRow";
 import {
   captureHotkey,
   formatHotkeyLabel,
+  getSettingsSections,
+  hotkeyPartLabel,
   hotkeyParts,
-  SETTINGS_SECTIONS,
   type SettingsSectionId,
 } from "./settingsUtils";
 
 export function SettingsView() {
+  const { t } = useTranslation();
   const [recordingHotkey, setRecordingHotkey] = useState(false);
   const [pendingHotkey, setPendingHotkey] = useState<string | null>(null);
   const [hotkeyRestoreError, setHotkeyRestoreError] = useState<string | null>(
@@ -39,6 +44,7 @@ export function SettingsView() {
     setAutoLearn,
     setAutoUpdate,
     setSttLanguage,
+    setUiLanguage,
     setWhisperModel,
     setLlmModel,
     setInferenceBackend,
@@ -49,15 +55,16 @@ export function SettingsView() {
     resetSettings,
   } = useSettings();
 
+  const settingsSections = useMemo(() => getSettingsSections(t), [t]);
   const sectionMeta = useMemo(
     () =>
       Object.fromEntries(
-        SETTINGS_SECTIONS.map((section) => [section.id, section]),
+        settingsSections.map((section) => [section.id, section]),
       ) as Record<
         SettingsSectionId,
-        (typeof SETTINGS_SECTIONS)[number]
+        (typeof settingsSections)[number]
       >,
-    [],
+    [settingsSections],
   );
 
   const handleHotkeyCapture = useCallback(
@@ -131,10 +138,8 @@ export function SettingsView() {
   return (
     <div className="w-full">
       <header className="mb-8">
-        <h1 className="text-heading-md mb-2 text-ink">Paramètres</h1>
-        <p className="text-body-sm text-charcoal">
-          Les réglages sont enregistrés localement sur cet appareil.
-        </p>
+        <h1 className="text-heading-md mb-2 text-ink">{t("settings.title")}</h1>
+        <p className="text-body-sm text-charcoal">{t("settings.subtitle")}</p>
       </header>
 
       <div className="flex flex-col gap-12 pb-8">
@@ -145,14 +150,30 @@ export function SettingsView() {
             glow="blue"
           >
             <Select
+              id="ui-language"
+              label={t("settings.uiLanguage.label")}
+              value={settings.uiLanguage}
+              disabled={!loaded || saving}
+              options={[
+                { value: "fr", label: t("settings.uiLanguage.fr") },
+                { value: "en", label: t("settings.uiLanguage.en") },
+              ]}
+              onChange={(value) => {
+                if (value === "fr" || value === "en") {
+                  void setUiLanguage(value as UiLanguageCode);
+                }
+              }}
+            />
+
+            <Select
               id="language"
-              label="Langue de dictée"
+              label={t("settings.sttLanguage.label")}
               value={settings.sttLanguage}
               disabled={!loaded || saving}
               options={[
-                { value: "fr", label: "Français" },
-                { value: "en", label: "Anglais" },
-                { value: "auto", label: "Détection automatique" },
+                { value: "fr", label: t("settings.sttLanguage.fr") },
+                { value: "en", label: t("settings.sttLanguage.en") },
+                { value: "auto", label: t("settings.sttLanguage.auto") },
               ]}
               onChange={(value) => {
                 void setSttLanguage(value);
@@ -160,11 +181,11 @@ export function SettingsView() {
             />
 
             <SettingsToggleRow
-              label="Auto-edits IA"
+              label={t("settings.autoEdit.label")}
               description={
                 settings.autoEdit
-                  ? "Nettoie fillers, ponctuation et reformulation légère via un modèle local."
-                  : "Mode verbatim : la transcription brute est injectée sans post-traitement LLM."
+                  ? t("settings.autoEdit.descriptionOn")
+                  : t("settings.autoEdit.descriptionOff")
               }
               checked={settings.autoEdit}
               disabled={!loaded}
@@ -176,16 +197,18 @@ export function SettingsView() {
             {settings.autoEdit && llmProgress !== null && (
               <ProgressBar
                 value={llmProgress}
-                label={`Téléchargement LLM (${llmProgressModel ?? settings.llmModel})`}
+                label={t("settings.modelsPanel.downloadLlm", {
+                  model: llmProgressModel ?? settings.llmModel,
+                })}
               />
             )}
 
             <SettingsToggleRow
-              label="Apprentissage automatique des corrections"
+              label={t("settings.autoLearn.label")}
               description={
                 settings.autoLearn
-                  ? "Détecte les corrections dans l'application cible et enrichit le dictionnaire localement."
-                  : "Désactivé : seules les corrections manuelles sont prises en compte."
+                  ? t("settings.autoLearn.descriptionOn")
+                  : t("settings.autoLearn.descriptionOff")
               }
               checked={settings.autoLearn}
               disabled={!loaded}
@@ -241,16 +264,16 @@ export function SettingsView() {
           >
             <div className="flex flex-col gap-3">
               <TextInput
-                label="Raccourci global"
-                value={formatHotkeyLabel(displayHotkey)}
+                label={t("settings.shortcutsPanel.globalLabel")}
+                value={formatHotkeyLabel(displayHotkey, t)}
                 readOnly
               />
               <p className="text-body-sm text-charcoal">
-                Aperçu :{" "}
+                {t("keys.hotkeyPreview")}{" "}
                 {hotkeyParts(displayHotkey).map((part, index) => (
                   <span key={`${part}-${index}`}>
-                    {index > 0 && " + "}
-                    <Kbd>{part === "Space" ? "Espace" : part}</Kbd>
+                    {index > 0 && ` ${t("common.plusSeparator")} `}
+                    <Kbd>{hotkeyPartLabel(t, part)}</Kbd>
                   </span>
                 ))}
               </p>
@@ -263,15 +286,17 @@ export function SettingsView() {
                 }}
               >
                 {recordingHotkey
-                  ? "Appuyez sur la combinaison… (Échap pour annuler)"
-                  : "Modifier le raccourci"}
+                  ? t("keys.hotkeyCapturePrompt", {
+                      escapeHint: t("keys.escapeHint"),
+                    })
+                  : t("keys.hotkeyEdit")}
               </Button>
             </div>
 
             {hotkeyRestoreError && (
               <div className="space-y-2">
                 <p className="text-body-sm text-accent-red">
-                  {hotkeyRestoreError}
+                  {translateError(hotkeyRestoreError, t)}
                 </p>
                 <Button
                   variant="ghost"
@@ -279,7 +304,7 @@ export function SettingsView() {
                     void restoreGlobalHotkey();
                   }}
                 >
-                  Réactiver le raccourci de dictée
+                  {t("keys.hotkeyRestore")}
                 </Button>
               </div>
             )}
@@ -292,11 +317,11 @@ export function SettingsView() {
             glow="blue"
           >
             <SettingsToggleRow
-              label="Mises à jour automatiques"
+              label={t("settings.autoUpdate.label")}
               description={
                 settings.autoUpdate
-                  ? "Vérifie les nouvelles versions sur GitHub au démarrage et installe les mises à jour signées."
-                  : "Désactivé : aucune vérification réseau pour les mises à jour de l'application."
+                  ? t("settings.autoUpdate.descriptionOn")
+                  : t("settings.autoUpdate.descriptionOff")
               }
               checked={settings.autoUpdate}
               disabled={!loaded}
@@ -306,7 +331,7 @@ export function SettingsView() {
             />
 
             <SettingsToggleRow
-              label="Lancer au démarrage"
+              label={t("settings.autostart.label")}
               checked={autostartEnabled}
               disabled={!loaded}
               onCheckedChange={(checked) => {
@@ -315,11 +340,11 @@ export function SettingsView() {
             />
 
             <SettingsToggleRow
-              label="Mode basse consommation"
+              label={t("settings.lowPower.label")}
               description={
                 settings.lowPowerMode
-                  ? "LLM chargé à la demande ; Whisper déchargé après 10 min d'inactivité."
-                  : "Modèles maintenus en mémoire pour une latence réduite."
+                  ? t("settings.lowPower.descriptionOn")
+                  : t("settings.lowPower.descriptionOff")
               }
               checked={settings.lowPowerMode}
               disabled={!loaded}
@@ -329,11 +354,11 @@ export function SettingsView() {
             />
 
             <SettingsToggleRow
-              label="Profils adaptatifs"
+              label={t("settings.adaptivePerf.label")}
               description={
                 settings.adaptivePerf
-                  ? "Ajuste chunk VAD, threads STT et modèles « Automatique » selon la RAM/GPU."
-                  : "Paramètres de performance fixes (chunk 512, threads par défaut)."
+                  ? t("settings.adaptivePerf.descriptionOn")
+                  : t("settings.adaptivePerf.descriptionOff")
               }
               checked={settings.adaptivePerf}
               disabled={!loaded}
@@ -344,15 +369,15 @@ export function SettingsView() {
 
             <Select
               id="inference-backend"
-              label="Backend d'inférence"
+              label={t("settings.inferenceBackend.label")}
               value={settings.inferenceBackend}
               disabled={!loaded || saving}
               options={[
                 {
                   value: "auto",
-                  label: "Automatique (GPU si disponible, sinon CPU)",
+                  label: t("settings.inferenceBackend.auto"),
                 },
-                { value: "cpu", label: "CPU uniquement" },
+                { value: "cpu", label: t("settings.inferenceBackend.cpu") },
               ]}
               onChange={(value) => {
                 void setInferenceBackend(value);
@@ -361,20 +386,24 @@ export function SettingsView() {
 
             {inferenceInfo && (
               <p className="text-caption text-ash">
-                Compilé avec support {inferenceInfo.compiled_backend} — backend
-                actif : {inferenceInfo.active_backend}. Profil{" "}
-                {inferenceInfo.perf_tier} — RAM{" "}
-                {inferenceInfo.total_ram_gb.toFixed(0)} Go (
-                {inferenceInfo.avail_ram_gb.toFixed(1)} Go libres). Modèles
-                effectifs : Whisper {inferenceInfo.effective_whisper}, LLM{" "}
-                {inferenceInfo.effective_llm}, chunk VAD{" "}
-                {inferenceInfo.vad_chunk_size}.
+                {t("settings.inferenceInfo", {
+                  compiled: inferenceInfo.compiled_backend,
+                  active: inferenceInfo.active_backend,
+                  tier: inferenceInfo.perf_tier,
+                  totalRam: inferenceInfo.total_ram_gb.toFixed(0),
+                  freeRam: inferenceInfo.avail_ram_gb.toFixed(1),
+                  whisper: inferenceInfo.effective_whisper,
+                  llm: inferenceInfo.effective_llm,
+                  chunk: inferenceInfo.vad_chunk_size,
+                })}
               </p>
             )}
           </SettingsSection>
 
           {errorMessage && (
-            <p className="text-body-sm text-accent-red">{errorMessage}</p>
+            <p className="text-body-sm text-accent-red">
+              {translateError(errorMessage, t)}
+            </p>
           )}
 
           <footer className="flex flex-wrap items-center justify-between gap-4 border-t border-divider-soft pt-6">
@@ -385,10 +414,10 @@ export function SettingsView() {
                 void resetSettings();
               }}
             >
-              Réinitialiser
+              {t("common.reset")}
             </Button>
             <Button variant="primary" disabled>
-              {saving ? "Enregistrement…" : "Enregistrement automatique"}
+              {saving ? t("common.saving") : t("common.autoSave")}
             </Button>
           </footer>
         </div>

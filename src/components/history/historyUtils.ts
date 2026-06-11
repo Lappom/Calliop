@@ -1,12 +1,27 @@
+import type { TFunction } from "i18next";
 import type { DictationEntry } from "../../hooks/useHistory";
 
 export type HistorySort = "recent" | "oldest" | "longest";
 
-export const HISTORY_SORT_LABELS: Record<HistorySort, string> = {
-  recent: "Plus récentes",
-  oldest: "Plus anciennes",
-  longest: "Plus longues",
-};
+export function getHistorySortLabels(t: TFunction): Record<HistorySort, string> {
+  return {
+    recent: t("history.sort.recent"),
+    oldest: t("history.sort.oldest"),
+    longest: t("history.sort.longest"),
+  };
+}
+
+export function getHistoryGroupLabels(t: TFunction) {
+  return {
+    today: t("common.today"),
+    yesterday: t("common.yesterday"),
+    thisWeek: t("common.thisWeek"),
+    thisMonth: t("common.thisMonth"),
+    other: t("common.other"),
+  };
+}
+
+export type HistoryGroupLabels = ReturnType<typeof getHistoryGroupLabels>;
 
 export const HISTORY_SORT_ORDER: HistorySort[] = [
   "recent",
@@ -40,23 +55,23 @@ export function sortHistoryEntries(
   return sorted;
 }
 
-export function formatEntryTime(iso: string): string {
+export function formatEntryTime(iso: string, intlLocale: string): string {
   const date = parseEntryDate(iso);
   if (!date) {
     return iso;
   }
-  return new Intl.DateTimeFormat("fr-FR", {
+  return new Intl.DateTimeFormat(intlLocale, {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(date);
 }
 
-export function formatEntryClock(iso: string): string {
+export function formatEntryClock(iso: string, intlLocale: string): string {
   const date = parseEntryDate(iso);
   if (!date) {
     return "";
   }
-  return new Intl.DateTimeFormat("fr-FR", {
+  return new Intl.DateTimeFormat(intlLocale, {
     hour: "2-digit",
     minute: "2-digit",
   }).format(date);
@@ -71,10 +86,14 @@ function startOfDay(date: Date): Date {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());
 }
 
-export function groupLabelForDate(iso: string): string {
+export function groupLabelForDate(
+  iso: string,
+  intlLocale: string,
+  groupLabels: HistoryGroupLabels,
+): string {
   const date = parseEntryDate(iso);
   if (!date) {
-    return "Autre";
+    return groupLabels.other;
   }
 
   const today = startOfDay(new Date());
@@ -83,11 +102,11 @@ export function groupLabelForDate(iso: string): string {
     (today.getTime() - entryDay.getTime()) / (1000 * 60 * 60 * 24),
   );
 
-  if (diffDays === 0) return "Aujourd'hui";
-  if (diffDays === 1) return "Hier";
-  if (diffDays < 7) return "Cette semaine";
-  if (diffDays < 30) return "Ce mois-ci";
-  return new Intl.DateTimeFormat("fr-FR", {
+  if (diffDays === 0) return groupLabels.today;
+  if (diffDays === 1) return groupLabels.yesterday;
+  if (diffDays < 7) return groupLabels.thisWeek;
+  if (diffDays < 30) return groupLabels.thisMonth;
+  return new Intl.DateTimeFormat(intlLocale, {
     month: "long",
     year: "numeric",
   }).format(date);
@@ -98,11 +117,15 @@ export interface HistoryGroup {
   entries: DictationEntry[];
 }
 
-export function groupHistoryEntries(entries: DictationEntry[]): HistoryGroup[] {
+export function groupHistoryEntries(
+  entries: DictationEntry[],
+  intlLocale: string,
+  groupLabels: HistoryGroupLabels,
+): HistoryGroup[] {
   const groups = new Map<string, DictationEntry[]>();
 
   for (const entry of entries) {
-    const label = groupLabelForDate(entry.created_at);
+    const label = groupLabelForDate(entry.created_at, intlLocale, groupLabels);
     const bucket = groups.get(label);
     if (bucket) {
       bucket.push(entry);

@@ -1,13 +1,11 @@
 import { useEffect, useId, useState, type FormEvent } from "react";
 import { ArrowRight } from "lucide-react";
+import { useUiLocale } from "../../i18n/useUiLocale";
 import { Button } from "../ui/Button";
 import { InfoTooltip } from "../ui/InfoTooltip";
 import { Modal } from "../ui/Modal";
 import { TextInput } from "../ui/TextInput";
 import { Toggle } from "../ui/Toggle";
-
-const CORRECTION_HELP =
-  "Quand activé, Calliop remplace automatiquement la version incorrecte dictée par le mot correct.";
 
 const inputClassName = [
   "h-10 min-w-0 flex-1 rounded-md border border-hairline-strong",
@@ -39,6 +37,7 @@ export function DictionaryWordModal({
   initialMisspelling = null,
   onSubmit,
 }: DictionaryWordModalProps) {
+  const { t } = useUiLocale();
   const [word, setWord] = useState(initialWord);
   const [correctMisspelling, setCorrectMisspelling] = useState(false);
   const [misspelling, setMisspelling] = useState("");
@@ -76,11 +75,13 @@ export function DictionaryWordModal({
     <Modal
       open={open}
       onClose={onClose}
-      title={isCreate ? "Nouveau mot" : "Modifier le mot"}
+      title={
+        isCreate ? t("dictionary.modal.createTitle") : t("dictionary.modal.editTitle")
+      }
       description={
         isCreate
-          ? "Ajoutez un mot ou nom propre injecté dans le prompt Whisper pour améliorer la transcription."
-          : "Modifiez l'orthographe ou la casse du mot enregistré."
+          ? t("dictionary.modal.createDescription")
+          : t("dictionary.modal.editDescription")
       }
     >
       <form className="space-y-4" onSubmit={handleSubmit}>
@@ -91,9 +92,9 @@ export function DictionaryWordModal({
                 htmlFor={toggleId}
                 className="text-body-md cursor-pointer text-ink"
               >
-                Corriger une faute
+                {t("dictionary.modal.correctMisspelling")}
               </label>
-              <InfoTooltip content={CORRECTION_HELP} />
+              <InfoTooltip content={t("dictionary.modal.correctMisspellingHelp")} />
             </div>
             <Toggle
               id={toggleId}
@@ -111,15 +112,17 @@ export function DictionaryWordModal({
 
         {showCorrectionInputs ? (
           <div className="flex flex-col gap-2">
-            <span className="text-body-sm text-charcoal">Mot</span>
+            <span className="text-body-sm text-charcoal">
+              {t("dictionary.modal.wordLabel")}
+            </span>
             <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
               <input
                 type="text"
                 value={misspelling}
                 onChange={(event) => setMisspelling(event.target.value)}
-                placeholder="Faute transcrite"
+                placeholder={t("dictionary.modal.incorrectPlaceholder")}
                 disabled={busy || !isCreate}
-                aria-label="Version incorrecte"
+                aria-label={t("dictionary.modal.incorrectAria")}
                 className={inputClassName}
               />
               <ArrowRight
@@ -132,25 +135,24 @@ export function DictionaryWordModal({
                 type="text"
                 value={word}
                 onChange={(event) => setWord(event.target.value)}
-                placeholder="Orthographe correcte"
+                placeholder={t("dictionary.modal.correctPlaceholder")}
                 disabled={busy}
-                aria-label="Orthographe correcte"
+                aria-label={t("dictionary.modal.correctAria")}
                 className={inputClassName}
               />
             </div>
             {!isCreate && initialMisspelling && (
               <p className="text-caption m-0 text-ash">
-                La faute transcrite ne peut pas être modifiée. Supprimez et
-                recréez le mot pour changer la règle.
+                {t("dictionary.modal.cannotEditMisspelling")}
               </p>
             )}
           </div>
         ) : (
           <TextInput
-            label="Mot ou expression"
+            label={t("dictionary.modal.wordOrExpression")}
             value={word}
             onChange={(event) => setWord(event.target.value)}
-            placeholder="Ex. Calliop, Kubernetes, Dupont-Martin…"
+            placeholder={t("dictionary.modal.wordPlaceholder")}
             disabled={busy}
           />
         )}
@@ -166,7 +168,7 @@ export function DictionaryWordModal({
             disabled={busy}
             onClick={onClose}
           >
-            Annuler
+            {t("common.cancel")}
           </Button>
           <Button
             type="submit"
@@ -174,10 +176,10 @@ export function DictionaryWordModal({
             disabled={busy || !canSubmit}
           >
             {busy
-              ? "Enregistrement…"
+              ? t("common.saving")
               : isCreate
-                ? "Ajouter"
-                : "Enregistrer"}
+                ? t("common.add")
+                : t("common.save")}
           </Button>
         </div>
       </form>

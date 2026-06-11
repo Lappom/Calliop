@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import type { InferenceInfo, ModelsStatus } from "../../hooks/useSettings";
 import { ProgressBar } from "../ui/ProgressBar";
 import { Select } from "../ui/Select";
@@ -30,14 +31,15 @@ export function ModelsSettingsPanel({
   onWhisperChange,
   onLlmChange,
 }: ModelsSettingsPanelProps) {
-  const whisperOptions = buildWhisperSelectOptions(modelsStatus?.whisper);
-  const llmOptions = buildLlmSelectOptions(modelsStatus?.llm);
+  const { t } = useTranslation();
+  const whisperOptions = buildWhisperSelectOptions(modelsStatus?.whisper, t);
+  const llmOptions = buildLlmSelectOptions(modelsStatus?.llm, t);
 
   return (
     <div className="space-y-6">
       <Select
         id="whisper-model"
-        label="Modèle Whisper (STT)"
+        label={t("settings.modelsPanel.whisperLabel")}
         value={whisperModel}
         options={whisperOptions}
         disabled={disabled}
@@ -47,13 +49,15 @@ export function ModelsSettingsPanel({
       {sttProgress !== null && (
         <ProgressBar
           value={sttProgress}
-          label={`Téléchargement Whisper (${sttProgressModel ?? whisperModel})`}
+          label={t("settings.modelsPanel.downloadWhisper", {
+            model: sttProgressModel ?? whisperModel,
+          })}
         />
       )}
 
       <Select
         id="llm-model"
-        label="Modèle LLM (auto-edits)"
+        label={t("settings.modelsPanel.llmLabel")}
         value={llmModel}
         options={llmOptions}
         disabled={disabled}
@@ -63,18 +67,23 @@ export function ModelsSettingsPanel({
       {llmProgress !== null && (
         <ProgressBar
           value={llmProgress}
-          label={`Téléchargement LLM (${llmProgressModel ?? llmModel})`}
+          label={t("settings.modelsPanel.downloadLlm", {
+            model: llmProgressModel ?? llmModel,
+          })}
         />
       )}
 
       {inferenceInfo && (
         <p className="text-caption text-ash">
-          Backend {inferenceInfo.active_backend.toUpperCase()}
-          {inferenceInfo.gpu_available ? " · GPU Vulkan" : " · CPU"}
-          {" · "}
-          profil {inferenceInfo.perf_tier}
-          {" · "}
-          effectif {inferenceInfo.effective_whisper} / {inferenceInfo.effective_llm}
+          {t("settings.modelsPanel.inferenceSummary", {
+            backend: inferenceInfo.active_backend.toUpperCase(),
+            gpuOrCpu: inferenceInfo.gpu_available
+              ? t("settings.modelsPanel.gpuVulkan")
+              : t("settings.modelsPanel.cpuOnly"),
+            tier: inferenceInfo.perf_tier,
+            whisper: inferenceInfo.effective_whisper,
+            llm: inferenceInfo.effective_llm,
+          })}
         </p>
       )}
     </div>

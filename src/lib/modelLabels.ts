@@ -1,20 +1,25 @@
+import type { TFunction } from "i18next";
 import type { ModelDownloadKind } from "../hooks/useModelDownloads";
 
-const MODEL_LABELS: Record<string, string> = {
-  small: "Whisper Small",
-  "distil-fr-dec16": "Distil FR",
-  medium: "Distil FR",
-  "qwen3-0.6b": "Qwen3 0.6B",
-  "qwen3-1.7b": "Qwen3 1.7B",
-  "qwen3-4b": "Qwen3 4B",
+const MODEL_LABEL_KEYS: Record<string, string> = {
+  small: "settings.modelsPanel.whisper.small",
+  "distil-fr-dec16": "settings.modelsPanel.whisper.distilFr",
+  medium: "settings.modelsPanel.whisper.distilFr",
+  "qwen3-0.6b": "settings.modelsPanel.llm.qwen06",
+  "qwen3-1.7b": "settings.modelsPanel.llm.qwen17",
+  "qwen3-4b": "settings.modelsPanel.llm.qwen4",
 };
 
-export function formatModelDownloadTitle(kind: ModelDownloadKind): string {
-  return kind === "whisper"
-    ? "Téléchargement Whisper"
-    : "Téléchargement LLM";
-}
-
-export function formatModelLabel(modelId: string): string {
-  return MODEL_LABELS[modelId] ?? modelId;
+export function getModelDownloadLabels(t: TFunction) {
+  return {
+    formatTitle(kind: ModelDownloadKind): string {
+      return kind === "whisper"
+        ? t("window.downloadToasts.whisper")
+        : t("window.downloadToasts.llm");
+    },
+    formatLabel(modelId: string): string {
+      const key = MODEL_LABEL_KEYS[modelId];
+      return key ? t(key) : modelId;
+    },
+  };
 }

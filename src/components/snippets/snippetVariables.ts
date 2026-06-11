@@ -1,23 +1,29 @@
-export const SNIPPET_VARIABLES = [
-  {
-    token: "{{date}}",
-    label: "Date",
-    hint: "Date du jour (ex. 12 juin 2026)",
-  },
-  {
-    token: "{{clipboard}}",
-    label: "Presse-papiers",
-    hint: "Contenu actuel du presse-papiers",
-  },
-  {
-    token: "{{nom}}",
-    label: "Nom",
-    hint: "Votre nom (configurable dans Variables)",
-  },
-] as const;
+import type { TFunction } from "i18next";
+
+export const SNIPPET_VARIABLE_TOKENS = ["{{date}}", "{{clipboard}}", "{{nom}}"] as const;
 
 const VARIABLE_PATTERN = /\{\{(date|clipboard|nom)\}\}/;
 
 export function containsSnippetVariables(content: string): boolean {
   return VARIABLE_PATTERN.test(content);
+}
+
+export function getSnippetVariables(t: TFunction) {
+  return [
+    {
+      token: "{{date}}",
+      label: t("snippets.variablesModal.date.label"),
+      hint: t("snippets.variablesModal.date.hint"),
+    },
+    {
+      token: "{{clipboard}}",
+      label: t("snippets.variablesModal.clipboard.label"),
+      hint: t("snippets.variablesModal.clipboard.hint"),
+    },
+    {
+      token: "{{nom}}",
+      label: t("snippets.variablesModal.name.label"),
+      hint: t("snippets.variablesModal.name.hint"),
+    },
+  ] as const;
 }

@@ -1,3 +1,5 @@
+import type { TFunction } from "i18next";
+
 export type AppView =
   | "main"
   | "dictionary"
@@ -19,15 +21,27 @@ export function isAppView(value: string): value is AppView {
   );
 }
 
-export const PRIMARY_VIEWS: { id: AppView; label: string }[] = [
-  { id: "main", label: "Accueil" },
-  { id: "history", label: "Historique" },
-  { id: "insight", label: "Statistiques" },
-  { id: "dictionary", label: "Dictionnaire" },
-  { id: "snippets", label: "Snippets" },
-  { id: "style", label: "Style" },
+const PRIMARY_VIEW_IDS: AppView[] = [
+  "main",
+  "history",
+  "insight",
+  "dictionary",
+  "snippets",
+  "style",
 ];
 
-export const BOTTOM_VIEWS: { id: AppView; label: string }[] = [
-  { id: "settings", label: "Paramètres" },
-];
+const BOTTOM_VIEW_IDS: AppView[] = ["settings"];
+
+export function getPrimaryViews(t: TFunction): { id: AppView; label: string }[] {
+  return PRIMARY_VIEW_IDS.map((id) => ({
+    id,
+    label: t(`nav.items.${id}`),
+  }));
+}
+
+export function getBottomViews(t: TFunction): { id: AppView; label: string }[] {
+  return BOTTOM_VIEW_IDS.map((id) => ({
+    id,
+    label: t(`nav.items.${id}`),
+  }));
+}

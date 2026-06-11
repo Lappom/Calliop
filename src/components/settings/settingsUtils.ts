@@ -1,31 +1,35 @@
+import type { TFunction } from "i18next";
+
 export type SettingsSectionId = "general" | "models" | "shortcuts" | "advanced";
 
-export const SETTINGS_SECTIONS: {
+export function getSettingsSections(t: TFunction): {
   id: SettingsSectionId;
   label: string;
   description: string;
-}[] = [
-  {
-    id: "general",
-    label: "Général",
-    description: "Langue, auto-édition IA et apprentissage des corrections.",
-  },
-  {
-    id: "models",
-    label: "Modèles",
-    description: "Whisper, LLM et gestion des fichiers installés.",
-  },
-  {
-    id: "shortcuts",
-    label: "Raccourcis",
-    description: "Combinaison globale pour démarrer une dictée.",
-  },
-  {
-    id: "advanced",
-    label: "Avancé",
-    description: "Mises à jour, démarrage automatique et backend d'inférence.",
-  },
-];
+}[] {
+  return [
+    {
+      id: "general",
+      label: t("settings.sections.general.label"),
+      description: t("settings.sections.general.description"),
+    },
+    {
+      id: "models",
+      label: t("settings.sections.models.label"),
+      description: t("settings.sections.models.description"),
+    },
+    {
+      id: "shortcuts",
+      label: t("settings.sections.shortcuts.label"),
+      description: t("settings.sections.shortcuts.description"),
+    },
+    {
+      id: "advanced",
+      label: t("settings.sections.advanced.label"),
+      description: t("settings.sections.advanced.description"),
+    },
+  ];
+}
 
 export function settingsSectionDomId(id: SettingsSectionId): string {
   return `settings-section-${id}`;
@@ -35,8 +39,22 @@ export function hotkeyParts(hotkey: string): string[] {
   return hotkey.split("+").map((part) => part.trim());
 }
 
-export function formatHotkeyLabel(hotkey: string): string {
-  return hotkey.replace(/Space/g, "Espace");
+export function formatHotkeyLabel(hotkey: string, t: TFunction): string {
+  return hotkey.replace(/Space/g, t("keys.space"));
+}
+
+export function hotkeyPartLabel(t: TFunction, part: string): string {
+  if (part === "Space") {
+    return t("keys.space");
+  }
+  const modifierKeys: Record<string, string> = {
+    Ctrl: "keys.modifiers.ctrl",
+    Alt: "keys.modifiers.alt",
+    Shift: "keys.modifiers.shift",
+    Super: "keys.modifiers.super",
+  };
+  const key = modifierKeys[part];
+  return key ? t(key) : part;
 }
 
 export function captureHotkey(event: KeyboardEvent): string | null {

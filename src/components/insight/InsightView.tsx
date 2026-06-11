@@ -1,5 +1,6 @@
 import { RefreshCw } from "lucide-react";
 import { useMemo } from "react";
+import { useUiLocale } from "../../i18n/useUiLocale";
 import type { LatencyMetricsPayload } from "../../hooks/usePipelineState";
 import { useInsights } from "../../hooks/useInsights";
 import { SnippetListToolbarButton } from "../snippets/SnippetListToolbarButton";
@@ -25,6 +26,7 @@ interface InsightViewProps {
 }
 
 export function InsightView({ latencyMetrics }: InsightViewProps) {
+  const { t, formatNumber } = useUiLocale();
   const { insights, loaded, errorMessage, reload } = useInsights();
 
   const activeLatency = resolveActiveLatency(
@@ -56,15 +58,12 @@ export function InsightView({ latencyMetrics }: InsightViewProps) {
     <div className="flex flex-col gap-8">
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-heading-md mb-2 text-ink">Statistiques</h1>
-          <p className="text-body-sm text-charcoal">
-            Activité, performances du pipeline et répartition par application —
-            calculées localement depuis votre historique.
-          </p>
+          <h1 className="text-heading-md mb-2 text-ink">{t("insight.title")}</h1>
+          <p className="text-body-sm text-charcoal">{t("insight.subtitle")}</p>
         </div>
         {loaded && (
           <SnippetListToolbarButton
-            label="Actualiser les statistiques"
+            label={t("insight.refresh")}
             onClick={() => {
               void reload();
             }}
@@ -79,7 +78,7 @@ export function InsightView({ latencyMetrics }: InsightViewProps) {
       )}
 
       {!loaded && (
-        <p className="text-body-sm text-charcoal">Chargement…</p>
+        <p className="text-body-sm text-charcoal">{t("common.loading")}</p>
       )}
 
       {showEmptyState && <InsightEmptyState />}
@@ -87,35 +86,45 @@ export function InsightView({ latencyMetrics }: InsightViewProps) {
       {loaded && hasInsightData(insights) && (
         <>
           <section className="flex flex-col gap-3">
-            <p className="text-caption m-0 text-charcoal">Aujourd&apos;hui</p>
+            <p className="text-caption m-0 text-charcoal">
+              {t("insight.sections.today")}
+            </p>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               <InsightMetricCard
-                label="Latence dernière dictée"
-                value={hasLatency ? `${activeLatency.totalMs} ms` : "—"}
+                label={t("insight.metrics.lastLatency.label")}
+                value={
+                  hasLatency
+                    ? `${activeLatency.totalMs} ms`
+                    : t("common.emDash")
+                }
                 detail={
                   hasLatency
-                    ? formatLatencyDetail(activeLatency)
-                    : "Effectuez une dictée pour mesurer la latence."
+                    ? formatLatencyDetail(activeLatency, t)
+                    : t("insight.metrics.lastLatency.empty")
                 }
                 glow="blue"
               />
               <InsightMetricCard
-                label="Mots dictés"
+                label={t("insight.metrics.wordsToday.label")}
                 value={String(wordsToday)}
                 detail={
                   wordsToday > 0
-                    ? `${dictationsToday} dictée${dictationsToday > 1 ? "s" : ""} depuis minuit.`
-                    : "Comptés depuis minuit (heure locale)."
+                    ? t("insight.metrics.wordsToday.dictations", {
+                        count: dictationsToday,
+                      })
+                    : t("insight.metrics.wordsToday.empty")
                 }
                 glow="green"
               />
               <InsightMetricCard
-                label="Corrections apprises"
+                label={t("insight.metrics.learned.label")}
                 value={String(learnedCount)}
                 detail={
                   learnedCount > 0
-                    ? `${learnedCount} mot${learnedCount > 1 ? "s" : ""} ajouté${learnedCount > 1 ? "s" : ""} au dictionnaire.`
-                    : "Les corrections enrichissent le dictionnaire local."
+                    ? t("insight.metrics.learned.detail", {
+                        count: learnedCount,
+                      })
+                    : t("insight.metrics.learned.empty")
                 }
                 glow="orange"
               />
@@ -123,27 +132,33 @@ export function InsightView({ latencyMetrics }: InsightViewProps) {
           </section>
 
           <section className="flex flex-col gap-3">
-            <p className="text-caption m-0 text-charcoal">Global</p>
+            <p className="text-caption m-0 text-charcoal">
+              {t("insight.sections.global")}
+            </p>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <InsightMetricCard
-                label="Mots transcrits"
-                value={totalWords.toLocaleString("fr-FR")}
+                label={t("insight.metrics.totalWords.label")}
+                value={formatNumber(totalWords)}
                 glow="blue"
               />
               <InsightMetricCard
-                label="Dictées enregistrées"
+                label={t("insight.metrics.totalDictations.label")}
                 value={String(totalDictations)}
                 glow="green"
               />
               <InsightMetricCard
-                label="Latence moyenne"
-                value={averageLatencyMs > 0 ? `${averageLatencyMs} ms` : "—"}
+                label={t("insight.metrics.avgLatency.label")}
+                value={
+                  averageLatencyMs > 0
+                    ? `${averageLatencyMs} ms`
+                    : t("common.emDash")
+                }
                 glow="orange"
               />
               <InsightMetricCard
-                label="Temps de parole"
-                value={formatAudioDuration(totalAudioMinutes)}
-                detail="Durée audio cumulée de vos dictées."
+                label={t("insight.metrics.speechTime.label")}
+                value={formatAudioDuration(totalAudioMinutes, t)}
+                detail={t("insight.metrics.speechTime.detail")}
                 glow="blue"
               />
             </div>
@@ -153,20 +168,20 @@ export function InsightView({ latencyMetrics }: InsightViewProps) {
 
           <div className="grid gap-4 lg:grid-cols-2 lg:items-stretch">
             <InsightChartPanel
-              title="Activité — 7 jours"
-              description="Mots dictés par jour. Le nombre de dictées apparaît au-dessus de chaque barre."
+              title={t("insight.charts.activity.title")}
+              description={t("insight.charts.activity.description")}
               empty={!hasActivityData}
-              emptyMessage="Les barres apparaîtront après vos premières dictées."
+              emptyMessage={t("insight.charts.activity.empty")}
               glow="blue"
             >
               <ActivityChart data={dailyActivity} />
             </InsightChartPanel>
 
             <InsightChartPanel
-              title="Latence — dernières dictées"
-              description="Décomposition STT, LLM et injection (empilé)."
+              title={t("insight.charts.latency.title")}
+              description={t("insight.charts.latency.description")}
               empty={recentLatency.length === 0}
-              emptyMessage="Aucune mesure de latence enregistrée."
+              emptyMessage={t("insight.charts.latency.empty")}
               glow="orange"
             >
               <LatencyChart data={recentLatency} />
@@ -175,10 +190,10 @@ export function InsightView({ latencyMetrics }: InsightViewProps) {
 
           <div className="grid gap-4 lg:grid-cols-[1fr_260px] lg:items-stretch">
             <InsightChartPanel
-              title="Utilisation par application"
-              description="Répartition des mots dictés selon la fenêtre active."
+              title={t("insight.charts.appUsage.title")}
+              description={t("insight.charts.appUsage.description")}
               empty={appUsage.length === 0}
-              emptyMessage="Aucune donnée de contexte pour le moment."
+              emptyMessage={t("insight.charts.appUsage.empty")}
               glow="green"
               className="min-h-[280px] sm:min-h-[320px]"
             >
@@ -192,9 +207,11 @@ export function InsightView({ latencyMetrics }: InsightViewProps) {
               ].join(" ")}
             >
               <div className="relative">
-                <h2 className="text-heading-sm m-0 text-ink">Vitesse vs frappe</h2>
+                <h2 className="text-heading-sm m-0 text-ink">
+                  {t("insight.wpm.title")}
+                </h2>
                 <p className="text-body-sm mt-2 text-charcoal">
-                  Comparaison à 40 mots/min (frappe clavier moyenne).
+                  {t("insight.wpm.description")}
                 </p>
               </div>
               <div className="relative flex flex-1 flex-col items-center justify-center overflow-visible py-4">
@@ -202,8 +219,8 @@ export function InsightView({ latencyMetrics }: InsightViewProps) {
               </div>
               <p className="text-body-sm relative m-0 text-center text-charcoal">
                 {averageWpm > 0
-                  ? `${Math.round(averageWpm)} mots/min en moyenne`
-                  : "Vitesse calculée après vos premières dictées."}
+                  ? t("insight.wpm.average", { wpm: Math.round(averageWpm) })
+                  : t("insight.wpm.empty")}
               </p>
             </div>
           </div>

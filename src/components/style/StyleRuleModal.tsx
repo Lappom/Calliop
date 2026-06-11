@@ -1,4 +1,5 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useTranslation } from "react-i18next";
 import type {
   AppContextMatchType,
   ToneProfile,
@@ -6,7 +7,7 @@ import type {
 import { Button } from "../ui/Button";
 import { Modal } from "../ui/Modal";
 import { TextInput } from "../ui/TextInput";
-import { MATCH_TYPE_LABELS } from "./styleUtils";
+import { getMatchTypeLabels } from "./styleUtils";
 import { ToneProfilePicker } from "./ToneProfilePicker";
 
 interface StyleRuleModalProps {
@@ -34,10 +35,12 @@ export function StyleRuleModal({
   initialTone = "casual",
   onSubmit,
 }: StyleRuleModalProps) {
+  const { t } = useTranslation();
+  const matchTypeLabels = useMemo(() => getMatchTypeLabels(t), [t]);
   const [pattern, setPattern] = useState(initialPattern);
   const [matchType, setMatchType] =
     useState<AppContextMatchType>(initialMatchType);
-  const [tone, setTone] = useState<ToneProfile>(initialTone);
+  const [tone, setTone] = useState(initialTone);
 
   useEffect(() => {
     if (open) {
@@ -60,25 +63,29 @@ export function StyleRuleModal({
     <Modal
       open={open}
       onClose={onClose}
-      title="Nouvelle règle de style"
-      description="Associez une application à un style de dictée. S'applique lorsque l'auto-édition IA est activée."
+      title={t("style.modal.title")}
+      description={t("style.modal.description")}
       size="md"
     >
       <form className="space-y-5" onSubmit={handleSubmit}>
         <TextInput
-          label="Motif"
+          label={t("style.modal.patternLabel")}
           value={pattern}
           onChange={(event) => setPattern(event.target.value)}
           placeholder={
-            matchType === "exe" ? 'Ex. "slack.exe" ou "Code"' : 'Ex. "Outlook"'
+            matchType === "exe"
+              ? t("style.modal.patternExePlaceholder")
+              : t("style.modal.patternTitlePlaceholder")
           }
           disabled={busy}
         />
 
         <div className="flex flex-col gap-2">
-          <span className="text-body-sm text-charcoal">Correspondance</span>
+          <span className="text-body-sm text-charcoal">
+            {t("style.modal.matchTypeLabel")}
+          </span>
           <div className="flex flex-wrap gap-2">
-            {(Object.keys(MATCH_TYPE_LABELS) as AppContextMatchType[]).map(
+            {(Object.keys(matchTypeLabels) as AppContextMatchType[]).map(
               (type) => (
                 <button
                   key={type}
@@ -95,7 +102,7 @@ export function StyleRuleModal({
                   ].join(" ")}
                   aria-pressed={matchType === type}
                 >
-                  {MATCH_TYPE_LABELS[type]}
+                  {matchTypeLabels[type]}
                 </button>
               ),
             )}
@@ -108,16 +115,12 @@ export function StyleRuleModal({
           <p className="text-body-sm text-accent-red">{errorMessage}</p>
         )}
 
-        <div className="flex flex-wrap justify-end gap-3 pt-1">
-          <Button type="button" variant="outline" disabled={busy} onClick={onClose}>
-            Annuler
+        <div className="flex justify-end gap-2 pt-2">
+          <Button type="button" variant="ghost" disabled={busy} onClick={onClose}>
+            {t("common.cancel")}
           </Button>
-          <Button
-            type="submit"
-            variant="primary"
-            disabled={busy || !pattern.trim()}
-          >
-            {busy ? "Ajout…" : "Ajouter"}
+          <Button type="submit" variant="primary" disabled={busy}>
+            {t("common.save")}
           </Button>
         </div>
       </form>

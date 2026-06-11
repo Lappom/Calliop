@@ -1,0 +1,644 @@
+{
+  "nav": {
+    "brand": "Calliop",
+    "sections": {
+      "activity": "Activité",
+      "personalization": "Personnalisation"
+    },
+    "items": {
+      "main": "Accueil",
+      "history": "Historique",
+      "insight": "Statistiques",
+      "dictionary": "Dictionnaire",
+      "snippets": "Snippets",
+      "style": "Style",
+      "settings": "Paramètres"
+    },
+    "aria": {
+      "closeMenu": "Fermer le menu",
+      "openMenu": "Ouvrir le menu",
+      "navigation": "Navigation",
+      "mainNavigation": "Navigation principale"
+    }
+  },
+  "common": {
+    "loading": "Chargement…",
+    "cancel": "Annuler",
+    "close": "Fermer",
+    "save": "Enregistrer",
+    "saving": "Enregistrement…",
+    "add": "Ajouter",
+    "adding": "Ajout…",
+    "reset": "Réinitialiser",
+    "search": "Rechercher",
+    "refresh": "Actualiser",
+    "refreshList": "Actualiser la liste",
+    "previous": "Précédent",
+    "next": "Suivant",
+    "continue": "Continuer",
+    "start": "Commencer",
+    "retry": "Réessayer",
+    "retryDownload": "Réessayer le téléchargement",
+    "preview": "Aperçu",
+    "actions": "Actions",
+    "sort": "Tri",
+    "filters": "Filtres",
+    "noResults": "Aucun résultat pour « {{query}} ».",
+    "noResultsFilters": "Aucun résultat pour les filtres actuels.",
+    "emDash": "—",
+    "ellipsis": "…",
+    "plusSeparator": "+",
+    "autoSave": "Enregistrement automatique",
+    "copied": "Copié",
+    "reinjected": "Réinjecté",
+    "today": "Aujourd'hui",
+    "yesterday": "Hier",
+    "thisWeek": "Cette semaine",
+    "thisMonth": "Ce mois-ci",
+    "other": "Autre",
+    "withoutTitle": "(sans titre)",
+    "words": "mots",
+    "minutesShort": "min",
+    "hoursShort": "h",
+    "percent": "{{value}} %",
+    "rangeOfTotal": "{{start}}–{{end}} sur {{total}}",
+    "pageOfTotal": "Page {{page}} / {{totalPages}}",
+    "units": {
+      "mb": "Mo",
+      "gb": "Go"
+    }
+  },
+  "keys": {
+    "space": "Espace",
+    "escapeHint": "Échap pour annuler",
+    "modifiers": {
+      "ctrl": "Ctrl",
+      "alt": "Alt",
+      "shift": "Shift",
+      "super": "Super"
+    },
+    "defaultHotkey": "Alt+Space",
+    "hotkeyPreview": "Aperçu :",
+    "hotkeyCapturePrompt": "Appuyez sur la combinaison… ({{escapeHint}})",
+    "hotkeyEdit": "Modifier le raccourci",
+    "hotkeyRestore": "Réactiver le raccourci de dictée",
+    "dictateHint": "{{alt}} + {{space}} pour dicter · survolez une entrée pour copier ou réinjecter",
+    "dictateStartHint": "Placez le curseur dans une application, puis appuyez sur {{alt}} + {{space}} pour commencer.",
+    "toggleDescription": "Appuyez sur {{alt}} + {{space}} pour démarrer, puis réappuyez pour arrêter.",
+    "pushToTalkDescription": "Maintenez le raccourci pendant que vous parlez, relâchez pour transcrire.",
+    "activeCursorDescription": "Le texte est inséré là où se trouve le curseur — Notepad, Word, navigateur…",
+    "hotkeyGuideTitle": "Raccourcis",
+    "toggleTitle": "Toggle",
+    "pushToTalkTitle": "Push-to-talk",
+    "activeCursorTitle": "Curseur actif",
+    "onboardingUsage": "Utilisez {{hotkeyParts}} ({{hotkeyLabel}}) partout où vous pouvez taper du texte."
+  },
+  "settings": {
+    "title": "Paramètres",
+    "subtitle": "Les réglages sont enregistrés localement sur cet appareil.",
+    "sections": {
+      "general": {
+        "label": "Général",
+        "description": "Langue, auto-édition IA et apprentissage des corrections."
+      },
+      "models": {
+        "label": "Modèles",
+        "description": "Whisper, LLM et gestion des fichiers installés."
+      },
+      "shortcuts": {
+        "label": "Raccourcis",
+        "description": "Combinaison globale pour démarrer une dictée."
+      },
+      "advanced": {
+        "label": "Avancé",
+        "description": "Mises à jour, démarrage automatique et backend d'inférence."
+      }
+    },
+    "uiLanguage": {
+      "label": "Langue de l'interface",
+      "fr": "Français",
+      "en": "Anglais"
+    },
+    "sttLanguage": {
+      "label": "Langue de dictée",
+      "fr": "Français",
+      "en": "Anglais",
+      "auto": "Détection automatique"
+    },
+    "autoEdit": {
+      "label": "Auto-edits IA",
+      "descriptionOn": "Nettoie fillers, ponctuation et reformulation légère via un modèle local.",
+      "descriptionOff": "Mode verbatim : la transcription brute est injectée sans post-traitement LLM."
+    },
+    "autoLearn": {
+      "label": "Apprentissage automatique des corrections",
+      "descriptionOn": "Détecte les corrections dans l'application cible et enrichit le dictionnaire localement.",
+      "descriptionOff": "Désactivé : seules les corrections manuelles sont prises en compte."
+    },
+    "autoUpdate": {
+      "label": "Mises à jour automatiques",
+      "descriptionOn": "Vérifie les nouvelles versions sur GitHub au démarrage et installe les mises à jour signées.",
+      "descriptionOff": "Désactivé : aucune vérification réseau pour les mises à jour de l'application."
+    },
+    "autostart": {
+      "label": "Lancer au démarrage"
+    },
+    "lowPower": {
+      "label": "Mode basse consommation",
+      "descriptionOn": "LLM chargé à la demande ; Whisper déchargé après 10 min d'inactivité.",
+      "descriptionOff": "Modèles maintenus en mémoire pour une latence réduite."
+    },
+    "adaptivePerf": {
+      "label": "Profils adaptatifs",
+      "descriptionOn": "Ajuste chunk VAD, threads STT et modèles « Automatique » selon la RAM/GPU.",
+      "descriptionOff": "Paramètres de performance fixes (chunk 512, threads par défaut)."
+    },
+    "modelsPanel": {
+      "whisperLabel": "Modèle Whisper (STT)",
+      "llmLabel": "Modèle LLM (auto-edits)",
+      "downloadWhisper": "Téléchargement Whisper ({{model}})",
+      "downloadLlm": "Téléchargement LLM ({{model}})",
+      "inferenceSummary": "Backend {{backend}}{{gpuOrCpu}} · profil {{tier}} · effectif {{whisper}} / {{llm}}",
+      "gpuVulkan": " · GPU Vulkan",
+      "cpuOnly": " · CPU",
+      "status": {
+        "active": "Actif",
+        "installed": "Installé",
+        "missing": "Non installé"
+      },
+      "whisper": {
+        "auto": "Automatique (recommandé)",
+        "small": "Small (~466 Mo)",
+        "distilFr": "Distil FR dec16 (~755 Mo)"
+      },
+      "llm": {
+        "auto": "Automatique (recommandé)",
+        "qwen06": "Qwen3 0.6B (~484 Mo)",
+        "qwen17": "Qwen3 1.7B (~1,1 Go)",
+        "qwen4": "Qwen3 4B (~2,5 Go)"
+      }
+    },
+    "shortcutsPanel": {
+      "globalLabel": "Raccourci global"
+    },
+    "inferenceBackend": {
+      "label": "Backend d'inférence",
+      "auto": "Automatique (GPU si disponible, sinon CPU)",
+      "cpu": "CPU uniquement"
+    },
+    "inferenceInfo": "Compilé avec support {{compiled}} — backend actif : {{active}}. Profil {{tier}} — RAM {{totalRam}} Go ({{freeRam}} Go libres). Modèles effectifs : Whisper {{whisper}}, LLM {{llm}}, chunk VAD {{chunk}}."
+  },
+  "main": {
+    "title": "Dictée vocale locale",
+    "subtitle": "Parlez dans n'importe quelle application — 100 % hors ligne.",
+    "pipeline": {
+      "preparing": "Préparation",
+      "downloadWhisper": "Téléchargement du modèle Whisper",
+      "initWhisper": "Initialisation du modèle Whisper…",
+      "firstLaunchHint": "Premier lancement : le modèle est chargé localement sur votre machine.",
+      "liveTranscript": "Transcription en direct",
+      "loadingModel": "Chargement du modèle…",
+      "states": {
+        "idle": {
+          "label": "En attente",
+          "hint": "Placez le curseur dans votre application, puis lancez une dictée."
+        },
+        "recording": {
+          "label": "Écoute en cours…",
+          "hint": "Parlez clairement — réappuyez pour arrêter ou relâchez en push-to-talk."
+        },
+        "transcribing": {
+          "label": "Transcription…",
+          "hint": "Whisper transcrit votre voix localement, sans envoi réseau."
+        },
+        "injecting": {
+          "label": "Injection du texte…",
+          "hint": "Le texte est inséré dans l'application active."
+        },
+        "error": {
+          "label": "Erreur",
+          "hint": "Consultez le message ci-dessous ou relancez une dictée.",
+          "unknown": "Erreur inconnue"
+        }
+      }
+    },
+    "correction": {
+      "heading": "Dernière dictée — modifiez pour corriger et enrichir le dictionnaire",
+      "srLabel": "Texte de la dernière dictée",
+      "placeholder": "Votre dernière dictée apparaîtra ici. Corrigez-la pour enseigner de nouveaux mots à Whisper.",
+      "apply": "Appliquer la correction",
+      "learning": "Apprentissage…",
+      "addedToDictionary": "Ajouté au dictionnaire :"
+    },
+    "latency": {
+      "title": "Performance de la dernière dictée",
+      "stt": "Transcription",
+      "llm": "Auto-édition IA",
+      "inject": "Injection",
+      "total": "Total",
+      "detail": "STT {{sttMs}} ms · injection {{injectMs}} ms · LLM {{llmMs}} ms"
+    }
+  },
+  "onboarding": {
+    "steps": {
+      "welcome": "Bienvenue",
+      "microphone": "Micro",
+      "test": "Test",
+      "done": "Terminé"
+    },
+    "welcome": {
+      "title": "Bienvenue sur Calliop",
+      "subtitle": "Dictez dans n'importe quelle application, sans cloud.",
+      "downloadWhisper": "Téléchargement du modèle Whisper…",
+      "loadingModel": "Chargement du modèle de transcription…",
+      "modelReady": "Modèle de transcription prêt.",
+      "continueWithoutModel": "Vous pouvez continuer pour tester le micro ; la dictée nécessite le modèle."
+    },
+    "microphone": {
+      "title": "Autoriser le microphone",
+      "description": "Calliop a besoin d'accéder à votre micro. Cliquez sur « Tester le micro » — Windows affichera une demande de permission au premier enregistrement.",
+      "testStart": "Tester le micro",
+      "testStop": "Arrêter le test"
+    },
+    "test": {
+      "title": "Testez une dictée",
+      "instructions": "Cliquez sur « Démarrer la dictée », puis dites « Bonjour, ceci est un test ».",
+      "waiting": "En attente de votre voix…",
+      "start": "Démarrer la dictée",
+      "stop": "Arrêter la dictée",
+      "stateLabel": "État :"
+    },
+    "done": {
+      "title": "Vous êtes prêt"
+    },
+    "navigation": {
+      "previous": "Précédent",
+      "continue": "Continuer",
+      "finish": "Commencer"
+    }
+  },
+  "dictionary": {
+    "title": "Dictionnaire",
+    "subtitle": "Mots et noms propres injectés dans le prompt Whisper pour améliorer la transcription.",
+    "newWord": "Nouveau mot",
+    "addWord": "Ajouter un mot",
+    "empty": "Aucun mot enregistré. Ajoutez des noms propres ou corrigez une dictée depuis l'accueil.",
+    "searchLabel": "Rechercher un mot",
+    "searchPlaceholder": "Mot ou version incorrecte…",
+    "table": {
+      "word": "Mot",
+      "source": "Source",
+      "addedAt": "Ajouté le"
+    },
+    "sort": {
+      "alphaAsc": "Tri A → Z",
+      "alphaDesc": "Tri Z → A",
+      "recent": "Plus récents",
+      "source": "Par source"
+    },
+    "filter": {
+      "all": "Tous",
+      "manual": "Manuels",
+      "learned": "Appris"
+    },
+    "source": {
+      "manual": {
+        "label": "Manuel",
+        "description": "Ajouté depuis cette page"
+      },
+      "learned": {
+        "label": "Appris",
+        "description": "Détecté via une correction de dictée"
+      }
+    },
+    "modal": {
+      "createTitle": "Nouveau mot",
+      "editTitle": "Modifier le mot",
+      "createDescription": "Ajoutez un mot ou nom propre injecté dans le prompt Whisper pour améliorer la transcription.",
+      "editDescription": "Modifiez l'orthographe ou la casse du mot enregistré.",
+      "correctMisspelling": "Corriger une faute",
+      "correctMisspellingHelp": "Quand activé, Calliop remplace automatiquement la version incorrecte dictée par le mot correct.",
+      "wordLabel": "Mot",
+      "incorrectPlaceholder": "Faute transcrite",
+      "incorrectAria": "Version incorrecte",
+      "correctPlaceholder": "Orthographe correcte",
+      "correctAria": "Orthographe correcte",
+      "cannotEditMisspelling": "La faute transcrite ne peut pas être modifiée. Supprimez et recréez le mot pour changer la règle.",
+      "wordOrExpression": "Mot ou expression",
+      "wordPlaceholder": "Ex. Calliop, Kubernetes, Dupont-Martin…",
+      "editWord": "Modifier {{word}}",
+      "deleteWord": "Supprimer {{word}}"
+    },
+    "errors": {
+      "alreadyExists": "Ce mot est déjà dans le dictionnaire.",
+      "duplicateWord": "Un mot identique existe déjà."
+    }
+  },
+  "snippets": {
+    "title": "Snippets",
+    "subtitle": "Définissez des déclencheurs vocaux qui insèrent un texte complet après la transcription.",
+    "new": "Nouveau snippet",
+    "create": "Créer un snippet",
+    "variables": "Variables",
+    "importJson": "Importer JSON",
+    "exportJson": "Exporter JSON",
+    "empty": "Aucun snippet enregistré. Créez un déclencheur vocal ou importez un fichier JSON.",
+    "searchLabel": "Rechercher un snippet",
+    "searchPlaceholder": "Déclencheur ou texte…",
+    "sort": {
+      "triggerAsc": "Tri A → Z",
+      "triggerDesc": "Tri Z → A",
+      "recent": "Plus récents"
+    },
+    "badge": {
+      "variables": "Variables"
+    },
+    "modal": {
+      "createTitle": "Nouveau snippet",
+      "editTitle": "Modifier le snippet",
+      "createDescription": "Définissez un déclencheur vocal et le texte inséré après la transcription.",
+      "editDescription": "Modifiez le déclencheur ou le texte inséré.",
+      "triggerLabel": "Déclencheur vocal",
+      "triggerPlaceholder": "Ex. \"ma signature\"",
+      "contentLabel": "Texte à insérer",
+      "contentPlaceholder": "Cordialement,\n{{nom}}",
+      "preview": "Aperçu",
+      "editTrigger": "Modifier {{trigger}}",
+      "deleteTrigger": "Supprimer {{trigger}}"
+    },
+    "variablesModal": {
+      "title": "Variables",
+      "description": "Valeurs résolues à la dictée. Copiez un jeton pour l'utiliser dans un snippet.",
+      "copyToken": "Copier {{token}}",
+      "valueLabel": "Valeur",
+      "current": "Actuel :",
+      "date": {
+        "label": "Date",
+        "hint": "Date du jour (ex. 12 juin 2026)"
+      },
+      "clipboard": {
+        "label": "Presse-papiers",
+        "hint": "Contenu actuel du presse-papiers"
+      },
+      "name": {
+        "label": "Nom",
+        "hint": "Votre nom (configurable dans Variables)",
+        "placeholder": "Ex. Marie Dupont"
+      }
+    },
+    "errors": {
+      "duplicateTrigger": "Ce déclencheur existe déjà."
+    }
+  },
+  "style": {
+    "title": "Style",
+    "subtitle": "Adaptez le ton de vos dictées selon l'application active — formel pour Outlook, décontracté pour Slack, technique pour l'IDE. Actif uniquement avec l'auto-édition IA.",
+    "newRule": "Nouvelle règle",
+    "createRule": "Créer une règle",
+    "empty": "Aucune règle configurée. Créez une association application → style pour personnaliser vos dictées.",
+    "searchLabel": "Rechercher une règle",
+    "searchPlaceholder": "Motif, ton ou type…",
+    "sort": {
+      "patternAsc": "Tri A → Z",
+      "patternDesc": "Tri Z → A",
+      "tone": "Par ton",
+      "recent": "Plus récents"
+    },
+    "matchType": {
+      "exe": "Exécutable",
+      "titleContains": "Titre contient"
+    },
+    "tone": {
+      "default": {
+        "label": "Neutre",
+        "description": "Transcription fidèle, sans reformulation stylistique."
+      },
+      "casual": {
+        "label": "Décontracté",
+        "description": "Ton naturel et conversationnel pour le chat et les notes."
+      },
+      "formal": {
+        "label": "Formel",
+        "description": "Registre professionnel pour e-mails et documents."
+      },
+      "technical": {
+        "label": "Technique",
+        "description": "Précision et concision pour le code et la doc."
+      }
+    },
+    "activeWindow": {
+      "label": "Application au premier plan",
+      "notDetected": "Aucune application détectée pour l'instant. Cliquez dans l'application cible (même sur votre autre écran) — la détection se met à jour automatiquement.",
+      "refresh": "Actualiser",
+      "createRule": "Règle pour cette app"
+    },
+    "modal": {
+      "title": "Nouvelle règle de style",
+      "description": "Associez une application à un style de dictée. S'applique lorsque l'auto-édition IA est activée.",
+      "patternLabel": "Motif",
+      "patternExePlaceholder": "Ex. \"slack.exe\" ou \"Code\"",
+      "patternTitlePlaceholder": "Ex. \"Outlook\"",
+      "matchTypeLabel": "Correspondance",
+      "toneLegend": "Style de dictée",
+      "deleteRule": "Supprimer la règle {{pattern}}"
+    },
+    "errors": {
+      "cannotAdd": "Impossible d'ajouter cette règle."
+    }
+  },
+  "history": {
+    "title": "Historique",
+    "subtitle": "Retrouvez vos dictées passées. Utilisez les actions sur chaque entrée pour copier ou réinjecter le texte dans l'application active.",
+    "stats": {
+      "dictations": "Dictées",
+      "words": "Mots transcrits",
+      "avgLatency": "Latence moyenne"
+    },
+    "refresh": "Actualiser l'historique",
+    "searchLabel": "Rechercher dans l'historique",
+    "searchPlaceholder": "Mots-clés, application, extrait de texte…",
+    "empty": "Aucune dictée enregistrée pour l'instant.",
+    "sort": {
+      "recent": "Plus récentes",
+      "oldest": "Plus anciennes",
+      "longest": "Plus longues"
+    },
+    "entry": {
+      "copy": "Copier le texte",
+      "reinject": "Réinjecter dans l'application active",
+      "wordCount_one": "{{count}} mot",
+      "wordCount_other": "{{count}} mots"
+    },
+    "pagination": {
+      "previous": "Précédent",
+      "next": "Suivant"
+    }
+  },
+  "insight": {
+    "title": "Statistiques",
+    "subtitle": "Activité, performances du pipeline et répartition par application — calculées localement depuis votre historique.",
+    "refresh": "Actualiser les statistiques",
+    "empty": {
+      "title": "Pas encore de statistiques",
+      "description": "Effectuez vos premières dictées pour voir l'activité, la latence du pipeline, la répartition par application et votre vitesse de parole."
+    },
+    "sections": {
+      "today": "Aujourd'hui",
+      "global": "Global",
+      "weekSummary": "Synthèse — 7 derniers jours"
+    },
+    "metrics": {
+      "lastLatency": {
+        "label": "Latence dernière dictée",
+        "empty": "Effectuez une dictée pour mesurer la latence."
+      },
+      "wordsToday": {
+        "label": "Mots dictés",
+        "empty": "Comptés depuis minuit (heure locale).",
+        "dictations_one": "{{count}} dictée depuis minuit.",
+        "dictations_other": "{{count}} dictées depuis minuit."
+      },
+      "learned": {
+        "label": "Corrections apprises",
+        "empty": "Les corrections enrichissent le dictionnaire local.",
+        "detail_one": "{{count}} mot ajouté au dictionnaire.",
+        "detail_other": "{{count}} mots ajoutés au dictionnaire."
+      },
+      "totalWords": {
+        "label": "Mots transcrits"
+      },
+      "totalDictations": {
+        "label": "Dictées enregistrées"
+      },
+      "avgLatency": {
+        "label": "Latence moyenne"
+      },
+      "speechTime": {
+        "label": "Temps de parole",
+        "detail": "Durée audio cumulée de vos dictées."
+      }
+    },
+    "week": {
+      "words": "Mots dictés",
+      "dictations": "Dictées",
+      "avgPerActiveDay": "Moyenne / jour actif",
+      "avgWordsValue": "{{count}} mots",
+      "bestDay": {
+        "label": "Meilleur jour",
+        "value": "{{count}} mots",
+        "empty": "Aucune activité sur la période."
+      }
+    },
+    "charts": {
+      "activity": {
+        "title": "Activité — 7 jours",
+        "description": "Mots dictés par jour. Le nombre de dictées apparaît au-dessus de chaque barre.",
+        "empty": "Les barres apparaîtront après vos premières dictées.",
+        "aria": "Graphique des mots dictés sur les sept derniers jours"
+      },
+      "latency": {
+        "title": "Latence — dernières dictées",
+        "description": "Décomposition STT, LLM et injection (empilé).",
+        "empty": "Aucune mesure de latence enregistrée.",
+        "aria": "Graphique de latence des dernières dictées",
+        "stt": "STT",
+        "llm": "LLM",
+        "inject": "Injection"
+      },
+      "appUsage": {
+        "title": "Utilisation par application",
+        "description": "Répartition des mots dictés selon la fenêtre active.",
+        "empty": "Aucune donnée de contexte pour le moment.",
+        "aria": "Répartition des mots dictés par application",
+        "centerWords": "mots"
+      }
+    },
+    "wpm": {
+      "title": "Vitesse vs frappe",
+      "description": "Comparaison à 40 mots/min (frappe clavier moyenne).",
+      "vsBaseline": "vs {{baseline}} mots/min",
+      "average": "{{wpm}} mots/min en moyenne",
+      "empty": "Vitesse calculée après vos premières dictées.",
+      "aria": "Vitesse de dictée : {{wpm}} mots par minute, {{percent}} pour cent de la frappe moyenne"
+    }
+  },
+  "overlay": {
+    "states": {
+      "idle": "En attente",
+      "recording": "Écoute en cours",
+      "transcribing": "Transcription en cours",
+      "injecting": "Injection du texte",
+      "error": "Erreur de dictée"
+    }
+  },
+  "errors": {
+    "unknown": "Erreur inconnue",
+    "MIC_PROBE_ACTIVE_BEFORE_DICTATION": "Arrêtez le test micro avant de dicter.",
+    "CANNOT_DELETE_AUTO_WHISPER": "Impossible de supprimer le modèle Whisper automatique.",
+    "CANNOT_DELETE_ACTIVE_WHISPER": "Impossible de supprimer le modèle Whisper actif.",
+    "CANNOT_DELETE_AUTO_LLM": "Impossible de supprimer le modèle LLM automatique.",
+    "CANNOT_DELETE_ACTIVE_LLM": "Impossible de supprimer le modèle LLM actif.",
+    "INVALID_MODEL_KIND": "Type de modèle invalide (whisper ou llm).",
+    "UNKNOWN_WHISPER_MODEL": "Modèle Whisper inconnu.",
+    "UNKNOWN_LLM_MODEL": "Modèle LLM inconnu.",
+    "INVALID_INFERENCE_BACKEND": "Backend d'inférence invalide.",
+    "WORD_EMPTY": "Le mot ne peut pas être vide.",
+    "WORD_TOO_LONG": "Le mot ne peut pas être vide et ne peut pas être uniquement numérique.",
+    "MISSPELLING_INVALID": "La version incorrecte ne peut pas être vide et ne peut pas être uniquement numérique.",
+    "MISSPELLING_SAME_AS_WORD": "La version incorrecte doit être différente du mot correct.",
+    "MISSPELLING_ALREADY_REGISTERED": "Cette faute transcrite est déjà enregistrée.",
+    "WORD_ALREADY_IN_DICTIONARY": "Ce mot est déjà dans le dictionnaire.",
+    "WORD_NOT_FOUND": "Mot introuvable.",
+    "SNIPPET_TRIGGER_EMPTY": "Le déclencheur ne peut pas être vide.",
+    "SNIPPET_TRIGGER_TOO_SHORT": "Le déclencheur doit contenir au moins 2 caractères.",
+    "SNIPPET_CONTENT_EMPTY": "Le texte du snippet ne peut pas être vide.",
+    "SNIPPET_FILE_EMPTY": "Le fichier ne contient aucun snippet.",
+    "SNIPPET_NOT_FOUND": "Snippet introuvable.",
+    "INVALID_JSON": "JSON invalide.",
+    "SNIPPET_IMPORT_NO_VALID": "Aucun snippet valide importé (déclencheur ≥ 2 caractères, texte non vide).",
+    "PATTERN_TOO_SHORT": "Le motif doit contenir au moins 2 caractères.",
+    "RULE_NOT_FOUND": "Règle introuvable.",
+    "DICTATION_NOT_FOUND": "Dictée introuvable.",
+    "MIC_PROBE_ALREADY_ACTIVE": "Le test micro est déjà en cours.",
+    "DICTATION_ACTIVE_BEFORE_MIC_PROBE": "Une dictée est en cours. Arrêtez-la avant de tester le micro.",
+    "UNSUPPORTED_STT_LANGUAGE": "Langue de dictée non prise en charge.",
+    "INVALID_MATCH_TYPE": "Type de correspondance invalide (exe ou title_contains).",
+    "INVALID_TONE": "Ton invalide (default, casual, formal ou technical).",
+    "notifications": {
+      "title": "Calliop",
+      "dictionaryWordAdded_one": "Mot ajouté au dictionnaire : {{word}}",
+      "dictionaryWordsAdded_other": "{{count}} mots ajoutés au dictionnaire : {{words}}"
+    }
+  },
+  "tray": {
+    "tooltip": "Calliop",
+    "open": "Ouvrir Calliop",
+    "toggle": "Démarrer / arrêter la dictée",
+    "dictationLanguage": "Langue de dictée : {{label}}",
+    "settings": "Paramètres",
+    "history": "Historique",
+    "dictionary": "Dictionnaire",
+    "snippets": "Snippets",
+    "insight": "Statistiques",
+    "autoEdit": "Auto-edits IA",
+    "autostart": "Lancer au démarrage",
+    "quit": "Quitter",
+    "language": {
+      "fr": "FR",
+      "en": "EN",
+      "auto": "AUTO"
+    }
+  },
+  "window": {
+    "title": "Calliop",
+    "minimize": "Réduire",
+    "maximize": "Agrandir",
+    "restore": "Restaurer",
+    "close": "Fermer",
+    "downloadToasts": {
+      "aria": "Téléchargements de modèles en cours",
+      "whisper": "Téléchargement Whisper",
+      "llm": "Téléchargement LLM"
+    }
+  }
+}

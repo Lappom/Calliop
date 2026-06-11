@@ -18,6 +18,14 @@ pub const KEY_ONBOARDING_DONE: &str = "onboarding_done";
 pub const KEY_AUTO_UPDATE: &str = "auto_update";
 pub const KEY_LOW_POWER_MODE: &str = "low_power_mode";
 pub const KEY_ADAPTIVE_PERF: &str = "adaptive_perf";
+pub const KEY_UI_LANGUAGE: &str = "ui_language";
+
+pub fn detect_default_ui_language() -> String {
+    match sys_locale::get_locale() {
+        Some(locale) if locale.to_ascii_lowercase().starts_with("en") => "en".into(),
+        _ => "fr".into(),
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -56,6 +64,7 @@ pub struct AppSettings {
     pub inference_backend: String,
     pub low_power_mode: bool,
     pub adaptive_perf: bool,
+    pub ui_language: String,
 }
 
 impl Default for AppSettings {
@@ -71,6 +80,7 @@ impl Default for AppSettings {
             inference_backend: InferenceBackend::default().as_setting_value().into(),
             low_power_mode: false,
             adaptive_perf: true,
+            ui_language: detect_default_ui_language(),
         }
     }
 }
@@ -134,6 +144,9 @@ impl Store {
                 .to_string(),
             low_power_mode: self.get_bool(KEY_LOW_POWER_MODE, false)?,
             adaptive_perf: self.get_bool(KEY_ADAPTIVE_PERF, true)?,
+            ui_language: self
+                .get_string(KEY_UI_LANGUAGE, &detect_default_ui_language())?
+                .to_string(),
         })
     }
 
@@ -217,6 +230,11 @@ impl Store {
                 }
             ],
         )?;
+        tx.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![KEY_UI_LANGUAGE, settings.ui_language.as_str()],
+        )?;
         tx.commit()?;
         Ok(())
     }
@@ -289,6 +307,7 @@ mod tests {
                 inference_backend: "cpu".into(),
                 low_power_mode: true,
                 adaptive_perf: false,
+                ui_language: "en".into(),
             })
             .expect("save");
         let loaded = store.load_settings().expect("load");
@@ -300,6 +319,39 @@ mod tests {
         assert_eq!(loaded.llm_model, "qwen3-0.6b");
         assert!(loaded.low_power_mode);
         assert!(!loaded.adaptive_perf);
+        assert_eq!(loaded.ui_language, "en");
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn ui_language_defaults_when_missing() {
+        let dir = std::env::temp_dir().join(format!(
+            "calliop-ui-language-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::create_dir_all(&dir);
+        let db_file = dir.join("settings.db");
+        let conn = rusqlite::Connection::open(&db_file).unwrap();
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )",
+            [],
+        )
+        .unwrap();
+
+        let store = Store::from_connection(conn);
+        let loaded = store.load_settings().expect("load");
+        assert!(
+            loaded.ui_language == "fr" || loaded.ui_language == "en",
+            "expected fr or en, got {}",
+            loaded.ui_language
+        );
 
         let _ = std::fs::remove_dir_all(dir);
     }

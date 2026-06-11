@@ -19,24 +19,24 @@ export const APP_SEGMENT_COLORS = [
   CHART_COLORS.red,
 ] as const;
 
-export function formatShortDate(isoDate: string): string {
+export function formatShortDate(isoDate: string, intlLocale: string): string {
   const date = new Date(`${isoDate}T12:00:00`);
   if (Number.isNaN(date.getTime())) {
     return isoDate;
   }
-  return new Intl.DateTimeFormat("fr-FR", {
+  return new Intl.DateTimeFormat(intlLocale, {
     weekday: "short",
     day: "numeric",
   }).format(date);
 }
 
-export function formatShortTime(iso: string): string {
+export function formatShortTime(iso: string, intlLocale: string): string {
   const normalized = iso.includes("T") ? iso : `${iso.replace(" ", "T")}Z`;
   const date = new Date(normalized);
   if (Number.isNaN(date.getTime())) {
     return "—";
   }
-  return new Intl.DateTimeFormat("fr-FR", {
+  return new Intl.DateTimeFormat(intlLocale, {
     hour: "2-digit",
     minute: "2-digit",
   }).format(date);

@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import type { TFunction } from "i18next";
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 export type SttLanguageCode = "fr" | "en" | "auto";
 
@@ -9,24 +11,25 @@ interface SttLanguageChangedPayload {
   detected: boolean;
 }
 
-const LANGUAGE_LABELS: Record<SttLanguageCode, string> = {
-  fr: "FR",
-  en: "EN",
-  auto: "AUTO",
+const STT_LANGUAGE_KEYS: Record<SttLanguageCode, string> = {
+  fr: "settings.sttLanguage.fr",
+  en: "settings.sttLanguage.en",
+  auto: "settings.sttLanguage.auto",
 };
 
 function isSttLanguageCode(value: string): value is SttLanguageCode {
   return value === "fr" || value === "en" || value === "auto";
 }
 
-export function sttLanguageLabel(code: string): string {
+export function sttLanguageLabel(code: string, t: TFunction): string {
   if (isSttLanguageCode(code)) {
-    return LANGUAGE_LABELS[code];
+    return t(STT_LANGUAGE_KEYS[code]);
   }
   return code.toUpperCase();
 }
 
 export function useSttLanguage() {
+  const { t } = useTranslation();
   const [language, setLanguage] = useState<SttLanguageCode>("fr");
   const [cycling, setCycling] = useState(false);
 
@@ -83,7 +86,7 @@ export function useSttLanguage() {
 
   return {
     language,
-    languageLabel: sttLanguageLabel(language),
+    languageLabel: sttLanguageLabel(language, t),
     cycling,
     cycleLanguage,
   };

@@ -1,0 +1,644 @@
+{
+  "nav": {
+    "brand": "Calliop",
+    "sections": {
+      "activity": "Activity",
+      "personalization": "Personalization"
+    },
+    "items": {
+      "main": "Home",
+      "history": "History",
+      "insight": "Statistics",
+      "dictionary": "Dictionary",
+      "snippets": "Snippets",
+      "style": "Style",
+      "settings": "Settings"
+    },
+    "aria": {
+      "closeMenu": "Close menu",
+      "openMenu": "Open menu",
+      "navigation": "Navigation",
+      "mainNavigation": "Main navigation"
+    }
+  },
+  "common": {
+    "loading": "Loading…",
+    "cancel": "Cancel",
+    "close": "Close",
+    "save": "Save",
+    "saving": "Saving…",
+    "add": "Add",
+    "adding": "Adding…",
+    "reset": "Reset",
+    "search": "Search",
+    "refresh": "Refresh",
+    "refreshList": "Refresh list",
+    "previous": "Previous",
+    "next": "Next",
+    "continue": "Continue",
+    "start": "Start",
+    "retry": "Retry",
+    "retryDownload": "Retry download",
+    "preview": "Preview",
+    "actions": "Actions",
+    "sort": "Sort",
+    "filters": "Filters",
+    "noResults": "No results for \"{{query}}\".",
+    "noResultsFilters": "No results for the current filters.",
+    "emDash": "—",
+    "ellipsis": "…",
+    "plusSeparator": "+",
+    "autoSave": "Auto-save",
+    "copied": "Copied",
+    "reinjected": "Reinjected",
+    "today": "Today",
+    "yesterday": "Yesterday",
+    "thisWeek": "This week",
+    "thisMonth": "This month",
+    "other": "Other",
+    "withoutTitle": "(untitled)",
+    "words": "words",
+    "minutesShort": "min",
+    "hoursShort": "h",
+    "percent": "{{value}}%",
+    "rangeOfTotal": "{{start}}–{{end}} of {{total}}",
+    "pageOfTotal": "Page {{page}} / {{totalPages}}",
+    "units": {
+      "mb": "MB",
+      "gb": "GB"
+    }
+  },
+  "keys": {
+    "space": "Space",
+    "escapeHint": "Esc to cancel",
+    "modifiers": {
+      "ctrl": "Ctrl",
+      "alt": "Alt",
+      "shift": "Shift",
+      "super": "Super"
+    },
+    "defaultHotkey": "Alt+Space",
+    "hotkeyPreview": "Preview:",
+    "hotkeyCapturePrompt": "Press the key combination… ({{escapeHint}})",
+    "hotkeyEdit": "Change shortcut",
+    "hotkeyRestore": "Restore dictation shortcut",
+    "dictateHint": "{{alt}} + {{space}} to dictate · hover an entry to copy or reinject",
+    "dictateStartHint": "Place the cursor in an app, then press {{alt}} + {{space}} to start.",
+    "toggleDescription": "Press {{alt}} + {{space}} to start, then press again to stop.",
+    "pushToTalkDescription": "Hold the shortcut while speaking, release to transcribe.",
+    "activeCursorDescription": "Text is inserted where the cursor is — Notepad, Word, browser…",
+    "hotkeyGuideTitle": "Shortcuts",
+    "toggleTitle": "Toggle",
+    "pushToTalkTitle": "Push-to-talk",
+    "activeCursorTitle": "Active cursor",
+    "onboardingUsage": "Use {{hotkeyParts}} ({{hotkeyLabel}}) anywhere you can type."
+  },
+  "settings": {
+    "title": "Settings",
+    "subtitle": "Settings are saved locally on this device.",
+    "sections": {
+      "general": {
+        "label": "General",
+        "description": "Language, AI auto-edits, and correction learning."
+      },
+      "models": {
+        "label": "Models",
+        "description": "Whisper, LLM, and installed file management."
+      },
+      "shortcuts": {
+        "label": "Shortcuts",
+        "description": "Global shortcut to start dictation."
+      },
+      "advanced": {
+        "label": "Advanced",
+        "description": "Updates, launch at startup, and inference backend."
+      }
+    },
+    "uiLanguage": {
+      "label": "Interface language",
+      "fr": "French",
+      "en": "English"
+    },
+    "sttLanguage": {
+      "label": "Dictation language",
+      "fr": "French",
+      "en": "English",
+      "auto": "Automatic detection"
+    },
+    "autoEdit": {
+      "label": "AI auto-edits",
+      "descriptionOn": "Cleans fillers, punctuation, and light rephrasing via a local model.",
+      "descriptionOff": "Verbatim mode: raw transcription is injected without LLM post-processing."
+    },
+    "autoLearn": {
+      "label": "Automatic correction learning",
+      "descriptionOn": "Detects corrections in the target app and enriches the dictionary locally.",
+      "descriptionOff": "Disabled: only manual corrections are applied."
+    },
+    "autoUpdate": {
+      "label": "Automatic updates",
+      "descriptionOn": "Checks for new versions on GitHub at startup and installs signed updates.",
+      "descriptionOff": "Disabled: no network check for application updates."
+    },
+    "autostart": {
+      "label": "Launch at startup"
+    },
+    "lowPower": {
+      "label": "Low power mode",
+      "descriptionOn": "LLM loaded on demand; Whisper unloaded after 10 min of inactivity.",
+      "descriptionOff": "Models kept in memory for lower latency."
+    },
+    "adaptivePerf": {
+      "label": "Adaptive profiles",
+      "descriptionOn": "Adjusts VAD chunk, STT threads, and \"Automatic\" models based on RAM/GPU.",
+      "descriptionOff": "Fixed performance settings (chunk 512, default threads)."
+    },
+    "modelsPanel": {
+      "whisperLabel": "Whisper model (STT)",
+      "llmLabel": "LLM model (auto-edits)",
+      "downloadWhisper": "Downloading Whisper ({{model}})",
+      "downloadLlm": "Downloading LLM ({{model}})",
+      "inferenceSummary": "Backend {{backend}}{{gpuOrCpu}} · profile {{tier}} · effective {{whisper}} / {{llm}}",
+      "gpuVulkan": " · Vulkan GPU",
+      "cpuOnly": " · CPU",
+      "status": {
+        "active": "Active",
+        "installed": "Installed",
+        "missing": "Not installed"
+      },
+      "whisper": {
+        "auto": "Automatic (recommended)",
+        "small": "Small (~466 MB)",
+        "distilFr": "Distil FR dec16 (~755 MB)"
+      },
+      "llm": {
+        "auto": "Automatic (recommended)",
+        "qwen06": "Qwen3 0.6B (~484 MB)",
+        "qwen17": "Qwen3 1.7B (~1.1 GB)",
+        "qwen4": "Qwen3 4B (~2.5 GB)"
+      }
+    },
+    "shortcutsPanel": {
+      "globalLabel": "Global shortcut"
+    },
+    "inferenceBackend": {
+      "label": "Inference backend",
+      "auto": "Automatic (GPU if available, otherwise CPU)",
+      "cpu": "CPU only"
+    },
+    "inferenceInfo": "Built with {{compiled}} support — active backend: {{active}}. Profile {{tier}} — RAM {{totalRam}} GB ({{freeRam}} GB free). Effective models: Whisper {{whisper}}, LLM {{llm}}, VAD chunk {{chunk}}."
+  },
+  "main": {
+    "title": "Local voice dictation",
+    "subtitle": "Speak in any application — 100% offline.",
+    "pipeline": {
+      "preparing": "Preparing",
+      "downloadWhisper": "Downloading Whisper model",
+      "initWhisper": "Initializing Whisper model…",
+      "firstLaunchHint": "First launch: the model is loaded locally on your machine.",
+      "liveTranscript": "Live transcription",
+      "loadingModel": "Loading model…",
+      "states": {
+        "idle": {
+          "label": "Idle",
+          "hint": "Place the cursor in your app, then start dictation."
+        },
+        "recording": {
+          "label": "Listening…",
+          "hint": "Speak clearly — press again to stop or release in push-to-talk mode."
+        },
+        "transcribing": {
+          "label": "Transcribing…",
+          "hint": "Whisper transcribes your voice locally, with no network upload."
+        },
+        "injecting": {
+          "label": "Injecting text…",
+          "hint": "Text is inserted into the active application."
+        },
+        "error": {
+          "label": "Error",
+          "hint": "See the message below or start a new dictation.",
+          "unknown": "Unknown error"
+        }
+      }
+    },
+    "correction": {
+      "heading": "Last dictation — edit to correct and enrich the dictionary",
+      "srLabel": "Last dictation text",
+      "placeholder": "Your last dictation will appear here. Correct it to teach Whisper new words.",
+      "apply": "Apply correction",
+      "learning": "Learning…",
+      "addedToDictionary": "Added to dictionary:"
+    },
+    "latency": {
+      "title": "Last dictation performance",
+      "stt": "Transcription",
+      "llm": "AI auto-edit",
+      "inject": "Injection",
+      "total": "Total",
+      "detail": "STT {{sttMs}} ms · injection {{injectMs}} ms · LLM {{llmMs}} ms"
+    }
+  },
+  "onboarding": {
+    "steps": {
+      "welcome": "Welcome",
+      "microphone": "Microphone",
+      "test": "Test",
+      "done": "Done"
+    },
+    "welcome": {
+      "title": "Welcome to Calliop",
+      "subtitle": "Dictate in any application, without the cloud.",
+      "downloadWhisper": "Downloading Whisper model…",
+      "loadingModel": "Loading transcription model…",
+      "modelReady": "Transcription model ready.",
+      "continueWithoutModel": "You can continue to test the microphone; dictation requires the model."
+    },
+    "microphone": {
+      "title": "Allow microphone access",
+      "description": "Calliop needs access to your microphone. Click \"Test microphone\" — Windows will prompt for permission on first recording.",
+      "testStart": "Test microphone",
+      "testStop": "Stop test"
+    },
+    "test": {
+      "title": "Try a dictation",
+      "instructions": "Click \"Start dictation\", then say \"Hello, this is a test\".",
+      "waiting": "Waiting for your voice…",
+      "start": "Start dictation",
+      "stop": "Stop dictation",
+      "stateLabel": "State:"
+    },
+    "done": {
+      "title": "You're all set"
+    },
+    "navigation": {
+      "previous": "Previous",
+      "continue": "Continue",
+      "finish": "Get started"
+    }
+  },
+  "dictionary": {
+    "title": "Dictionary",
+    "subtitle": "Words and proper nouns injected into the Whisper prompt to improve transcription.",
+    "newWord": "New word",
+    "addWord": "Add word",
+    "empty": "No words saved. Add proper nouns or correct a dictation from the home screen.",
+    "searchLabel": "Search for a word",
+    "searchPlaceholder": "Word or incorrect form…",
+    "table": {
+      "word": "Word",
+      "source": "Source",
+      "addedAt": "Added on"
+    },
+    "sort": {
+      "alphaAsc": "Sort A → Z",
+      "alphaDesc": "Sort Z → A",
+      "recent": "Most recent",
+      "source": "By source"
+    },
+    "filter": {
+      "all": "All",
+      "manual": "Manual",
+      "learned": "Learned"
+    },
+    "source": {
+      "manual": {
+        "label": "Manual",
+        "description": "Added from this page"
+      },
+      "learned": {
+        "label": "Learned",
+        "description": "Detected from a dictation correction"
+      }
+    },
+    "modal": {
+      "createTitle": "New word",
+      "editTitle": "Edit word",
+      "createDescription": "Add a word or proper noun injected into the Whisper prompt to improve transcription.",
+      "editDescription": "Edit the spelling or casing of the saved word.",
+      "correctMisspelling": "Correct a misspelling",
+      "correctMisspellingHelp": "When enabled, Calliop automatically replaces the incorrectly dictated form with the correct word.",
+      "wordLabel": "Word",
+      "incorrectPlaceholder": "Transcribed mistake",
+      "incorrectAria": "Incorrect form",
+      "correctPlaceholder": "Correct spelling",
+      "correctAria": "Correct spelling",
+      "cannotEditMisspelling": "The transcribed mistake cannot be edited. Delete and recreate the word to change the rule.",
+      "wordOrExpression": "Word or phrase",
+      "wordPlaceholder": "e.g. Calliop, Kubernetes, Dupont-Martin…",
+      "editWord": "Edit {{word}}",
+      "deleteWord": "Delete {{word}}"
+    },
+    "errors": {
+      "alreadyExists": "This word is already in the dictionary.",
+      "duplicateWord": "An identical word already exists."
+    }
+  },
+  "snippets": {
+    "title": "Snippets",
+    "subtitle": "Define voice triggers that insert full text after transcription.",
+    "new": "New snippet",
+    "create": "Create snippet",
+    "variables": "Variables",
+    "importJson": "Import JSON",
+    "exportJson": "Export JSON",
+    "empty": "No snippets saved. Create a voice trigger or import a JSON file.",
+    "searchLabel": "Search snippets",
+    "searchPlaceholder": "Trigger or text…",
+    "sort": {
+      "triggerAsc": "Sort A → Z",
+      "triggerDesc": "Sort Z → A",
+      "recent": "Most recent"
+    },
+    "badge": {
+      "variables": "Variables"
+    },
+    "modal": {
+      "createTitle": "New snippet",
+      "editTitle": "Edit snippet",
+      "createDescription": "Define a voice trigger and the text inserted after transcription.",
+      "editDescription": "Edit the trigger or inserted text.",
+      "triggerLabel": "Voice trigger",
+      "triggerPlaceholder": "e.g. \"my signature\"",
+      "contentLabel": "Text to insert",
+      "contentPlaceholder": "Best regards,\n{{nom}}",
+      "preview": "Preview",
+      "editTrigger": "Edit {{trigger}}",
+      "deleteTrigger": "Delete {{trigger}}"
+    },
+    "variablesModal": {
+      "title": "Variables",
+      "description": "Values resolved at dictation time. Copy a token to use it in a snippet.",
+      "copyToken": "Copy {{token}}",
+      "valueLabel": "Value",
+      "current": "Current:",
+      "date": {
+        "label": "Date",
+        "hint": "Today's date (e.g. June 12, 2026)"
+      },
+      "clipboard": {
+        "label": "Clipboard",
+        "hint": "Current clipboard contents"
+      },
+      "name": {
+        "label": "Name",
+        "hint": "Your name (configurable in Variables)",
+        "placeholder": "e.g. Jane Doe"
+      }
+    },
+    "errors": {
+      "duplicateTrigger": "This trigger already exists."
+    }
+  },
+  "style": {
+    "title": "Style",
+    "subtitle": "Adapt dictation tone to the active app — formal for Outlook, casual for Slack, technical for your IDE. Active only with AI auto-edits enabled.",
+    "newRule": "New rule",
+    "createRule": "Create rule",
+    "empty": "No rules configured. Create an app → style mapping to personalize your dictations.",
+    "searchLabel": "Search rules",
+    "searchPlaceholder": "Pattern, tone, or type…",
+    "sort": {
+      "patternAsc": "Sort A → Z",
+      "patternDesc": "Sort Z → A",
+      "tone": "By tone",
+      "recent": "Most recent"
+    },
+    "matchType": {
+      "exe": "Executable",
+      "titleContains": "Title contains"
+    },
+    "tone": {
+      "default": {
+        "label": "Neutral",
+        "description": "Faithful transcription without stylistic rephrasing."
+      },
+      "casual": {
+        "label": "Casual",
+        "description": "Natural, conversational tone for chat and notes."
+      },
+      "formal": {
+        "label": "Formal",
+        "description": "Professional register for emails and documents."
+      },
+      "technical": {
+        "label": "Technical",
+        "description": "Precision and concision for code and documentation."
+      }
+    },
+    "activeWindow": {
+      "label": "Foreground application",
+      "notDetected": "No application detected yet. Click in the target app (even on your other screen) — detection updates automatically.",
+      "refresh": "Refresh",
+      "createRule": "Rule for this app"
+    },
+    "modal": {
+      "title": "New style rule",
+      "description": "Associate an application with a dictation style. Applies when AI auto-edits are enabled.",
+      "patternLabel": "Pattern",
+      "patternExePlaceholder": "e.g. \"slack.exe\" or \"Code\"",
+      "patternTitlePlaceholder": "e.g. \"Outlook\"",
+      "matchTypeLabel": "Match type",
+      "toneLegend": "Dictation style",
+      "deleteRule": "Delete rule {{pattern}}"
+    },
+    "errors": {
+      "cannotAdd": "Unable to add this rule."
+    }
+  },
+  "history": {
+    "title": "History",
+    "subtitle": "Browse past dictations. Use actions on each entry to copy or reinject text into the active application.",
+    "stats": {
+      "dictations": "Dictations",
+      "words": "Words transcribed",
+      "avgLatency": "Average latency"
+    },
+    "refresh": "Refresh history",
+    "searchLabel": "Search history",
+    "searchPlaceholder": "Keywords, application, text excerpt…",
+    "empty": "No dictations recorded yet.",
+    "sort": {
+      "recent": "Most recent",
+      "oldest": "Oldest",
+      "longest": "Longest"
+    },
+    "entry": {
+      "copy": "Copy text",
+      "reinject": "Reinject into active application",
+      "wordCount_one": "{{count}} word",
+      "wordCount_other": "{{count}} words"
+    },
+    "pagination": {
+      "previous": "Previous",
+      "next": "Next"
+    }
+  },
+  "insight": {
+    "title": "Statistics",
+    "subtitle": "Activity, pipeline performance, and per-app breakdown — computed locally from your history.",
+    "refresh": "Refresh statistics",
+    "empty": {
+      "title": "No statistics yet",
+      "description": "Complete your first dictations to see activity, pipeline latency, per-app breakdown, and speaking speed."
+    },
+    "sections": {
+      "today": "Today",
+      "global": "Overall",
+      "weekSummary": "Summary — last 7 days"
+    },
+    "metrics": {
+      "lastLatency": {
+        "label": "Last dictation latency",
+        "empty": "Complete a dictation to measure latency."
+      },
+      "wordsToday": {
+        "label": "Words dictated",
+        "empty": "Counted since midnight (local time).",
+        "dictations_one": "{{count}} dictation since midnight.",
+        "dictations_other": "{{count}} dictations since midnight."
+      },
+      "learned": {
+        "label": "Learned corrections",
+        "empty": "Corrections enrich the local dictionary.",
+        "detail_one": "{{count}} word added to the dictionary.",
+        "detail_other": "{{count}} words added to the dictionary."
+      },
+      "totalWords": {
+        "label": "Words transcribed"
+      },
+      "totalDictations": {
+        "label": "Recorded dictations"
+      },
+      "avgLatency": {
+        "label": "Average latency"
+      },
+      "speechTime": {
+        "label": "Speaking time",
+        "detail": "Cumulative audio duration of your dictations."
+      }
+    },
+    "week": {
+      "words": "Words dictated",
+      "dictations": "Dictations",
+      "avgPerActiveDay": "Average / active day",
+      "avgWordsValue": "{{count}} words",
+      "bestDay": {
+        "label": "Best day",
+        "value": "{{count}} words",
+        "empty": "No activity in this period."
+      }
+    },
+    "charts": {
+      "activity": {
+        "title": "Activity — 7 days",
+        "description": "Words dictated per day. Dictation count appears above each bar.",
+        "empty": "Bars will appear after your first dictations.",
+        "aria": "Chart of words dictated over the last seven days"
+      },
+      "latency": {
+        "title": "Latency — recent dictations",
+        "description": "STT, LLM, and injection breakdown (stacked).",
+        "empty": "No latency measurements recorded.",
+        "aria": "Chart of latency for recent dictations",
+        "stt": "STT",
+        "llm": "LLM",
+        "inject": "Injection"
+      },
+      "appUsage": {
+        "title": "Usage by application",
+        "description": "Breakdown of dictated words by active window.",
+        "empty": "No context data yet.",
+        "aria": "Breakdown of dictated words by application",
+        "centerWords": "words"
+      }
+    },
+    "wpm": {
+      "title": "Speed vs typing",
+      "description": "Comparison to 40 words/min (average keyboard typing).",
+      "vsBaseline": "vs {{baseline}} words/min",
+      "average": "{{wpm}} words/min on average",
+      "empty": "Speed is calculated after your first dictations.",
+      "aria": "Dictation speed: {{wpm}} words per minute, {{percent}} percent of average typing speed"
+    }
+  },
+  "overlay": {
+    "states": {
+      "idle": "Idle",
+      "recording": "Listening",
+      "transcribing": "Transcribing",
+      "injecting": "Injecting text",
+      "error": "Dictation error"
+    }
+  },
+  "errors": {
+    "unknown": "Unknown error",
+    "MIC_PROBE_ACTIVE_BEFORE_DICTATION": "Stop the microphone test before dictating.",
+    "CANNOT_DELETE_AUTO_WHISPER": "Cannot delete the automatic Whisper model.",
+    "CANNOT_DELETE_ACTIVE_WHISPER": "Cannot delete the active Whisper model.",
+    "CANNOT_DELETE_AUTO_LLM": "Cannot delete the automatic LLM model.",
+    "CANNOT_DELETE_ACTIVE_LLM": "Cannot delete the active LLM model.",
+    "INVALID_MODEL_KIND": "Invalid model type (whisper or llm).",
+    "UNKNOWN_WHISPER_MODEL": "Unknown Whisper model.",
+    "UNKNOWN_LLM_MODEL": "Unknown LLM model.",
+    "INVALID_INFERENCE_BACKEND": "Invalid inference backend.",
+    "WORD_EMPTY": "Word cannot be empty.",
+    "WORD_TOO_LONG": "Word cannot be empty and cannot consist of digits only.",
+    "MISSPELLING_INVALID": "Incorrect form cannot be empty and cannot consist of digits only.",
+    "MISSPELLING_SAME_AS_WORD": "Incorrect form must differ from the correct word.",
+    "MISSPELLING_ALREADY_REGISTERED": "This transcribed mistake is already registered.",
+    "WORD_ALREADY_IN_DICTIONARY": "This word is already in the dictionary.",
+    "WORD_NOT_FOUND": "Word not found.",
+    "SNIPPET_TRIGGER_EMPTY": "Trigger cannot be empty.",
+    "SNIPPET_TRIGGER_TOO_SHORT": "Trigger must be at least 2 characters long.",
+    "SNIPPET_CONTENT_EMPTY": "Snippet text cannot be empty.",
+    "SNIPPET_FILE_EMPTY": "File contains no snippets.",
+    "SNIPPET_NOT_FOUND": "Snippet not found.",
+    "INVALID_JSON": "Invalid JSON.",
+    "SNIPPET_IMPORT_NO_VALID": "No valid snippets imported (trigger ≥ 2 characters, non-empty text).",
+    "PATTERN_TOO_SHORT": "Pattern must be at least 2 characters long.",
+    "RULE_NOT_FOUND": "Rule not found.",
+    "DICTATION_NOT_FOUND": "Dictation not found.",
+    "MIC_PROBE_ALREADY_ACTIVE": "Microphone test is already running.",
+    "DICTATION_ACTIVE_BEFORE_MIC_PROBE": "A dictation is in progress. Stop it before testing the microphone.",
+    "UNSUPPORTED_STT_LANGUAGE": "Unsupported dictation language.",
+    "INVALID_MATCH_TYPE": "Invalid match type (exe or title_contains).",
+    "INVALID_TONE": "Invalid tone (default, casual, formal, or technical).",
+    "notifications": {
+      "title": "Calliop",
+      "dictionaryWordAdded_one": "Word added to dictionary: {{word}}",
+      "dictionaryWordsAdded_other": "{{count}} words added to dictionary: {{words}}"
+    }
+  },
+  "tray": {
+    "tooltip": "Calliop",
+    "open": "Open Calliop",
+    "toggle": "Start / stop dictation",
+    "dictationLanguage": "Dictation language: {{label}}",
+    "settings": "Settings",
+    "history": "History",
+    "dictionary": "Dictionary",
+    "snippets": "Snippets",
+    "insight": "Statistics",
+    "autoEdit": "AI auto-edits",
+    "autostart": "Launch at startup",
+    "quit": "Quit",
+    "language": {
+      "fr": "FR",
+      "en": "EN",
+      "auto": "AUTO"
+    }
+  },
+  "window": {
+    "title": "Calliop",
+    "minimize": "Minimize",
+    "maximize": "Maximize",
+    "restore": "Restore",
+    "close": "Close",
+    "downloadToasts": {
+      "aria": "Model downloads in progress",
+      "whisper": "Downloading Whisper",
+      "llm": "Downloading LLM"
+    }
+  }
+}

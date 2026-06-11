@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import type { LatencyMetricsPayload } from "../../hooks/usePipelineState";
 import { glowSurfaceClasses } from "../layout/glowSurface";
 import { formatLatencyBreakdown } from "./mainUtils";
@@ -7,16 +8,25 @@ interface LatencySummaryProps {
 }
 
 export function LatencySummary({ metrics }: LatencySummaryProps) {
+  const { t } = useTranslation();
   const breakdown = formatLatencyBreakdown(metrics);
 
   return (
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-      <MetricPill label="Transcription" value={breakdown.stt} glow="blue" />
+      <MetricPill label={t("main.latency.stt")} value={breakdown.stt} glow="blue" />
       {breakdown.llm && (
-        <MetricPill label="Auto-édition IA" value={breakdown.llm} glow="orange" />
+        <MetricPill
+          label={t("main.latency.llm")}
+          value={breakdown.llm}
+          glow="orange"
+        />
       )}
-      <MetricPill label="Injection" value={breakdown.inject} glow="green" />
-      <MetricPill label="Total" value={breakdown.total} glow="blue" />
+      <MetricPill
+        label={t("main.latency.inject")}
+        value={breakdown.inject}
+        glow="green"
+      />
+      <MetricPill label={t("main.latency.total")} value={breakdown.total} glow="blue" />
     </div>
   );
 }

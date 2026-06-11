@@ -20,7 +20,8 @@ Ouvrez la fenêtre principale depuis l’icône de la barre des tâches.
 
 ### Général
 
-- **Langue de dictée** : français, anglais ou détection automatique.
+- **Langue de l'interface** : français ou anglais (Paramètres → Général). Au premier lancement, la langue suit celle du système si elle est reconnue.
+- **Langue de dictée** : français, anglais ou détection automatique (Whisper). Indépendante de la langue de l'interface.
 - **Auto-edits IA** : nettoie fillers, ponctuation et reformulation légère (modèle local Qwen).
 - **Apprentissage des corrections** : enrichit le dictionnaire quand vous corrigez le texte injecté.
 

@@ -1,16 +1,23 @@
+import type { TFunction } from "i18next";
 import type { LatencyMetricsPayload, PipelineState } from "../../hooks/usePipelineState";
 import type { GlowColor } from "../layout/glowSurface";
 
-export const STATE_HINTS: Record<PipelineState, string> = {
-  idle: "Placez le curseur dans votre application, puis lancez une dictée.",
-  recording: "Parlez clairement — réappuyez pour arrêter ou relâchez en push-to-talk.",
-  transcribing: "Whisper transcrit votre voix localement, sans envoi réseau.",
-  injecting: "Le texte est inséré dans l'application active.",
-  error: "Consultez le message ci-dessous ou relancez une dictée.",
-};
+export function getStateHints(t: TFunction): Record<PipelineState, string> {
+  return {
+    idle: t("main.pipeline.states.idle.hint"),
+    recording: t("main.pipeline.states.recording.hint"),
+    transcribing: t("main.pipeline.states.transcribing.hint"),
+    injecting: t("main.pipeline.states.injecting.hint"),
+    error: t("main.pipeline.states.error.hint"),
+  };
+}
 
-export function formatHotkeyDisplay(hotkey: string): string {
-  return hotkey.replace(/Space/g, "Espace");
+export function pipelineStateLabel(t: TFunction, state: PipelineState): string {
+  return t(`main.pipeline.states.${state}.label`);
+}
+
+export function formatHotkeyDisplay(hotkey: string, t: TFunction): string {
+  return hotkey.replace(/Space/g, t("keys.space"));
 }
 
 export function hotkeyParts(hotkey: string): string[] {

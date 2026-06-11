@@ -1,12 +1,13 @@
+import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { useModelDownloads } from "../../hooks/useModelDownloads";
-import {
-  formatModelDownloadTitle,
-  formatModelLabel,
-} from "../../lib/modelLabels";
+import { getModelDownloadLabels } from "../../lib/modelLabels";
 import { ProgressBar } from "../ui/ProgressBar";
 
 export function ModelDownloadToasts() {
+  const { t } = useTranslation();
   const downloads = useModelDownloads();
+  const modelLabels = useMemo(() => getModelDownloadLabels(t), [t]);
 
   if (downloads.length === 0) {
     return null;
@@ -16,7 +17,7 @@ export function ModelDownloadToasts() {
     <div
       className="pointer-events-none fixed bottom-4 right-4 z-[60] flex w-[min(100vw-2rem,320px)] flex-col gap-3"
       aria-live="polite"
-      aria-label="Téléchargements de modèles en cours"
+      aria-label={t("window.downloadToasts.aria")}
     >
       {downloads.map((download) => (
         <div
@@ -25,11 +26,11 @@ export function ModelDownloadToasts() {
           role="status"
         >
           <p className="text-body-sm m-0 mb-3 font-medium text-ink">
-            {formatModelDownloadTitle(download.kind)}
+            {modelLabels.formatTitle(download.kind)}
           </p>
           <ProgressBar
             value={download.percent}
-            label={formatModelLabel(download.modelId)}
+            label={modelLabels.formatLabel(download.modelId)}
           />
         </div>
       ))}

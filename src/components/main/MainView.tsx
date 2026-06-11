@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import type {
   LatencyMetricsPayload,
   PipelineState,
@@ -31,6 +32,7 @@ export function MainView({
   audioLevel,
   latencyMetrics,
 }: MainViewProps) {
+  const { t } = useTranslation();
   const {
     editedTranscript,
     setEditedTranscript,
@@ -45,11 +47,9 @@ export function MainView({
     <div className="flex flex-col gap-8">
       <header>
         <h1 className="text-display-serif mb-2 text-4xl text-ink sm:text-5xl">
-          Dictée vocale locale
+          {t("main.title")}
         </h1>
-        <p className="text-subtitle text-charcoal">
-          Parlez dans n&apos;importe quelle application — 100&nbsp;% hors ligne.
-        </p>
+        <p className="text-subtitle text-charcoal">{t("main.subtitle")}</p>
       </header>
 
       <PipelineStatusCard
@@ -84,14 +84,16 @@ export function MainView({
       {latencyMetrics && modelReady && (
         <section className="flex flex-col gap-3">
           <p className="text-caption m-0 text-charcoal">
-            Performance de la dernière dictée
+            {t("main.latency.title")}
           </p>
           <LatencySummary metrics={latencyMetrics} />
         </section>
       )}
 
       <section className="flex flex-col gap-3">
-        <p className="text-caption m-0 text-charcoal">Raccourcis</p>
+        <p className="text-caption m-0 text-charcoal">
+          {t("keys.hotkeyGuideTitle")}
+        </p>
         <MainHotkeyGuide />
       </section>
     </div>

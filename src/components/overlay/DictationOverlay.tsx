@@ -1,12 +1,13 @@
+import { useTranslation } from "react-i18next";
 import { usePipelineState, type PipelineState } from "../../hooks/usePipelineState";
 import { WaveformVisualizer } from "./WaveformVisualizer";
 
-const ARIA_LABELS: Record<PipelineState, string> = {
-  idle: "En attente",
-  recording: "Écoute en cours",
-  transcribing: "Transcription en cours",
-  injecting: "Injection du texte",
-  error: "Erreur de dictée",
+const OVERLAY_STATE_KEYS: Record<PipelineState, string> = {
+  idle: "overlay.states.idle",
+  recording: "overlay.states.recording",
+  transcribing: "overlay.states.transcribing",
+  injecting: "overlay.states.injecting",
+  error: "overlay.states.error",
 };
 
 function glowStateClass(state: PipelineState, hasError: boolean): string {
@@ -23,6 +24,7 @@ function glowStateClass(state: PipelineState, hasError: boolean): string {
 }
 
 export function DictationOverlay() {
+  const { t } = useTranslation();
   const { pipelineState, errorMessage, audioLevel } = usePipelineState();
   const hasError = Boolean(errorMessage);
 
@@ -37,7 +39,7 @@ export function DictationOverlay() {
         .join(" ")}
       role="status"
       aria-live="polite"
-      aria-label={ARIA_LABELS[pipelineState]}
+      aria-label={t(OVERLAY_STATE_KEYS[pipelineState])}
     >
       <div className="overlay-pill">
         <WaveformVisualizer state={pipelineState} level={audioLevel} />

@@ -1,29 +1,55 @@
 import type { ReactNode } from "react";
 import { Mic, MousePointerClick, ToggleLeft } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Kbd } from "../ui/Kbd";
 
+const ALT_MARKER = "%ALT%";
+const SPACE_MARKER = "%SPACE%";
+
+function HotkeyToggleDescription() {
+  const { t } = useTranslation();
+  const template = t("keys.toggleDescription", {
+    alt: ALT_MARKER,
+    space: SPACE_MARKER,
+  });
+  const segments = template.split(
+    new RegExp(`(${ALT_MARKER}|${SPACE_MARKER})`),
+  );
+
+  return (
+    <>
+      {segments.map((segment, index) => {
+        if (segment === ALT_MARKER) {
+          return <Kbd key={index}>{t("keys.modifiers.alt")}</Kbd>;
+        }
+        if (segment === SPACE_MARKER) {
+          return <Kbd key={index}>{t("keys.space")}</Kbd>;
+        }
+        return segment;
+      })}
+    </>
+  );
+}
+
 export function MainHotkeyGuide() {
+  const { t } = useTranslation();
+
   return (
     <div className="grid gap-3 sm:grid-cols-3">
       <HintCard
         icon={<Mic size={16} strokeWidth={1.75} aria-hidden />}
-        title="Toggle"
-        description={
-          <>
-            Appuyez sur <Kbd>Alt</Kbd> + <Kbd>Espace</Kbd> pour démarrer, puis
-            réappuyez pour arrêter.
-          </>
-        }
+        title={t("keys.toggleTitle")}
+        description={<HotkeyToggleDescription />}
       />
       <HintCard
         icon={<ToggleLeft size={16} strokeWidth={1.75} aria-hidden />}
-        title="Push-to-talk"
-        description="Maintenez le raccourci pendant que vous parlez, relâchez pour transcrire."
+        title={t("keys.pushToTalkTitle")}
+        description={t("keys.pushToTalkDescription")}
       />
       <HintCard
         icon={<MousePointerClick size={16} strokeWidth={1.75} aria-hidden />}
-        title="Curseur actif"
-        description="Le texte est inséré là où se trouve le curseur — Notepad, Word, navigateur…"
+        title={t("keys.activeCursorTitle")}
+        description={t("keys.activeCursorDescription")}
       />
     </div>
   );

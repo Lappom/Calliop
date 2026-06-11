@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { useTranslation } from "react-i18next";
 import { AppFrame } from "./components/layout/AppFrame";
 import { AppShell } from "./components/layout/AppShell";
 import { ModelDownloadToasts } from "./components/layout/ModelDownloadToasts";
@@ -17,6 +18,7 @@ import type { AppView } from "./lib/views";
 import { isAppView } from "./lib/views";
 
 function App() {
+  const { t } = useTranslation();
   const [currentView, setCurrentView] = useState<AppView>("main");
   const [onboardingChecked, setOnboardingChecked] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -58,7 +60,7 @@ function App() {
       <>
         <AppFrame>
           <div className="flex flex-1 items-center justify-center text-body">
-            Chargement…
+            {t("common.loading")}
           </div>
         </AppFrame>
         <ModelDownloadToasts />

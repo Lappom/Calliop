@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { translateError } from "../lib/translateError";
 
 export type DictionarySource = "manual" | "learned";
 
@@ -19,6 +21,7 @@ interface DictionaryUpdatedPayload {
 }
 
 export function useDictionary() {
+  const { t } = useTranslation();
   const [words, setWords] = useState<DictionaryWord[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -31,9 +34,9 @@ export function useDictionary() {
       setLoaded(true);
       setErrorMessage(null);
     } catch (err) {
-      setErrorMessage(String(err));
+      setErrorMessage(translateError(err, t));
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     let cancelled = false;
@@ -82,17 +85,17 @@ export function useDictionary() {
         if (inserted) {
           await loadWords();
         } else {
-          setErrorMessage("Ce mot est déjà dans le dictionnaire.");
+          setErrorMessage(t("dictionary.errors.alreadyExists"));
         }
         return inserted;
       } catch (err) {
-        setErrorMessage(String(err));
+        setErrorMessage(translateError(err, t));
         throw err;
       } finally {
         setBusy(false);
       }
     },
-    [loadWords],
+    [loadWords, t],
   );
 
   const removeWord = useCallback(
@@ -103,13 +106,13 @@ export function useDictionary() {
         await invoke("remove_dictionary_word", { id });
         await loadWords();
       } catch (err) {
-        setErrorMessage(String(err));
+        setErrorMessage(translateError(err, t));
         throw err;
       } finally {
         setBusy(false);
       }
     },
-    [loadWords],
+    [loadWords, t],
   );
 
   const updateWord = useCallback(
@@ -131,13 +134,13 @@ export function useDictionary() {
         }
         return updated;
       } catch (err) {
-        setErrorMessage(String(err));
+        setErrorMessage(translateError(err, t));
         throw err;
       } finally {
         setBusy(false);
       }
     },
-    [loadWords],
+    [loadWords, t],
   );
 
   return {

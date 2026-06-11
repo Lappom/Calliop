@@ -1,5 +1,7 @@
+import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import type { ToneProfile } from "../../hooks/useAppContext";
-import { TONE_META } from "./styleUtils";
+import { getToneMeta } from "./styleUtils";
 
 const TONE_BADGE_STYLES: Record<
   ToneProfile,
@@ -33,8 +35,10 @@ interface ToneBadgeProps {
 }
 
 export function ToneBadge({ tone, className = "" }: ToneBadgeProps) {
+  const { t } = useTranslation();
+  const toneMeta = useMemo(() => getToneMeta(t), [t]);
   const styles = TONE_BADGE_STYLES[tone];
-  const label = TONE_META[tone].label;
+  const label = toneMeta[tone].label;
 
   return (
     <span
@@ -53,7 +57,7 @@ export function ToneBadge({ tone, className = "" }: ToneBadgeProps) {
     >
       <span
         className="size-1.5 shrink-0 rounded-full"
-        style={{ backgroundColor: TONE_META[tone].accent }}
+        style={{ backgroundColor: toneMeta[tone].accent }}
         aria-hidden
       />
       {label}

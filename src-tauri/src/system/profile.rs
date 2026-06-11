@@ -194,6 +194,7 @@ mod tests {
             inference_backend: InferenceBackend::Auto.as_setting_value().into(),
             low_power_mode: low_power,
             adaptive_perf: adaptive,
+            ui_language: "fr".into(),
         }
     }
 

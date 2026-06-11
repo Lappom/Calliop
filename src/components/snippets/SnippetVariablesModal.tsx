@@ -1,9 +1,10 @@
 import { Check, Copy } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useUiLocale } from "../../i18n/useUiLocale";
 import { Button } from "../ui/Button";
 import { Modal } from "../ui/Modal";
 import { TextInput } from "../ui/TextInput";
-import { SNIPPET_VARIABLES } from "./snippetVariables";
+import { getSnippetVariables } from "./snippetVariables";
 
 interface SnippetVariablesModalProps {
   open: boolean;
@@ -14,11 +15,11 @@ interface SnippetVariablesModalProps {
   onPreview: (content: string) => Promise<string>;
 }
 
-function truncateValue(value: string, max = 80): string {
+function truncateValue(value: string, ellipsis: string, max = 80): string {
   if (value.length <= max) {
     return value;
   }
-  return `${value.slice(0, max)}…`;
+  return `${value.slice(0, max)}${ellipsis}`;
 }
 
 export function SnippetVariablesModal({
@@ -29,6 +30,8 @@ export function SnippetVariablesModal({
   onSaveUserName,
   onPreview,
 }: SnippetVariablesModalProps) {
+  const { t } = useUiLocale();
+  const snippetVariables = useMemo(() => getSnippetVariables(t), [t]);
   const [resolved, setResolved] = useState<Record<string, string>>({});
   const [nomDraft, setNomDraft] = useState(userName);
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
@@ -48,7 +51,7 @@ export function SnippetVariablesModal({
 
     const load = async () => {
       const entries = await Promise.all(
-        SNIPPET_VARIABLES.map(async (variable) => {
+        snippetVariables.map(async (variable) => {
           const value = await onPreview(variable.token);
           return [variable.token, value] as const;
         }),
@@ -67,7 +70,7 @@ export function SnippetVariablesModal({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [open, onPreview, userName]);
+  }, [open, onPreview, userName, snippetVariables]);
 
   const copyToken = async (token: string) => {
     try {
@@ -84,18 +87,18 @@ export function SnippetVariablesModal({
       open={open}
       onClose={onClose}
       size="md"
-      title="Variables"
-      description="Valeurs résolues à la dictée. Copiez un jeton pour l'utiliser dans un snippet."
+      title={t("snippets.variablesModal.title")}
+      description={t("snippets.variablesModal.description")}
     >
       <ul className="m-0 flex list-none flex-col gap-3 p-0">
-        {SNIPPET_VARIABLES.map((variable) => {
+        {snippetVariables.map((variable) => {
           const value = resolved[variable.token];
           const isNom = variable.token === "{{nom}}";
           const displayValue = isNom
-            ? userName.trim() || "—"
+            ? userName.trim() || t("common.emDash")
             : value?.trim()
-              ? truncateValue(value)
-              : "—";
+              ? truncateValue(value, t("common.ellipsis"))
+              : t("common.emDash");
 
           return (
             <li
@@ -114,7 +117,9 @@ export function SnippetVariablesModal({
                 </div>
                 <button
                   type="button"
-                  aria-label={`Copier ${variable.token}`}
+                  aria-label={t("snippets.variablesModal.copyToken", {
+                    token: variable.token,
+                  })}
                   disabled={busy}
                   onClick={() => {
                     void copyToken(variable.token);
@@ -137,7 +142,7 @@ export function SnippetVariablesModal({
               {isNom ? (
                 <div className="mt-3">
                   <TextInput
-                    label="Valeur"
+                    label={t("snippets.variablesModal.valueLabel")}
                     value={nomDraft}
                     onChange={(event) => setNomDraft(event.target.value)}
                     onBlur={() => {
@@ -145,13 +150,15 @@ export function SnippetVariablesModal({
                         void onSaveUserName(nomDraft);
                       }
                     }}
-                    placeholder="Ex. Marie Dupont"
+                    placeholder={t("snippets.variablesModal.name.placeholder")}
                     disabled={busy}
                   />
                 </div>
               ) : (
                 <p className="text-body-sm m-0 mt-3 text-ink">
-                  <span className="text-charcoal">Actuel : </span>
+                  <span className="text-charcoal">
+                    {t("snippets.variablesModal.current")}{" "}
+                  </span>
                   <span className="font-[family-name:var(--font-mono)] text-body">
                     {displayValue}
                   </span>
@@ -164,7 +171,7 @@ export function SnippetVariablesModal({
 
       <div className="mt-6 flex justify-end">
         <Button type="button" variant="primary" disabled={busy} onClick={onClose}>
-          Fermer
+          {t("common.close")}
         </Button>
       </div>
     </Modal>

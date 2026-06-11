@@ -1,13 +1,18 @@
+import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import type { PipelineState } from "../../hooks/usePipelineState";
-import {
-  pipelineStatusColor,
-  STATE_LABELS,
-} from "../../hooks/usePipelineState";
+import { pipelineStatusColor } from "../../hooks/usePipelineState";
+import { translateError } from "../../lib/translateError";
 import { glowSurfaceClasses } from "../layout/glowSurface";
 import { ProgressBar } from "../ui/ProgressBar";
 import { StatusDot } from "../ui/StatusDot";
 import { AudioLevelBars } from "./AudioLevelBars";
-import { isPipelineBusy, pipelineCardGlow, STATE_HINTS } from "./mainUtils";
+import {
+  getStateHints,
+  isPipelineBusy,
+  pipelineCardGlow,
+  pipelineStateLabel,
+} from "./mainUtils";
 
 interface PipelineStatusCardProps {
   pipelineState: PipelineState;
@@ -26,6 +31,8 @@ export function PipelineStatusCard({
   partialTranscript,
   audioLevel,
 }: PipelineStatusCardProps) {
+  const { t } = useTranslation();
+  const stateHints = useMemo(() => getStateHints(t), [t]);
   const hasError = Boolean(errorMessage) || pipelineState === "error";
   const glow = pipelineCardGlow(pipelineState, hasError);
   const statusColor = pipelineStatusColor(pipelineState, hasError);
@@ -41,12 +48,12 @@ export function PipelineStatusCard({
         ].join(" ")}
       >
         <p className="text-caption relative m-0 text-charcoal">
-          Préparation
+          {t("main.pipeline.preparing")}
         </p>
         <p className="text-heading-sm relative m-0 mt-2 text-ink">
           {modelProgress !== null
-            ? "Téléchargement du modèle Whisper"
-            : "Initialisation du modèle Whisper…"}
+            ? t("main.pipeline.downloadWhisper")
+            : t("main.pipeline.initWhisper")}
         </p>
         {modelProgress !== null ? (
           <div className="relative mt-4">
@@ -54,13 +61,16 @@ export function PipelineStatusCard({
           </div>
         ) : (
           <p className="text-body-sm relative mt-3 text-charcoal">
-            Premier lancement : le modèle est chargé localement sur votre
-            machine.
+            {t("main.pipeline.firstLaunchHint")}
           </p>
         )}
       </div>
     );
   }
+
+  const displayError = errorMessage
+    ? translateError(errorMessage, t)
+    : t("main.pipeline.states.error.unknown");
 
   return (
     <div
@@ -79,12 +89,12 @@ export function PipelineStatusCard({
           />
           <div className="min-w-0">
             <p className="text-heading-sm m-0 text-ink">
-              {hasError ? STATE_LABELS.error : STATE_LABELS[pipelineState]}
+              {hasError
+                ? pipelineStateLabel(t, "error")
+                : pipelineStateLabel(t, pipelineState)}
             </p>
             <p className="text-body-sm mt-1.5 text-charcoal">
-              {hasError && errorMessage
-                ? errorMessage
-                : STATE_HINTS[pipelineState]}
+              {hasError ? displayError : stateHints[pipelineState]}
             </p>
           </div>
         </div>
@@ -95,7 +105,9 @@ export function PipelineStatusCard({
 
       {showPartial && (
         <div className="relative mt-5 overflow-hidden rounded-md border border-hairline bg-surface-deep px-4 py-3">
-          <p className="text-caption m-0 text-ash">Transcription en direct</p>
+          <p className="text-caption m-0 text-ash">
+            {t("main.pipeline.liveTranscript")}
+          </p>
           <p className="text-body-md m-0 mt-2 text-body">{partialTranscript}</p>
         </div>
       )}

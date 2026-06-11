@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { ArrowRight, Pencil, Trash2 } from "lucide-react";
+import { useUiLocale } from "../../i18n/useUiLocale";
 import type { Snippet } from "../../hooks/useSnippets";
 import { BadgePill } from "../ui/BadgePill";
 import { containsSnippetVariables } from "./snippetVariables";
@@ -49,6 +50,8 @@ export function SnippetsTable({
   onEdit,
   onDelete,
 }: SnippetsTableProps) {
+  const { t } = useUiLocale();
+
   return (
     <div className="overflow-hidden rounded-lg border border-hairline-strong bg-surface-card">
       <div className="overflow-x-auto">
@@ -74,7 +77,9 @@ export function SnippetsTable({
                         {entry.content}
                       </span>
                       {containsSnippetVariables(entry.content) && (
-                        <BadgePill className="shrink-0">Variables</BadgePill>
+                        <BadgePill className="shrink-0">
+                          {t("snippets.badge.variables")}
+                        </BadgePill>
                       )}
                     </span>
                   </div>
@@ -82,14 +87,18 @@ export function SnippetsTable({
                 <td className="w-20 shrink-0 px-2 py-2 sm:w-24">
                   <div className="flex items-center justify-end gap-0.5 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
                     <IconActionButton
-                      label={`Modifier ${entry.trigger}`}
+                      label={t("snippets.modal.editTrigger", {
+                        trigger: entry.trigger,
+                      })}
                       disabled={busy}
                       onClick={() => onEdit(entry)}
                     >
                       <Pencil size={15} strokeWidth={1.75} />
                     </IconActionButton>
                     <IconActionButton
-                      label={`Supprimer ${entry.trigger}`}
+                      label={t("snippets.modal.deleteTrigger", {
+                        trigger: entry.trigger,
+                      })}
                       disabled={busy}
                       tone="danger"
                       onClick={() => onDelete(entry.id)}

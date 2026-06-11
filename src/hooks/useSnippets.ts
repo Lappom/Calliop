@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
+import { useTranslation } from "react-i18next";
+import { translateError } from "../lib/translateError";
 
 export interface Snippet {
   id: number;
@@ -10,6 +12,7 @@ export interface Snippet {
 }
 
 export function useSnippets() {
+  const { t } = useTranslation();
   const [snippets, setSnippets] = useState<Snippet[]>([]);
   const [userName, setUserName] = useState("");
   const [loaded, setLoaded] = useState(false);
@@ -24,19 +27,19 @@ export function useSnippets() {
       setLoaded(true);
       setErrorMessage(null);
     } catch (err) {
-      setErrorMessage(String(err));
+      setErrorMessage(translateError(err, t));
       setLoaded(true);
     }
-  }, []);
+  }, [t]);
 
   const loadUserName = useCallback(async () => {
     try {
       const name = await invoke<string>("get_snippet_user_name");
       setUserName(name);
     } catch (err) {
-      setErrorMessage(String(err));
+      setErrorMessage(translateError(err, t));
     }
-  }, []);
+  }, [t]);
 
   const saveUserName = useCallback(async (name: string) => {
     const trimmed = name.trim();
@@ -45,19 +48,19 @@ export function useSnippets() {
       setUserName(trimmed);
       setErrorMessage(null);
     } catch (err) {
-      setErrorMessage(String(err));
+      setErrorMessage(translateError(err, t));
       throw err;
     }
-  }, []);
+  }, [t]);
 
   const previewExpansion = useCallback(async (content: string) => {
     try {
       return await invoke<string>("preview_snippet_expansion", { content });
     } catch (err) {
-      setErrorMessage(String(err));
+      setErrorMessage(translateError(err, t));
       return content;
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     let cancelled = false;
@@ -98,17 +101,17 @@ export function useSnippets() {
         if (inserted) {
           await loadSnippets();
         } else {
-          setErrorMessage("Ce déclencheur existe déjà.");
+          setErrorMessage(t("snippets.errors.duplicateTrigger"));
         }
         return inserted;
       } catch (err) {
-        setErrorMessage(String(err));
+        setErrorMessage(translateError(err, t));
         throw err;
       } finally {
         setBusy(false);
       }
     },
-    [loadSnippets],
+    [loadSnippets, t],
   );
 
   const removeSnippet = useCallback(
@@ -119,13 +122,13 @@ export function useSnippets() {
         await invoke("remove_snippet", { id });
         await loadSnippets();
       } catch (err) {
-        setErrorMessage(String(err));
+        setErrorMessage(translateError(err, t));
         throw err;
       } finally {
         setBusy(false);
       }
     },
-    [loadSnippets],
+    [loadSnippets, t],
   );
 
   const updateSnippet = useCallback(
@@ -147,17 +150,17 @@ export function useSnippets() {
         if (updated) {
           await loadSnippets();
         } else {
-          setErrorMessage("Ce déclencheur existe déjà.");
+          setErrorMessage(t("snippets.errors.duplicateTrigger"));
         }
         return updated;
       } catch (err) {
-        setErrorMessage(String(err));
+        setErrorMessage(translateError(err, t));
         throw err;
       } finally {
         setBusy(false);
       }
     },
-    [loadSnippets],
+    [loadSnippets, t],
   );
 
   const importSnippets = useCallback(
@@ -169,13 +172,13 @@ export function useSnippets() {
         await loadSnippets();
         return count;
       } catch (err) {
-        setErrorMessage(String(err));
+        setErrorMessage(translateError(err, t));
         throw err;
       } finally {
         setBusy(false);
       }
     },
-    [loadSnippets],
+    [loadSnippets, t],
   );
 
   const exportSnippets = useCallback(async () => {
@@ -191,12 +194,12 @@ export function useSnippets() {
       anchor.click();
       URL.revokeObjectURL(url);
     } catch (err) {
-      setErrorMessage(String(err));
+      setErrorMessage(translateError(err, t));
       throw err;
     } finally {
       setBusy(false);
     }
-  }, []);
+  }, [t]);
 
   const openImportDialog = useCallback(() => {
     fileInputRef.current?.click();

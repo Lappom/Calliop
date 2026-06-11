@@ -1,5 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useOnboarding } from "../../hooks/useOnboarding";
+import type { PipelineState } from "../../hooks/usePipelineState";
+import { translateError } from "../../lib/translateError";
 import { BadgePill } from "../ui/BadgePill";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
@@ -8,23 +11,47 @@ import { SectionGlow } from "../layout/SectionGlow";
 import { StatusDot } from "../ui/StatusDot";
 import { ProgressBar } from "../ui/ProgressBar";
 import { Kbd } from "../ui/Kbd";
+import {
+  formatHotkeyDisplay,
+  hotkeyParts,
+  pipelineStateLabel,
+} from "../main/mainUtils";
+import { hotkeyPartLabel } from "../settings/settingsUtils";
 
-const STEPS = [
-  { id: 1, label: "Bienvenue" },
-  { id: 2, label: "Micro" },
-  { id: 3, label: "Test" },
-  { id: 4, label: "Terminé" },
-];
+const HOTKEY_PARTS_MARKER = "%PARTS%";
+
+function OnboardingHotkeyUsage({ hotkey }: { hotkey: string }) {
+  const { t } = useTranslation();
+  const parts = hotkeyParts(hotkey);
+  const template = t("keys.onboardingUsage", {
+    hotkeyParts: HOTKEY_PARTS_MARKER,
+    hotkeyLabel: formatHotkeyDisplay(hotkey, t),
+  });
+  const segments = template.split(HOTKEY_PARTS_MARKER);
+
+  return (
+    <>
+      {segments[0]}
+      {parts.map((part, index) => (
+        <span key={`${part}-${index}`}>
+          {index > 0 && ` ${t("common.plusSeparator")} `}
+          <Kbd>{hotkeyPartLabel(t, part)}</Kbd>
+        </span>
+      ))}
+      {segments[1]}
+    </>
+  );
+}
+
+const STEP_IDS = [1, 2, 3, 4] as const;
+const STEP_KEYS = ["welcome", "microphone", "test", "done"] as const;
 
 interface OnboardingViewProps {
   onComplete: () => void;
 }
 
-function formatHotkey(hotkey: string): string {
-  return hotkey.replace(/Space/g, "Espace");
-}
-
 export function OnboardingView({ onComplete }: OnboardingViewProps) {
+  const { t } = useTranslation();
   const [step, setStep] = useState(1);
   const {
     modelProgress,
@@ -44,9 +71,17 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
     completeOnboarding,
   } = useOnboarding();
 
+  const steps = useMemo(
+    () =>
+      STEP_IDS.map((id, index) => ({
+        id,
+        label: t(`onboarding.steps.${STEP_KEYS[index]}`),
+      })),
+    [t],
+  );
+
   const isFirst = step === 1;
-  const isLast = step === STEPS.length;
-  const hotkeyParts = hotkey.split("+").map((p) => p.trim());
+  const isLast = step === steps.length;
 
   useEffect(() => {
     if (step === 2 || !micProbing) return;
@@ -57,7 +92,7 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
     if (step === 2 && micProbing) {
       await stopMicProbe();
     }
-    setStep((s) => Math.min(STEPS.length, s + 1));
+    setStep((s) => Math.min(steps.length, s + 1));
   };
 
   const handleFinish = async () => {
@@ -65,10 +100,15 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
     onComplete();
   };
 
+  const pipelineStateText = pipelineStateLabel(
+    t,
+    pipelineState as PipelineState,
+  );
+
   return (
     <div className="calliop-scroll mx-auto flex min-h-0 flex-1 w-full max-w-[880px] flex-col gap-8 overflow-y-auto bg-canvas p-4 sm:p-8">
       <div className="flex flex-wrap gap-2">
-        {STEPS.map((s) => (
+        {steps.map((s) => (
           <BadgePill key={s.id} active={s.id === step}>
             {s.id}. {s.label}
           </BadgePill>
@@ -80,40 +120,41 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
           {step === 1 && (
             <>
               <h1 className="text-display-serif mb-4 text-4xl text-ink">
-                Bienvenue sur Calliop
+                {t("onboarding.welcome.title")}
               </h1>
               <p className="text-subtitle mb-4 text-charcoal">
-                Dictez dans n&apos;importe quelle application, sans cloud.
+                {t("onboarding.welcome.subtitle")}
               </p>
               {modelProgress !== null && !modelReady && (
                 <ProgressBar
                   value={modelProgress}
-                  label="Téléchargement du modèle Whisper…"
+                  label={t("onboarding.welcome.downloadWhisper")}
                 />
               )}
               {modelLoading && modelProgress === null && !modelReady && (
                 <p className="text-body-sm text-charcoal">
-                  Chargement du modèle de transcription…
+                  {t("onboarding.welcome.loadingModel")}
                 </p>
               )}
               {modelReady && (
                 <p className="text-body-sm text-accent-green">
-                  Modèle de transcription prêt.
+                  {t("onboarding.welcome.modelReady")}
                 </p>
               )}
               {modelError && (
                 <div className="space-y-3">
-                  <p className="text-body-sm text-accent-red">{modelError}</p>
+                  <p className="text-body-sm text-accent-red">
+                    {translateError(modelError, t)}
+                  </p>
                   <Button
                     variant="ghost"
                     disabled={modelLoading}
                     onClick={() => void retryEnsureModel()}
                   >
-                    Réessayer le téléchargement
+                    {t("common.retryDownload")}
                   </Button>
                   <p className="text-caption text-ash">
-                    Vous pouvez continuer pour tester le micro ; la dictée
-                    nécessite le modèle.
+                    {t("onboarding.welcome.continueWithoutModel")}
                   </p>
                 </div>
               )}
@@ -123,12 +164,10 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
           {step === 2 && (
             <>
               <h2 className="text-heading-md mb-4 text-ink">
-                Autoriser le microphone
+                {t("onboarding.microphone.title")}
               </h2>
               <p className="text-body-md mb-4 text-body">
-                Calliop a besoin d&apos;accéder à votre micro. Cliquez sur
-                « Tester le micro » — Windows affichera une demande de
-                permission au premier enregistrement.
+                {t("onboarding.microphone.description")}
               </p>
               <div className="mb-4 h-2 overflow-hidden rounded-full bg-surface-elevated">
                 <div
@@ -148,7 +187,9 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
                   }
                 }}
               >
-                {micProbing ? "Arrêter le test" : "Tester le micro"}
+                {micProbing
+                  ? t("onboarding.microphone.testStop")
+                  : t("onboarding.microphone.testStart")}
               </Button>
             </>
           )}
@@ -156,14 +197,13 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
           {step === 3 && (
             <>
               <h2 className="text-heading-md mb-4 text-ink">
-                Testez une dictée
+                {t("onboarding.test.title")}
               </h2>
               <p className="text-body-sm mb-4 text-charcoal">
-                Cliquez sur « Démarrer la dictée », puis dites « Bonjour, ceci
-                est un test ».
+                {t("onboarding.test.instructions")}
               </p>
               <CodeWindow showTrafficLights={false}>
-                {dictationText || "En attente de votre voix…"}
+                {dictationText || t("onboarding.test.waiting")}
               </CodeWindow>
               <div className="mt-4 flex items-center gap-3">
                 <Button
@@ -172,11 +212,11 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
                   onClick={() => void runDictationTest()}
                 >
                   {pipelineState === "recording"
-                    ? "Arrêter la dictée"
-                    : "Démarrer la dictée"}
+                    ? t("onboarding.test.stop")
+                    : t("onboarding.test.start")}
                 </Button>
                 <span className="text-caption text-ash">
-                  État : {pipelineState}
+                  {t("onboarding.test.stateLabel")} {pipelineStateText}
                 </span>
               </div>
             </>
@@ -187,18 +227,11 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
               <div className="mb-4 flex items-center gap-3">
                 <StatusDot color="green" />
                 <h2 className="text-heading-md m-0 text-ink">
-                  Vous êtes prêt
+                  {t("onboarding.done.title")}
                 </h2>
               </div>
               <p className="text-body-md text-body">
-                Utilisez{" "}
-                {hotkeyParts.map((part, index) => (
-                  <span key={`${part}-${index}`}>
-                    {index > 0 && " + "}
-                    <Kbd>{part === "Space" ? "Espace" : part}</Kbd>
-                  </span>
-                ))}{" "}
-                ({formatHotkey(hotkey)}) partout où vous pouvez taper du texte.
+                <OnboardingHotkeyUsage hotkey={hotkey} />
               </p>
             </>
           )}
@@ -211,7 +244,7 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
           disabled={isFirst}
           onClick={() => setStep((s) => Math.max(1, s - 1))}
         >
-          Précédent
+          {t("onboarding.navigation.previous")}
         </Button>
         {!isLast ? (
           <Button
@@ -219,11 +252,11 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
             disabled={step === 1 && (modelLoading || (!modelReady && !modelError))}
             onClick={() => void goToNextStep()}
           >
-            Continuer
+            {t("onboarding.navigation.continue")}
           </Button>
         ) : (
           <Button variant="primary" onClick={() => void handleFinish()}>
-            Commencer
+            {t("onboarding.navigation.finish")}
           </Button>
         )}
       </div>

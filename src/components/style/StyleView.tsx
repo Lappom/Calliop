@@ -5,6 +5,7 @@ import {
   Search,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { useUiLocale } from "../../i18n/useUiLocale";
 import type {
   AppContextMatchType,
   ToneProfile,
@@ -20,9 +21,9 @@ import { StyleRuleModal } from "./StyleRuleModal";
 import { StyleRulesTable } from "./StyleRulesTable";
 import {
   filterStyleRules,
+  getStyleSortLabels,
   nextStyleSort,
   sortStyleRules,
-  STYLE_SORT_LABELS,
   STYLE_SORT_ORDER,
   type StyleRuleSort,
 } from "./styleUtils";
@@ -40,6 +41,7 @@ const DEFAULT_MODAL: ModalDefaults = {
 };
 
 export function StyleView() {
+  const { t, intlLocale } = useUiLocale();
   const [modalOpen, setModalOpen] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
   const [modalDefaults, setModalDefaults] = useState<ModalDefaults>(DEFAULT_MODAL);
@@ -58,6 +60,8 @@ export function StyleView() {
     reload,
   } = useAppContext();
 
+  const sortLabels = useMemo(() => getStyleSortLabels(t), [t]);
+
   useEffect(() => {
     const intervalId = window.setInterval(() => {
       void refreshActiveWindow();
@@ -66,9 +70,9 @@ export function StyleView() {
   }, [refreshActiveWindow]);
 
   const visibleRules = useMemo(() => {
-    const filtered = filterStyleRules(rules, searchQuery);
-    return sortStyleRules(filtered, sort);
-  }, [rules, searchQuery, sort]);
+    const filtered = filterStyleRules(rules, searchQuery, t);
+    return sortStyleRules(filtered, sort, t, intlLocale);
+  }, [rules, searchQuery, sort, t, intlLocale]);
 
   const openModal = (defaults: Partial<ModalDefaults> = {}) => {
     setModalError(null);
@@ -84,7 +88,7 @@ export function StyleView() {
     setModalError(null);
     const inserted = await addRule(pattern, matchType, tone);
     if (!inserted) {
-      setModalError("Impossible d'ajouter cette règle.");
+      setModalError(t("style.errors.cannotAdd"));
     }
     return inserted;
   };
@@ -92,12 +96,8 @@ export function StyleView() {
   return (
     <div className="flex flex-col gap-8">
       <header>
-        <h1 className="text-heading-md mb-2 text-ink">Style</h1>
-        <p className="text-body-sm text-charcoal">
-          Adaptez le ton de vos dictées selon l&apos;application active — formel
-          pour Outlook, décontracté pour Slack, technique pour l&apos;IDE. Actif
-          uniquement avec l&apos;auto-édition IA.
-        </p>
+        <h1 className="text-heading-md mb-2 text-ink">{t("style.title")}</h1>
+        <p className="text-body-sm text-charcoal">{t("style.subtitle")}</p>
       </header>
 
       <ActiveWindowCard
@@ -123,13 +123,13 @@ export function StyleView() {
           onClick={() => openModal()}
         >
           <Plus size={16} aria-hidden />
-          Nouvelle règle
+          {t("style.newRule")}
         </Button>
 
         {loaded && rules.length > 0 && (
           <div className="flex items-center gap-1">
             <SnippetListToolbarButton
-              label="Rechercher"
+              label={t("common.search")}
               active={searchOpen}
               disabled={busy}
               onClick={() => {
@@ -144,21 +144,18 @@ export function StyleView() {
               <Search size={16} strokeWidth={1.75} />
             </SnippetListToolbarButton>
             <SnippetListToolbarButton
-              label={STYLE_SORT_LABELS[sort]}
+              label={sortLabels[sort]}
               disabled={busy}
               onClick={() => setSort((current) => nextStyleSort(current))}
               onMenuSelect={setSort}
-              menuTitle="Tri"
-              menuOptions={toolbarMenuOptions(
-                STYLE_SORT_LABELS,
-                STYLE_SORT_ORDER,
-              )}
+              menuTitle={t("common.sort")}
+              menuOptions={toolbarMenuOptions(sortLabels, STYLE_SORT_ORDER)}
               activeMenuValue={sort}
             >
               <ArrowDownUp size={16} strokeWidth={1.75} />
             </SnippetListToolbarButton>
             <SnippetListToolbarButton
-              label="Actualiser la liste"
+              label={t("common.refreshList")}
               disabled={busy}
               onClick={() => {
                 void Promise.all([reload(), refreshActiveWindow()]);
@@ -176,10 +173,10 @@ export function StyleView() {
 
       {loaded && rules.length > 0 && searchOpen && (
         <TextInput
-          label="Rechercher une règle"
+          label={t("style.searchLabel")}
           value={searchQuery}
           onChange={(event) => setSearchQuery(event.target.value)}
-          placeholder="Motif, ton ou type…"
+          placeholder={t("style.searchPlaceholder")}
           disabled={busy}
           autoFocus
         />
@@ -190,16 +187,13 @@ export function StyleView() {
       )}
 
       {!loaded && (
-        <p className="text-body-sm text-charcoal">Chargement…</p>
+        <p className="text-body-sm text-charcoal">{t("common.loading")}</p>
       )}
 
       {loaded && rules.length === 0 && (
         <SectionGlow glow="orange">
           <div className="rounded-lg border border-hairline-strong bg-surface-card p-6 sm:p-8">
-            <p className="text-body-md m-0 text-charcoal">
-              Aucune règle configurée. Créez une association application →
-              style pour personnaliser vos dictées.
-            </p>
+            <p className="text-body-md m-0 text-charcoal">{t("style.empty")}</p>
             <Button
               type="button"
               variant="primary"
@@ -207,7 +201,7 @@ export function StyleView() {
               disabled={busy}
               onClick={() => openModal()}
             >
-              Créer une règle
+              {t("style.createRule")}
             </Button>
           </div>
         </SectionGlow>
@@ -218,7 +212,7 @@ export function StyleView() {
           {visibleRules.length === 0 ? (
             <div className="rounded-lg border border-hairline-strong bg-surface-card px-4 py-8 text-center">
               <p className="text-body-sm m-0 text-charcoal">
-                Aucun résultat pour « {searchQuery.trim()} ».
+                {t("common.noResults", { query: searchQuery.trim() })}
               </p>
             </div>
           ) : (

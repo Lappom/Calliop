@@ -1,4 +1,5 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import { useUiLocale } from "../../i18n/useUiLocale";
 import { Button } from "../ui/Button";
 
 interface HistoryPaginationProps {
@@ -16,6 +17,8 @@ export function HistoryPagination({
   disabled = false,
   onPageChange,
 }: HistoryPaginationProps) {
+  const { t, formatNumber } = useUiLocale();
+
   if (total <= pageSize) {
     return null;
   }
@@ -29,7 +32,11 @@ export function HistoryPagination({
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 border-t border-hairline pt-4">
       <p className="text-caption m-0 text-ash">
-        {rangeStart}–{rangeEnd} sur {total.toLocaleString("fr-FR")}
+        {t("common.rangeOfTotal", {
+          start: formatNumber(rangeStart),
+          end: formatNumber(rangeEnd),
+          total: formatNumber(total),
+        })}
       </p>
 
       <div className="flex items-center gap-2">
@@ -40,10 +47,10 @@ export function HistoryPagination({
           onClick={() => onPageChange(page - 1)}
         >
           <ChevronLeft size={16} strokeWidth={1.75} />
-          Précédent
+          {t("history.pagination.previous")}
         </Button>
         <span className="text-caption min-w-[5.5rem] text-center text-charcoal">
-          Page {page + 1} / {totalPages}
+          {t("common.pageOfTotal", { page: page + 1, totalPages })}
         </span>
         <Button
           variant="ghost"
@@ -51,7 +58,7 @@ export function HistoryPagination({
           className="gap-1.5 px-3"
           onClick={() => onPageChange(page + 1)}
         >
-          Suivant
+          {t("history.pagination.next")}
           <ChevronRight size={16} strokeWidth={1.75} />
         </Button>
       </div>

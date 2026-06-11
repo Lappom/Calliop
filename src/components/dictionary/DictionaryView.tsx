@@ -6,6 +6,7 @@ import {
   Search,
 } from "lucide-react";
 import { useMemo, useState } from "react";
+import { useUiLocale } from "../../i18n/useUiLocale";
 import type { DictionaryWord } from "../../hooks/useDictionary";
 import { useDictionary } from "../../hooks/useDictionary";
 import { SectionGlow } from "../layout/SectionGlow";
@@ -16,12 +17,12 @@ import { toolbarMenuOptions } from "../ui/toolbarMenu";
 import { DictionaryTable } from "./DictionaryTable";
 import { DictionaryWordModal } from "./DictionaryWordModal";
 import {
-  DICTIONARY_SORT_LABELS,
   DICTIONARY_SORT_ORDER,
   filterDictionaryWords,
+  getDictionaryFilterLabels,
+  getDictionarySortLabels,
   nextDictionarySort,
   sortDictionaryWords,
-  SOURCE_FILTER_LABELS,
   SOURCE_FILTER_ORDER,
   type DictionarySort,
   type DictionarySourceFilter,
@@ -33,6 +34,7 @@ type ModalState =
   | { mode: "edit"; entry: DictionaryWord };
 
 export function DictionaryView() {
+  const { t, intlLocale } = useUiLocale();
   const [modalState, setModalState] = useState<ModalState>({ mode: "closed" });
   const [modalError, setModalError] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -50,10 +52,22 @@ export function DictionaryView() {
     reload,
   } = useDictionary();
 
+  const sortLabels = useMemo(() => getDictionarySortLabels(t), [t]);
+
+  const sourceFilterLabels = useMemo(
+    () => getDictionaryFilterLabels(t),
+    [t],
+  );
+
   const visibleWords = useMemo(() => {
-    const filtered = filterDictionaryWords(words, searchQuery, sourceFilter);
-    return sortDictionaryWords(filtered, sort);
-  }, [words, searchQuery, sourceFilter, sort]);
+    const filtered = filterDictionaryWords(
+      words,
+      searchQuery,
+      sourceFilter,
+      intlLocale,
+    );
+    return sortDictionaryWords(filtered, sort, intlLocale);
+  }, [words, searchQuery, sourceFilter, sort, intlLocale]);
 
   const closeModal = () => {
     setModalState({ mode: "closed" });
@@ -68,14 +82,14 @@ export function DictionaryView() {
     if (modalState.mode === "create") {
       const inserted = await addWord(word, misspelling);
       if (!inserted) {
-        setModalError("Ce mot est déjà dans le dictionnaire.");
+        setModalError(t("dictionary.errors.alreadyExists"));
       }
       return inserted;
     }
     if (modalState.mode === "edit") {
       const updated = await updateWord(modalState.entry.id, word);
       if (!updated) {
-        setModalError("Un mot identique existe déjà.");
+        setModalError(t("dictionary.errors.duplicateWord"));
       }
       return updated;
     }
@@ -93,11 +107,8 @@ export function DictionaryView() {
   return (
     <div className="flex flex-col gap-8">
       <header>
-        <h1 className="text-heading-md mb-2 text-ink">Dictionnaire</h1>
-        <p className="text-body-sm text-charcoal">
-          Mots et noms propres injectés dans le prompt Whisper pour améliorer
-          la transcription.
-        </p>
+        <h1 className="text-heading-md mb-2 text-ink">{t("dictionary.title")}</h1>
+        <p className="text-body-sm text-charcoal">{t("dictionary.subtitle")}</p>
       </header>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -112,13 +123,13 @@ export function DictionaryView() {
           }}
         >
           <Plus size={16} aria-hidden />
-          Nouveau mot
+          {t("dictionary.newWord")}
         </Button>
 
         {loaded && words.length > 0 && (
           <div className="flex items-center gap-1">
             <SnippetListToolbarButton
-              label="Rechercher"
+              label={t("common.search")}
               active={searchOpen}
               disabled={busy}
               onClick={() => {
@@ -133,14 +144,14 @@ export function DictionaryView() {
               <Search size={16} strokeWidth={1.75} />
             </SnippetListToolbarButton>
             <SnippetListToolbarButton
-              label={SOURCE_FILTER_LABELS[sourceFilter]}
+              label={sourceFilterLabels[sourceFilter]}
               active={sourceFilter !== "all"}
               disabled={busy}
               onClick={cycleSourceFilter}
               onMenuSelect={setSourceFilter}
-              menuTitle="Filtres"
+              menuTitle={t("common.filters")}
               menuOptions={toolbarMenuOptions(
-                SOURCE_FILTER_LABELS,
+                sourceFilterLabels,
                 SOURCE_FILTER_ORDER,
               )}
               activeMenuValue={sourceFilter}
@@ -148,13 +159,13 @@ export function DictionaryView() {
               <Filter size={16} strokeWidth={1.75} />
             </SnippetListToolbarButton>
             <SnippetListToolbarButton
-              label={DICTIONARY_SORT_LABELS[sort]}
+              label={sortLabels[sort]}
               disabled={busy}
               onClick={() => setSort((current) => nextDictionarySort(current))}
               onMenuSelect={setSort}
-              menuTitle="Tri"
+              menuTitle={t("common.sort")}
               menuOptions={toolbarMenuOptions(
-                DICTIONARY_SORT_LABELS,
+                sortLabels,
                 DICTIONARY_SORT_ORDER,
               )}
               activeMenuValue={sort}
@@ -162,7 +173,7 @@ export function DictionaryView() {
               <ArrowDownUp size={16} strokeWidth={1.75} />
             </SnippetListToolbarButton>
             <SnippetListToolbarButton
-              label="Actualiser la liste"
+              label={t("common.refreshList")}
               disabled={busy}
               onClick={() => {
                 void reload();
@@ -180,10 +191,10 @@ export function DictionaryView() {
 
       {loaded && words.length > 0 && searchOpen && (
         <TextInput
-          label="Rechercher un mot"
+          label={t("dictionary.searchLabel")}
           value={searchQuery}
           onChange={(event) => setSearchQuery(event.target.value)}
-          placeholder="Mot ou version incorrecte…"
+          placeholder={t("dictionary.searchPlaceholder")}
           disabled={busy}
           autoFocus
         />
@@ -194,16 +205,13 @@ export function DictionaryView() {
       )}
 
       {!loaded && (
-        <p className="text-body-sm text-charcoal">Chargement…</p>
+        <p className="text-body-sm text-charcoal">{t("common.loading")}</p>
       )}
 
       {loaded && words.length === 0 && (
         <SectionGlow glow="blue">
           <div className="rounded-lg border border-hairline-strong bg-surface-card p-6 sm:p-8">
-            <p className="text-body-md m-0 text-charcoal">
-              Aucun mot enregistré. Ajoutez des noms propres ou corrigez une
-              dictée depuis l&apos;accueil.
-            </p>
+            <p className="text-body-md m-0 text-charcoal">{t("dictionary.empty")}</p>
             <Button
               type="button"
               variant="primary"
@@ -214,7 +222,7 @@ export function DictionaryView() {
                 setModalState({ mode: "create" });
               }}
             >
-              Ajouter un mot
+              {t("dictionary.addWord")}
             </Button>
           </div>
         </SectionGlow>
@@ -225,7 +233,7 @@ export function DictionaryView() {
           {visibleWords.length === 0 ? (
             <div className="rounded-lg border border-hairline-strong bg-surface-card px-4 py-8 text-center">
               <p className="text-body-sm m-0 text-charcoal">
-                Aucun résultat pour les filtres actuels.
+                {t("common.noResultsFilters")}
               </p>
             </div>
           ) : (

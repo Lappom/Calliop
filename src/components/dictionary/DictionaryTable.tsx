@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { ArrowRight, Pencil, Trash2 } from "lucide-react";
+import { useUiLocale } from "../../i18n/useUiLocale";
 import type { DictionaryWord } from "../../hooks/useDictionary";
 import { DictionarySourceBadge } from "./DictionarySourceBadge";
 import { formatDictionaryDate } from "./dictionaryUtils";
@@ -49,6 +50,8 @@ export function DictionaryTable({
   onEdit,
   onDelete,
 }: DictionaryTableProps) {
+  const { t, intlLocale } = useUiLocale();
+
   return (
     <div className="overflow-hidden rounded-lg border border-hairline-strong bg-surface-card">
       <div className="overflow-x-auto">
@@ -56,16 +59,16 @@ export function DictionaryTable({
           <thead>
             <tr className="border-b border-divider-soft text-left">
               <th className="text-caption px-4 py-3 font-medium text-ash">
-                Mot
+                {t("dictionary.table.word")}
               </th>
               <th className="text-caption hidden px-4 py-3 font-medium text-ash sm:table-cell">
-                Source
+                {t("dictionary.table.source")}
               </th>
               <th className="text-caption hidden px-4 py-3 font-medium text-ash md:table-cell">
-                Ajouté le
+                {t("dictionary.table.addedAt")}
               </th>
               <th className="text-caption w-20 px-2 py-3 font-medium text-ash sm:w-24">
-                <span className="sr-only">Actions</span>
+                <span className="sr-only">{t("common.actions")}</span>
               </th>
             </tr>
           </thead>
@@ -107,19 +110,19 @@ export function DictionaryTable({
                   <DictionarySourceBadge source={entry.source} />
                 </td>
                 <td className="text-body-sm hidden px-4 py-3.5 text-charcoal md:table-cell">
-                  {formatDictionaryDate(entry.created_at)}
+                  {formatDictionaryDate(entry.created_at, intlLocale)}
                 </td>
                 <td className="w-20 px-2 py-2 sm:w-24">
                   <div className="flex items-center justify-end gap-0.5 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
                     <IconActionButton
-                      label={`Modifier ${entry.word}`}
+                      label={t("dictionary.modal.editWord", { word: entry.word })}
                       disabled={busy}
                       onClick={() => onEdit(entry)}
                     >
                       <Pencil size={15} strokeWidth={1.75} />
                     </IconActionButton>
                     <IconActionButton
-                      label={`Supprimer ${entry.word}`}
+                      label={t("dictionary.modal.deleteWord", { word: entry.word })}
                       disabled={busy}
                       tone="danger"
                       onClick={() => onDelete(entry.id)}

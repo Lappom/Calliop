@@ -1,5 +1,7 @@
+import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import type { DictionarySource } from "../../hooks/useDictionary";
-import { SOURCE_META } from "./dictionaryUtils";
+import { getSourceMeta } from "./dictionaryUtils";
 
 const SOURCE_BADGE_STYLES: Record<
   DictionarySource,
@@ -26,8 +28,10 @@ export function DictionarySourceBadge({
   source,
   className = "",
 }: DictionarySourceBadgeProps) {
+  const { t } = useTranslation();
+  const sourceMeta = useMemo(() => getSourceMeta(t), [t]);
   const styles = SOURCE_BADGE_STYLES[source];
-  const label = SOURCE_META[source].label;
+  const label = sourceMeta[source].label;
 
   return (
     <span
@@ -46,7 +50,7 @@ export function DictionarySourceBadge({
     >
       <span
         className="size-1.5 shrink-0 rounded-full"
-        style={{ backgroundColor: SOURCE_META[source].accent }}
+        style={{ backgroundColor: sourceMeta[source].accent }}
         aria-hidden
       />
       {label}

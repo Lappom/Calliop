@@ -1,3 +1,4 @@
+import type { TFunction } from "i18next";
 import type {
   DictionarySource,
   DictionaryWord,
@@ -7,18 +8,26 @@ export type DictionarySort = "alpha-asc" | "alpha-desc" | "recent" | "source";
 
 export type DictionarySourceFilter = "all" | DictionarySource;
 
-export const DICTIONARY_SORT_LABELS: Record<DictionarySort, string> = {
-  "alpha-asc": "Tri A → Z",
-  "alpha-desc": "Tri Z → A",
-  recent: "Plus récents",
-  source: "Par source",
-};
+export function getDictionarySortLabels(
+  t: TFunction,
+): Record<DictionarySort, string> {
+  return {
+    "alpha-asc": t("dictionary.sort.alphaAsc"),
+    "alpha-desc": t("dictionary.sort.alphaDesc"),
+    recent: t("dictionary.sort.recent"),
+    source: t("dictionary.sort.source"),
+  };
+}
 
-export const SOURCE_FILTER_LABELS: Record<DictionarySourceFilter, string> = {
-  all: "Tous",
-  manual: "Manuels",
-  learned: "Appris",
-};
+export function getDictionaryFilterLabels(
+  t: TFunction,
+): Record<DictionarySourceFilter, string> {
+  return {
+    all: t("dictionary.filter.all"),
+    manual: t("dictionary.filter.manual"),
+    learned: t("dictionary.filter.learned"),
+  };
+}
 
 export const DICTIONARY_SORT_ORDER: DictionarySort[] = [
   "alpha-asc",
@@ -33,21 +42,25 @@ export const SOURCE_FILTER_ORDER: DictionarySourceFilter[] = [
   "learned",
 ];
 
-export const SOURCE_META: Record<
+export function getSourceMeta(
+  t: TFunction,
+): Record<
   DictionarySource,
   { label: string; accent: string; description: string }
-> = {
-  manual: {
-    label: "Manuel",
-    accent: "var(--color-accent-blue)",
-    description: "Ajouté depuis cette page",
-  },
-  learned: {
-    label: "Appris",
-    accent: "var(--color-accent-green)",
-    description: "Détecté via une correction de dictée",
-  },
-};
+> {
+  return {
+    manual: {
+      label: t("dictionary.source.manual.label"),
+      accent: "var(--color-accent-blue)",
+      description: t("dictionary.source.manual.description"),
+    },
+    learned: {
+      label: t("dictionary.source.learned.label"),
+      accent: "var(--color-accent-green)",
+      description: t("dictionary.source.learned.description"),
+    },
+  };
+}
 
 export function nextDictionarySort(current: DictionarySort): DictionarySort {
   if (current === "alpha-asc") return "alpha-desc";
@@ -60,8 +73,9 @@ export function filterDictionaryWords(
   words: DictionaryWord[],
   query: string,
   sourceFilter: DictionarySourceFilter,
+  intlLocale: string,
 ): DictionaryWord[] {
-  const normalized = query.trim().toLocaleLowerCase("fr-FR");
+  const normalized = query.trim().toLocaleLowerCase(intlLocale);
   return words.filter((entry) => {
     if (sourceFilter !== "all" && entry.source !== sourceFilter) {
       return false;
@@ -70,10 +84,10 @@ export function filterDictionaryWords(
       return true;
     }
     const wordMatch = entry.word
-      .toLocaleLowerCase("fr-FR")
+      .toLocaleLowerCase(intlLocale)
       .includes(normalized);
     const misspellingMatch = entry.misspelling
-      ?.toLocaleLowerCase("fr-FR")
+      ?.toLocaleLowerCase(intlLocale)
       .includes(normalized);
     return wordMatch || Boolean(misspellingMatch);
   });
@@ -82,12 +96,13 @@ export function filterDictionaryWords(
 export function sortDictionaryWords(
   words: DictionaryWord[],
   sort: DictionarySort,
+  intlLocale: string,
 ): DictionaryWord[] {
   const sorted = [...words];
   switch (sort) {
     case "alpha-desc":
       sorted.sort((a, b) =>
-        b.word.localeCompare(a.word, "fr-FR", { sensitivity: "base" }),
+        b.word.localeCompare(a.word, intlLocale, { sensitivity: "base" }),
       );
       break;
     case "recent":
@@ -100,25 +115,25 @@ export function sortDictionaryWords(
         if (sourceOrder !== 0) {
           return sourceOrder;
         }
-        return a.word.localeCompare(b.word, "fr-FR", { sensitivity: "base" });
+        return a.word.localeCompare(b.word, intlLocale, { sensitivity: "base" });
       });
       break;
     case "alpha-asc":
     default:
       sorted.sort((a, b) =>
-        a.word.localeCompare(b.word, "fr-FR", { sensitivity: "base" }),
+        a.word.localeCompare(b.word, intlLocale, { sensitivity: "base" }),
       );
       break;
   }
   return sorted;
 }
 
-export function formatDictionaryDate(iso: string): string {
+export function formatDictionaryDate(iso: string, intlLocale: string): string {
   const date = parseDictionaryDate(iso);
   if (!date) {
     return iso;
   }
-  return new Intl.DateTimeFormat("fr-FR", {
+  return new Intl.DateTimeFormat(intlLocale, {
     day: "numeric",
     month: "short",
     year: "numeric",

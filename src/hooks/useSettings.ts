@@ -1,6 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import type { UiLanguageCode } from "../i18n/locale";
+import { parseUiLanguage } from "../i18n/locale";
+import { translateError } from "../lib/translateError";
 import type { SttLanguageCode } from "./useSttLanguage";
 
 export type WhisperModelId = "auto" | "small" | "distil-fr-dec16";
@@ -18,6 +22,7 @@ export interface AppSettings {
   inferenceBackend: InferenceBackendId;
   lowPowerMode: boolean;
   adaptivePerf: boolean;
+  uiLanguage: UiLanguageCode;
 }
 
 export interface ModelStatusEntry {
@@ -57,6 +62,7 @@ interface SettingsPayload {
   inference_backend: string;
   low_power_mode: boolean;
   adaptive_perf: boolean;
+  ui_language: string;
 }
 
 interface DownloadProgress {
@@ -101,6 +107,7 @@ function toPayload(settings: AppSettings): SettingsPayload {
     inference_backend: settings.inferenceBackend,
     low_power_mode: settings.lowPowerMode,
     adaptive_perf: settings.adaptivePerf,
+    ui_language: settings.uiLanguage,
   };
 }
 
@@ -120,6 +127,7 @@ function fromPayload(payload: SettingsPayload): AppSettings {
     inferenceBackend: parseInferenceBackend(payload.inference_backend),
     lowPowerMode: payload.low_power_mode,
     adaptivePerf: payload.adaptive_perf,
+    uiLanguage: parseUiLanguage(payload.ui_language),
   };
 }
 
@@ -134,17 +142,23 @@ export const DEFAULT_SETTINGS: AppSettings = {
   inferenceBackend: "auto",
   lowPowerMode: false,
   adaptivePerf: true,
+  uiLanguage: "fr",
 };
 
-function formatBytes(bytes: number | null): string {
-  if (bytes === null) return "—";
-  if (bytes >= 1_000_000_000) {
-    return `${(bytes / 1_000_000_000).toFixed(1)} Go`;
-  }
-  return `${Math.round(bytes / 1_000_000)} Mo`;
-}
-
 export function useSettings() {
+  const { t } = useTranslation();
+  const formatBytes = useCallback(
+    (bytes: number | null): string => {
+      if (bytes === null) {
+        return t("common.emDash");
+      }
+      if (bytes >= 1_000_000_000) {
+        return `${(bytes / 1_000_000_000).toFixed(1)} ${t("common.units.gb")}`;
+      }
+      return `${Math.round(bytes / 1_000_000)} ${t("common.units.mb")}`;
+    },
+    [t],
+  );
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -192,7 +206,7 @@ export function useSettings() {
         }
       } catch (err) {
         if (!cancelled) {
-          setErrorMessage(String(err));
+          setErrorMessage(translateError(err, t));
         }
       }
     };
@@ -242,7 +256,7 @@ export function useSettings() {
       cancelled = true;
       void unlisteners.then((drops) => drops.forEach((drop) => drop()));
     };
-  }, [refreshModelsStatus, refreshInferenceInfo]);
+  }, [refreshModelsStatus, refreshInferenceInfo, t]);
 
   const saveSettings = useCallback(
     async (next: AppSettings) => {
@@ -282,13 +296,13 @@ export function useSettings() {
         setSettings(previousSettings);
         setLlmReady(previousLlmReady);
         setLlmProgress(previousLlmProgress);
-        setErrorMessage(String(err));
+        setErrorMessage(translateError(err, t));
         throw err;
       } finally {
         setSaving(false);
       }
     },
-    [refreshInferenceInfo, refreshModelsStatus],
+    [refreshInferenceInfo, refreshModelsStatus, t],
   );
 
   const setAutoEdit = useCallback(
@@ -354,6 +368,13 @@ export function useSettings() {
     [saveSettings],
   );
 
+  const setUiLanguage = useCallback(
+    async (uiLanguage: UiLanguageCode) => {
+      await saveSettings({ ...settingsRef.current, uiLanguage });
+    },
+    [saveSettings],
+  );
+
   const setHotkey = useCallback(async (hotkey: string) => {
     setSaving(true);
     setErrorMessage(null);
@@ -364,14 +385,14 @@ export function useSettings() {
       settingsRef.current = next;
       setSettings(next);
     } catch (err) {
-      setErrorMessage(String(err));
+      setErrorMessage(translateError(err, t));
       settingsRef.current = { ...settingsRef.current, hotkey: previous };
       setSettings((s) => ({ ...s, hotkey: previous }));
       throw err;
     } finally {
       setSaving(false);
     }
-  }, []);
+  }, [t]);
 
   const setAutostart = useCallback(async (enabled: boolean) => {
     await invoke("set_autostart_enabled", { enabled });
@@ -413,6 +434,7 @@ export function useSettings() {
     setInferenceBackend,
     setLowPowerMode,
     setAdaptivePerf,
+    setUiLanguage,
     setHotkey,
     setAutostart,
     resetSettings,

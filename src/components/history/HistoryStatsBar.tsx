@@ -1,4 +1,5 @@
 import type { DictationEntry } from "../../hooks/useHistory";
+import { useUiLocale } from "../../i18n/useUiLocale";
 import { glowSurfaceClasses } from "../layout/glowSurface";
 import { computeHistoryStats } from "./historyUtils";
 
@@ -8,6 +9,7 @@ interface HistoryStatsBarProps {
 }
 
 export function HistoryStatsBar({ entries, totalCount }: HistoryStatsBarProps) {
+  const { t, formatNumber } = useUiLocale();
   const { count, totalWords, avgLatency } = computeHistoryStats(entries);
   const displayCount = totalCount ?? count;
 
@@ -17,14 +19,14 @@ export function HistoryStatsBar({ entries, totalCount }: HistoryStatsBarProps) {
 
   return (
     <div className="grid gap-3 sm:grid-cols-3">
-      <StatCard label="Dictées" value={String(displayCount)} />
+      <StatCard label={t("history.stats.dictations")} value={String(displayCount)} />
       <StatCard
-        label="Mots transcrits"
-        value={totalWords.toLocaleString("fr-FR")}
+        label={t("history.stats.words")}
+        value={formatNumber(totalWords)}
       />
       <StatCard
-        label="Latence moyenne"
-        value={avgLatency > 0 ? `${avgLatency} ms` : "—"}
+        label={t("history.stats.avgLatency")}
+        value={avgLatency > 0 ? `${avgLatency} ms` : t("common.emDash")}
       />
     </div>
   );

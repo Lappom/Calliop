@@ -11,6 +11,8 @@ pub mod process_util;
 pub mod store;
 pub mod stt;
 pub mod system;
+pub mod ui;
+pub mod user_error;
 
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
@@ -45,6 +47,8 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_updater::UpdaterExt;
 
+use user_error::{user_error_string, UserError};
+
 /// Returns registered core module names (Phase 0 wiring check).
 pub fn registered_modules() -> [&'static str; 11] {
     [
@@ -74,9 +78,17 @@ struct HotkeyPressState {
 }
 
 struct TrayHandles {
-    autostart_item: CheckMenuItem<tauri::Wry>,
-    auto_edit_item: CheckMenuItem<tauri::Wry>,
+    open_item: MenuItem<tauri::Wry>,
+    toggle_item: MenuItem<tauri::Wry>,
     language_item: MenuItem<tauri::Wry>,
+    settings_item: MenuItem<tauri::Wry>,
+    history_item: MenuItem<tauri::Wry>,
+    dictionary_item: MenuItem<tauri::Wry>,
+    snippets_item: MenuItem<tauri::Wry>,
+    insight_item: MenuItem<tauri::Wry>,
+    auto_edit_item: CheckMenuItem<tauri::Wry>,
+    autostart_item: CheckMenuItem<tauri::Wry>,
+    quit_item: MenuItem<tauri::Wry>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -205,6 +217,7 @@ struct SettingsPayload {
     inference_backend: String,
     low_power_mode: bool,
     adaptive_perf: bool,
+    ui_language: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -234,6 +247,22 @@ fn settings_to_payload(settings: &AppSettings) -> SettingsPayload {
         inference_backend: settings.inference_backend.clone(),
         low_power_mode: settings.low_power_mode,
         adaptive_perf: settings.adaptive_perf,
+        ui_language: settings.ui_language.clone(),
+    }
+}
+
+fn current_ui_language(app: &AppHandle) -> String {
+    app.try_state::<AppState>()
+        .and_then(|state| state.store.load_settings().ok())
+        .map(|settings| settings.ui_language)
+        .unwrap_or_else(ui::locale::default_ui_language)
+}
+
+fn parse_ui_language(value: &str) -> String {
+    if value.trim() == "en" {
+        "en".into()
+    } else {
+        "fr".into()
     }
 }
 
@@ -397,7 +426,7 @@ fn register_hotkey(app: &AppHandle, shortcut: Shortcut) -> Result<(), String> {
 }
 
 fn parse_stt_language(value: &str) -> Result<SttLanguage, String> {
-    SttLanguage::parse(value).ok_or_else(|| format!("unsupported STT language: {value}"))
+    SttLanguage::parse(value).ok_or_else(|| user_error_string(UserError::UnsupportedSttLanguage))
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -585,13 +614,11 @@ fn app_context_rule_to_payload(rule: AppContextRule) -> AppContextRulePayload {
 }
 
 fn parse_match_type(value: &str) -> Result<AppContextMatchType, String> {
-    AppContextMatchType::parse(value)
-        .ok_or_else(|| "Type de correspondance invalide (exe ou title_contains).".into())
+    AppContextMatchType::parse(value).ok_or_else(|| user_error_string(UserError::InvalidMatchType))
 }
 
 fn parse_tone_profile(value: &str) -> Result<ToneProfile, String> {
-    ToneProfile::parse(value)
-        .ok_or_else(|| "Ton invalide (default, casual, formal ou technical).".into())
+    ToneProfile::parse(value).ok_or_else(|| user_error_string(UserError::InvalidTone))
 }
 
 const MENU_OPEN: &str = "open";
@@ -615,7 +642,7 @@ fn get_pipeline_state(state: State<'_, AppState>) -> String {
 async fn toggle_dictation(app: AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
     if is_mic_probe_active(&state) {
-        return Err("Arrêtez le test micro avant de dicter.".into());
+        return Err(user_error_string(UserError::MicProbeActiveBeforeDictation));
     }
     ensure_model_then_toggle(app).await;
     Ok(())
@@ -668,27 +695,27 @@ async fn delete_model(
     let path = match kind.as_str() {
         "whisper" => {
             let model = WhisperModel::parse(&model_id)
-                .ok_or_else(|| format!("modèle Whisper inconnu: {model_id}"))?;
+                .ok_or_else(|| user_error_string(UserError::UnknownWhisperModel))?;
             if !model.is_concrete() {
-                return Err("Impossible de supprimer le modèle Whisper automatique.".into());
+                return Err(user_error_string(UserError::CannotDeleteAutoWhisperModel));
             }
             if model == effective_whisper {
-                return Err("Impossible de supprimer le modèle Whisper actif.".into());
+                return Err(user_error_string(UserError::CannotDeleteActiveWhisperModel));
             }
             model.path()
         }
         "llm" => {
             let model = llm::LlmModel::parse(&model_id)
-                .ok_or_else(|| format!("modèle LLM inconnu: {model_id}"))?;
+                .ok_or_else(|| user_error_string(UserError::UnknownLlmModel))?;
             if !model.is_concrete() {
-                return Err("Impossible de supprimer le modèle LLM automatique.".into());
+                return Err(user_error_string(UserError::CannotDeleteAutoLlmModel));
             }
             if model == effective_llm {
-                return Err("Impossible de supprimer le modèle LLM actif.".into());
+                return Err(user_error_string(UserError::CannotDeleteActiveLlmModel));
             }
             model.path()
         }
-        _ => return Err("Type de modèle invalide (whisper ou llm).".into()),
+        _ => return Err(user_error_string(UserError::InvalidModelKind)),
     };
 
     if path.exists() {
@@ -762,16 +789,18 @@ async fn set_settings(
     let previous = state.store.load_settings().map_err(|e| e.to_string())?;
     let stt_language = parse_stt_language(&settings.stt_language)?;
     let whisper_model = WhisperModel::parse(&settings.whisper_model)
-        .ok_or_else(|| format!("modèle Whisper inconnu: {}", settings.whisper_model))?;
+        .ok_or_else(|| user_error_string(UserError::UnknownWhisperModel))?;
     let llm_model = llm::LlmModel::parse(&settings.llm_model)
-        .ok_or_else(|| format!("modèle LLM inconnu: {}", settings.llm_model))?;
+        .ok_or_else(|| user_error_string(UserError::UnknownLlmModel))?;
     let inference_backend = InferenceBackend::parse(&settings.inference_backend)
-        .ok_or_else(|| format!("backend invalide: {}", settings.inference_backend))?;
+        .ok_or_else(|| user_error_string(UserError::InvalidInferenceBackend))?;
 
     let prev_stt = previous.stt_language.clone();
     let next_stt = settings.stt_language.clone();
     let app_for_notify = app.clone();
     let stt_language_changed = prev_stt != next_stt;
+    let ui_language_changed =
+        previous.ui_language != parse_ui_language(&settings.ui_language);
     let whisper_changed = previous.whisper_model() != whisper_model;
     let llm_changed = previous.llm_model() != llm_model;
     let inference_changed = previous.inference_backend() != inference_backend;
@@ -801,6 +830,7 @@ async fn set_settings(
         inference_backend: inference_backend.as_setting_value().into(),
         low_power_mode: settings.low_power_mode,
         adaptive_perf: settings.adaptive_perf,
+        ui_language: parse_ui_language(&settings.ui_language),
     };
 
     let mut rollback_ctx = SettingsRollbackContext {
@@ -900,6 +930,13 @@ async fn set_settings(
             .notify_stt_language_changed(&app_for_notify);
     }
 
+    if ui_language_changed {
+        let _ = app.emit(
+            "ui-language-changed",
+            next_settings.ui_language.clone(),
+        );
+    }
+
     sync_tray_menus(&app);
     Ok(())
 }
@@ -997,12 +1034,10 @@ fn add_dictionary_word(
 ) -> Result<bool, String> {
     let normalized = normalize_word(&word);
     if normalized.is_empty() {
-        return Err("Le mot ne peut pas être vide.".into());
+        return Err(user_error_string(UserError::DictionaryWordEmpty));
     }
     if !is_valid_dictionary_word(&normalized) {
-        return Err(
-            "Le mot ne peut pas être vide et ne peut pas être uniquement numérique.".into(),
-        );
+        return Err(user_error_string(UserError::DictionaryWordInvalid));
     }
 
     let normalized_misspelling = misspelling
@@ -1011,13 +1046,10 @@ fn add_dictionary_word(
         .filter(|value| !value.is_empty());
     if let Some(ref incorrect) = normalized_misspelling {
         if !is_valid_dictionary_word(incorrect) {
-            return Err(
-                "La version incorrecte ne peut pas être vide et ne peut pas être uniquement numérique."
-                    .into(),
-            );
+            return Err(user_error_string(UserError::DictionaryMisspellingInvalid));
         }
         if normalized.eq_ignore_ascii_case(incorrect) {
-            return Err("La version incorrecte doit être différente du mot correct.".into());
+            return Err(user_error_string(UserError::DictionaryMisspellingSame));
         }
     }
 
@@ -1032,9 +1064,9 @@ fn add_dictionary_word(
 
     let Some(inserted_id) = inserted_id else {
         if normalized_misspelling.is_some() {
-            return Err("Cette faute transcrite est déjà enregistrée.".into());
+            return Err(user_error_string(UserError::DictionaryMisspellingExists));
         }
-        return Err("Ce mot est déjà dans le dictionnaire.".into());
+        return Err(user_error_string(UserError::DictionaryWordExists));
     };
 
     if let Err(err) = apply_dictionary_additions(&state, std::slice::from_ref(&normalized)) {
@@ -1067,19 +1099,17 @@ fn update_dictionary_word(
 ) -> Result<bool, String> {
     let normalized = normalize_word(&word);
     if normalized.is_empty() {
-        return Err("Le mot ne peut pas être vide.".into());
+        return Err(user_error_string(UserError::DictionaryWordEmpty));
     }
     if !is_valid_dictionary_word(&normalized) {
-        return Err(
-            "Le mot ne peut pas être vide et ne peut pas être uniquement numérique.".into(),
-        );
+        return Err(user_error_string(UserError::DictionaryWordInvalid));
     }
 
     let previous = state
         .store
         .get_word_by_id(id)
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("Mot introuvable (id {id})."))?;
+        .ok_or_else(|| user_error_string(UserError::DictionaryWordNotFound))?;
 
     if previous.word == normalized {
         return Ok(true);
@@ -1118,11 +1148,11 @@ fn remove_dictionary_word(
         .store
         .get_word_by_id(id)
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("Mot introuvable (id {id})."))?;
+        .ok_or_else(|| user_error_string(UserError::DictionaryWordNotFound))?;
 
     let removed = state.store.remove_word(id).map_err(|e| e.to_string())?;
     if !removed {
-        return Err(format!("Mot introuvable (id {id})."));
+        return Err(user_error_string(UserError::DictionaryWordNotFound));
     }
 
     if let Err(err) = refresh_whisper_prompt_full(&state) {
@@ -1178,13 +1208,13 @@ fn add_snippet(
 ) -> Result<bool, String> {
     let normalized_trigger = normalize_trigger(&trigger);
     if normalized_trigger.is_empty() {
-        return Err("Le déclencheur ne peut pas être vide.".into());
+        return Err(user_error_string(UserError::SnippetTriggerEmpty));
     }
     if !is_valid_trigger(&normalized_trigger) {
-        return Err("Le déclencheur doit contenir au moins 2 caractères.".into());
+        return Err(user_error_string(UserError::SnippetTriggerTooShort));
     }
     if !is_valid_snippet_content(&content) {
-        return Err("Le texte du snippet ne peut pas être vide.".into());
+        return Err(user_error_string(UserError::SnippetContentEmpty));
     }
 
     let inserted = state
@@ -1213,20 +1243,20 @@ fn update_snippet(
 ) -> Result<bool, String> {
     let normalized_trigger = normalize_trigger(&trigger);
     if normalized_trigger.is_empty() {
-        return Err("Le déclencheur ne peut pas être vide.".into());
+        return Err(user_error_string(UserError::SnippetTriggerEmpty));
     }
     if !is_valid_trigger(&normalized_trigger) {
-        return Err("Le déclencheur doit contenir au moins 2 caractères.".into());
+        return Err(user_error_string(UserError::SnippetTriggerTooShort));
     }
     if !is_valid_snippet_content(&content) {
-        return Err("Le texte du snippet ne peut pas être vide.".into());
+        return Err(user_error_string(UserError::SnippetContentEmpty));
     }
 
     let previous = state
         .store
         .get_snippet_by_id(id)
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| "Snippet introuvable.".to_string())?;
+        .ok_or_else(|| user_error_string(UserError::SnippetNotFound))?;
 
     let updated = state
         .store
@@ -1252,11 +1282,11 @@ fn remove_snippet(app: AppHandle, state: State<'_, AppState>, id: i64) -> Result
         .store
         .get_snippet_by_id(id)
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("Snippet introuvable (id {id})."))?;
+        .ok_or_else(|| user_error_string(UserError::SnippetNotFound))?;
 
     let removed = state.store.remove_snippet(id).map_err(|e| e.to_string())?;
     if !removed {
-        return Err(format!("Snippet introuvable (id {id})."));
+        return Err(user_error_string(UserError::SnippetNotFound));
     }
 
     if let Err(err) = refresh_whisper_prompt_state(&state) {
@@ -1275,9 +1305,9 @@ fn import_snippets(
     json: String,
 ) -> Result<usize, String> {
     let entries: Vec<SnippetImport> =
-        serde_json::from_str(&json).map_err(|err| format!("JSON invalide : {err}"))?;
+        serde_json::from_str(&json).map_err(|_| user_error_string(UserError::InvalidSnippetJson))?;
     if entries.is_empty() {
-        return Err("Le fichier ne contient aucun snippet.".into());
+        return Err(user_error_string(UserError::SnippetImportEmpty));
     }
 
     let previous = state
@@ -1290,9 +1320,7 @@ fn import_snippets(
         .import_snippets(&entries)
         .map_err(|e| e.to_string())?;
     if count == 0 {
-        return Err(
-            "Aucun snippet valide importé (déclencheur ≥ 2 caractères, texte non vide).".into(),
-        );
+        return Err(user_error_string(UserError::SnippetImportNoValid));
     }
 
     if let Err(err) = refresh_whisper_prompt_state(&state) {
@@ -1369,7 +1397,7 @@ fn add_app_context_rule(
     let match_type = parse_match_type(&match_type)?;
     let tone = parse_tone_profile(&tone)?;
     if !is_valid_app_context_pattern(&pattern, match_type) {
-        return Err("Le motif doit contenir au moins 2 caractères.".into());
+        return Err(user_error_string(UserError::AppContextPatternTooShort));
     }
 
     let inserted = state
@@ -1400,7 +1428,7 @@ fn remove_app_context_rule(
         .remove_app_context_rule(id)
         .map_err(|e| e.to_string())?;
     if !removed {
-        return Err(format!("Règle introuvable (id {id})."));
+        return Err(user_error_string(UserError::AppContextRuleNotFound));
     }
 
     refresh_app_context_rules_state(&state)?;
@@ -1456,7 +1484,7 @@ fn copy_dictation(state: State<'_, AppState>, id: i64) -> Result<(), String> {
         .store
         .get_dictation(id)
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("Dictée introuvable (id {id})."))?;
+        .ok_or_else(|| user_error_string(UserError::DictationNotFound))?;
     TextInjector::copy_to_clipboard(&entry.text).map_err(|e| e.to_string())
 }
 
@@ -1466,7 +1494,7 @@ fn reinject_dictation(state: State<'_, AppState>, id: i64) -> Result<(), String>
         .store
         .get_dictation(id)
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("Dictée introuvable (id {id})."))?;
+        .ok_or_else(|| user_error_string(UserError::DictationNotFound))?;
     let injector = TextInjector::new().map_err(|e| e.to_string())?;
     injector.inject(&entry.text).map_err(|e| e.to_string())
 }
@@ -1484,10 +1512,10 @@ fn is_autostart_enabled(app: AppHandle) -> Result<bool, String> {
 #[tauri::command]
 async fn start_mic_probe(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     if state.mic_probe.capture.lock().is_some() {
-        return Err("Le test micro est déjà en cours.".into());
+        return Err(user_error_string(UserError::MicProbeAlreadyActive));
     }
     if state.pipeline.lock().state() != PipelineState::Idle {
-        return Err("Une dictée est en cours. Arrêtez-la avant de tester le micro.".into());
+        return Err(user_error_string(UserError::DictationActiveMicProbe));
     }
     suspend_global_hotkey(&app, &state)?;
 
@@ -1848,6 +1876,7 @@ fn show_main_window_view(app: &AppHandle, view: Option<&str>) {
 }
 
 fn tray_language_menu_text(app: &AppHandle) -> String {
+    let ui_language = current_ui_language(app);
     let label = if let Some(state) = app.try_state::<AppState>() {
         state
             .pipeline
@@ -1857,11 +1886,47 @@ fn tray_language_menu_text(app: &AppHandle) -> String {
     } else {
         "FR"
     };
-    format!("Langue de dictée : {label}")
+    ui::locale::tr_with_vars(
+        "tray.dictationLanguage",
+        &ui_language,
+        &[("label", label)],
+    )
 }
 
 fn sync_tray_menus(app: &AppHandle) {
     if let Some(handles) = app.try_state::<TrayHandles>() {
+        let ui_language = current_ui_language(app);
+        let _ = handles
+            .open_item
+            .set_text(&ui::locale::tr("tray.open", &ui_language));
+        let _ = handles
+            .toggle_item
+            .set_text(&ui::locale::tr("tray.toggle", &ui_language));
+        let _ = handles
+            .settings_item
+            .set_text(&ui::locale::tr("tray.settings", &ui_language));
+        let _ = handles
+            .history_item
+            .set_text(&ui::locale::tr("tray.history", &ui_language));
+        let _ = handles
+            .dictionary_item
+            .set_text(&ui::locale::tr("tray.dictionary", &ui_language));
+        let _ = handles
+            .snippets_item
+            .set_text(&ui::locale::tr("tray.snippets", &ui_language));
+        let _ = handles
+            .insight_item
+            .set_text(&ui::locale::tr("tray.insight", &ui_language));
+        let _ = handles
+            .quit_item
+            .set_text(&ui::locale::tr("tray.quit", &ui_language));
+        let _ = handles
+            .auto_edit_item
+            .set_text(&ui::locale::tr("tray.autoEdit", &ui_language));
+        let _ = handles
+            .autostart_item
+            .set_text(&ui::locale::tr("tray.autostart", &ui_language));
+
         let autostart_enabled = app.autolaunch().is_enabled().unwrap_or(false);
         let _ = handles.autostart_item.set_checked(autostart_enabled);
 
@@ -1870,16 +1935,25 @@ fn sync_tray_menus(app: &AppHandle) {
             .map(|state| state.pipeline.lock().auto_edit_enabled())
             .unwrap_or(false);
         let _ = handles.auto_edit_item.set_checked(auto_edit_enabled);
-        let _ = handles.language_item.set_text(tray_language_menu_text(app));
+        let _ = handles
+            .language_item
+            .set_text(tray_language_menu_text(app));
     }
 }
 
 fn build_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
-    let open_item = MenuItem::with_id(app, MENU_OPEN, "Ouvrir Calliop", true, None::<&str>)?;
+    let ui_language = current_ui_language(app);
+    let open_item = MenuItem::with_id(
+        app,
+        MENU_OPEN,
+        &ui::locale::tr("tray.open", &ui_language),
+        true,
+        None::<&str>,
+    )?;
     let toggle_item = MenuItem::with_id(
         app,
         MENU_TOGGLE,
-        "Démarrer / arrêter la dictée",
+        &ui::locale::tr("tray.toggle", &ui_language),
         true,
         None::<&str>,
     )?;
@@ -1890,19 +1964,41 @@ fn build_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         true,
         None::<&str>,
     )?;
-    let settings_item =
-        MenuItem::with_id(app, MENU_OPEN_SETTINGS, "Paramètres", true, None::<&str>)?;
-    let history_item = MenuItem::with_id(app, MENU_OPEN_HISTORY, "Historique", true, None::<&str>)?;
-    let dictionary_item = MenuItem::with_id(
+    let settings_item = MenuItem::with_id(
         app,
-        MENU_OPEN_DICTIONARY,
-        "Dictionnaire",
+        MENU_OPEN_SETTINGS,
+        &ui::locale::tr("tray.settings", &ui_language),
         true,
         None::<&str>,
     )?;
-    let snippets_item = MenuItem::with_id(app, MENU_OPEN_SNIPPETS, "Snippets", true, None::<&str>)?;
-    let insight_item =
-        MenuItem::with_id(app, MENU_OPEN_INSIGHT, "Statistiques", true, None::<&str>)?;
+    let history_item = MenuItem::with_id(
+        app,
+        MENU_OPEN_HISTORY,
+        &ui::locale::tr("tray.history", &ui_language),
+        true,
+        None::<&str>,
+    )?;
+    let dictionary_item = MenuItem::with_id(
+        app,
+        MENU_OPEN_DICTIONARY,
+        &ui::locale::tr("tray.dictionary", &ui_language),
+        true,
+        None::<&str>,
+    )?;
+    let snippets_item = MenuItem::with_id(
+        app,
+        MENU_OPEN_SNIPPETS,
+        &ui::locale::tr("tray.snippets", &ui_language),
+        true,
+        None::<&str>,
+    )?;
+    let insight_item = MenuItem::with_id(
+        app,
+        MENU_OPEN_INSIGHT,
+        &ui::locale::tr("tray.insight", &ui_language),
+        true,
+        None::<&str>,
+    )?;
     let auto_edit_checked = app
         .try_state::<AppState>()
         .map(|state| state.pipeline.lock().auto_edit_enabled())
@@ -1910,7 +2006,7 @@ fn build_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let auto_edit_item = CheckMenuItem::with_id(
         app,
         MENU_AUTO_EDIT,
-        "Auto-edits IA",
+        &ui::locale::tr("tray.autoEdit", &ui_language),
         true,
         auto_edit_checked,
         None::<&str>,
@@ -1919,12 +2015,18 @@ fn build_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let autostart_item = CheckMenuItem::with_id(
         app,
         MENU_AUTOSTART,
-        "Lancer au démarrage",
+        &ui::locale::tr("tray.autostart", &ui_language),
         true,
         autostart_checked,
         None::<&str>,
     )?;
-    let quit_item = MenuItem::with_id(app, MENU_QUIT, "Quitter", true, None::<&str>)?;
+    let quit_item = MenuItem::with_id(
+        app,
+        MENU_QUIT,
+        &ui::locale::tr("tray.quit", &ui_language),
+        true,
+        None::<&str>,
+    )?;
     let separator = PredefinedMenuItem::separator(app)?;
     let menu = Menu::with_items(
         app,
@@ -1995,9 +2097,17 @@ fn build_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         .build(app)?;
 
     app.manage(TrayHandles {
-        autostart_item,
-        auto_edit_item,
+        open_item,
+        toggle_item,
         language_item,
+        settings_item,
+        history_item,
+        dictionary_item,
+        snippets_item,
+        insight_item,
+        auto_edit_item,
+        autostart_item,
+        quit_item,
     });
 
     Ok(())

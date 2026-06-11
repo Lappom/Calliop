@@ -1,5 +1,6 @@
 import { Menu, X } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import type { AppView } from "../../lib/views";
 import { Sidebar } from "./Sidebar";
 
@@ -10,6 +11,7 @@ interface AppShellProps {
 }
 
 export function AppShell({ currentView, onNavigate, children }: AppShellProps) {
+  const { t } = useTranslation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const closeSidebar = useCallback(() => {
@@ -45,7 +47,9 @@ export function AppShell({ currentView, onNavigate, children }: AppShellProps) {
             onClick={() => setSidebarOpen((current) => !current)}
             className="inline-flex size-10 items-center justify-center rounded-md border border-hairline-strong bg-surface-elevated text-ink transition-colors hover:border-ink/30"
             aria-expanded={sidebarOpen}
-            aria-label={sidebarOpen ? "Fermer le menu" : "Ouvrir le menu"}
+            aria-label={
+              sidebarOpen ? t("nav.aria.closeMenu") : t("nav.aria.openMenu")
+            }
           >
             {sidebarOpen ? <X size={20} /> : <Menu size={20} />}
           </button>
@@ -54,7 +58,7 @@ export function AppShell({ currentView, onNavigate, children }: AppShellProps) {
             onClick={() => onNavigate("main")}
             className="text-display-serif text-xl text-ink transition-opacity hover:opacity-80"
           >
-            Calliop
+            {t("nav.brand")}
           </button>
         </header>
 

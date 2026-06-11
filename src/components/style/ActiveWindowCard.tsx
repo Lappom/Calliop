@@ -1,8 +1,10 @@
+import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { AppWindow, RefreshCw, Sparkles } from "lucide-react";
 import type { ActiveWindow, AppContextRule } from "../../hooks/useAppContext";
 import { SectionGlow } from "../layout/SectionGlow";
 import { Button } from "../ui/Button";
-import { resolveActiveTone, TONE_META } from "./styleUtils";
+import { getToneMeta, resolveActiveTone } from "./styleUtils";
 import { ToneBadge } from "./ToneBadge";
 
 interface ActiveWindowCardProps {
@@ -20,8 +22,9 @@ export function ActiveWindowCard({
   onRefresh,
   onCreateFromActive,
 }: ActiveWindowCardProps) {
+  const { t } = useTranslation();
+  const toneMeta = useMemo(() => getToneMeta(t), [t]);
   const activeTone = resolveActiveTone(rules, activeWindow);
-  const toneMeta = TONE_META[activeTone];
 
   return (
     <SectionGlow glow="blue">
@@ -33,12 +36,12 @@ export function ActiveWindowCard({
             </div>
             <div className="min-w-0">
               <p className="text-caption mb-1 text-charcoal">
-                Application au premier plan
+                {t("style.activeWindow.label")}
               </p>
               {activeWindow ? (
                 <>
                   <p className="text-body-md m-0 truncate font-medium text-ink">
-                    {activeWindow.title || "(sans titre)"}
+                    {activeWindow.title || t("common.withoutTitle")}
                   </p>
                   <p className="text-caption mt-1 truncate text-ash">
                     {activeWindow.exeName}
@@ -46,9 +49,7 @@ export function ActiveWindowCard({
                 </>
               ) : (
                 <p className="text-body-sm m-0 text-ash">
-                  Aucune application détectée pour l&apos;instant. Cliquez dans
-                  l&apos;application cible (même sur votre autre écran) — la
-                  détection se met à jour automatiquement.
+                  {t("style.activeWindow.notDetected")}
                 </p>
               )}
             </div>
@@ -60,7 +61,7 @@ export function ActiveWindowCard({
               <ToneBadge tone={activeTone} />
             </div>
             <p className="text-caption m-0 max-w-xs text-right text-ash">
-              {toneMeta.description}
+              {toneMeta[activeTone].description}
             </p>
           </div>
         </div>
@@ -74,7 +75,7 @@ export function ActiveWindowCard({
             onClick={onRefresh}
           >
             <RefreshCw size={14} aria-hidden />
-            Actualiser
+            {t("style.activeWindow.refresh")}
           </Button>
           {activeWindow && (
             <Button
@@ -83,7 +84,7 @@ export function ActiveWindowCard({
               disabled={busy}
               onClick={onCreateFromActive}
             >
-              Règle pour cette app
+              {t("style.activeWindow.createRule")}
             </Button>
           )}
         </div>

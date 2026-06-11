@@ -1,20 +1,24 @@
+import type { TFunction } from "i18next";
 import type { ModelStatusEntry } from "../../hooks/useSettings";
 import type { SelectOption } from "../ui/Select";
 
 export type ModelInstallStatus = "active" | "installed" | "missing";
 
-const WHISPER_CATALOG: Omit<SelectOption, "status">[] = [
-  { value: "auto", label: "Automatique (recommandé)" },
-  { value: "small", label: "Small (~466 Mo)" },
-  { value: "distil-fr-dec16", label: "Distil FR dec16 (~755 Mo)" },
-];
+const WHISPER_MODEL_IDS = ["auto", "small", "distil-fr-dec16"] as const;
+const LLM_MODEL_IDS = ["auto", "qwen3-0.6b", "qwen3-1.7b", "qwen3-4b"] as const;
 
-const LLM_CATALOG: Omit<SelectOption, "status">[] = [
-  { value: "auto", label: "Automatique (recommandé)" },
-  { value: "qwen3-0.6b", label: "Qwen3 0.6B (~484 Mo)" },
-  { value: "qwen3-1.7b", label: "Qwen3 1.7B (~1,1 Go)" },
-  { value: "qwen3-4b", label: "Qwen3 4B (~2,5 Go)" },
-];
+const WHISPER_LABEL_KEYS: Record<(typeof WHISPER_MODEL_IDS)[number], string> = {
+  auto: "settings.modelsPanel.whisper.auto",
+  small: "settings.modelsPanel.whisper.small",
+  "distil-fr-dec16": "settings.modelsPanel.whisper.distilFr",
+};
+
+const LLM_LABEL_KEYS: Record<(typeof LLM_MODEL_IDS)[number], string> = {
+  auto: "settings.modelsPanel.llm.auto",
+  "qwen3-0.6b": "settings.modelsPanel.llm.qwen06",
+  "qwen3-1.7b": "settings.modelsPanel.llm.qwen17",
+  "qwen3-4b": "settings.modelsPanel.llm.qwen4",
+};
 
 function resolveModelStatus(
   entries: ModelStatusEntry[] | undefined,
@@ -29,31 +33,52 @@ function resolveModelStatus(
   return "installed";
 }
 
-export function modelStatusLabel(status: ModelInstallStatus): string {
+export function getModelStatusLabel(
+  status: ModelInstallStatus,
+  t: TFunction,
+): string {
   switch (status) {
     case "active":
-      return "Actif";
+      return t("settings.modelsPanel.status.active");
     case "installed":
-      return "Installé";
+      return t("settings.modelsPanel.status.installed");
     default:
-      return "Non installé";
+      return t("settings.modelsPanel.status.missing");
   }
+}
+
+export function getWhisperModelOptions(
+  t: TFunction,
+): Omit<SelectOption, "status">[] {
+  return WHISPER_MODEL_IDS.map((value) => ({
+    value,
+    label: t(WHISPER_LABEL_KEYS[value]),
+  }));
+}
+
+export function getLlmModelOptions(t: TFunction): Omit<SelectOption, "status">[] {
+  return LLM_MODEL_IDS.map((value) => ({
+    value,
+    label: t(LLM_LABEL_KEYS[value]),
+  }));
 }
 
 export function buildWhisperSelectOptions(
   entries: ModelStatusEntry[] | undefined,
+  t: TFunction,
 ): SelectOption[] {
-  return WHISPER_CATALOG.map((option) => {
+  return getWhisperModelOptions(t).map((option) => {
     const status = resolveModelStatus(entries, option.value);
-    return { ...option, status, statusLabel: modelStatusLabel(status) };
+    return { ...option, status, statusLabel: getModelStatusLabel(status, t) };
   });
 }
 
 export function buildLlmSelectOptions(
   entries: ModelStatusEntry[] | undefined,
+  t: TFunction,
 ): SelectOption[] {
-  return LLM_CATALOG.map((option) => {
+  return getLlmModelOptions(t).map((option) => {
     const status = resolveModelStatus(entries, option.value);
-    return { ...option, status, statusLabel: modelStatusLabel(status) };
+    return { ...option, status, statusLabel: getModelStatusLabel(status, t) };
   });
 }

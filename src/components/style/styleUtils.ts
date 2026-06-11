@@ -1,14 +1,10 @@
+import type { TFunction } from "i18next";
 import type {
   ActiveWindow,
   AppContextMatchType,
   AppContextRule,
   ToneProfile,
 } from "../../hooks/useAppContext";
-
-export const MATCH_TYPE_LABELS: Record<AppContextMatchType, string> = {
-  exe: "Exécutable",
-  title_contains: "Titre contient",
-};
 
 export const TONE_PROFILES: ToneProfile[] = [
   "default",
@@ -23,30 +19,52 @@ export interface ToneMeta {
   accent: string;
 }
 
-export const TONE_META: Record<ToneProfile, ToneMeta> = {
-  default: {
-    label: "Neutre",
-    description: "Transcription fidèle, sans reformulation stylistique.",
-    accent: "var(--color-charcoal)",
-  },
-  casual: {
-    label: "Décontracté",
-    description: "Ton naturel et conversationnel pour le chat et les notes.",
-    accent: "var(--color-accent-green)",
-  },
-  formal: {
-    label: "Formel",
-    description: "Registre professionnel pour e-mails et documents.",
-    accent: "var(--color-accent-blue)",
-  },
-  technical: {
-    label: "Technique",
-    description: "Précision et concision pour le code et la doc.",
-    accent: "var(--color-accent-orange)",
-  },
-};
+export function getMatchTypeLabels(
+  t: TFunction,
+): Record<AppContextMatchType, string> {
+  return {
+    exe: t("style.matchType.exe"),
+    title_contains: t("style.matchType.titleContains"),
+  };
+}
+
+export function getToneMeta(t: TFunction): Record<ToneProfile, ToneMeta> {
+  return {
+    default: {
+      label: t("style.tone.default.label"),
+      description: t("style.tone.default.description"),
+      accent: "var(--color-charcoal)",
+    },
+    casual: {
+      label: t("style.tone.casual.label"),
+      description: t("style.tone.casual.description"),
+      accent: "var(--color-accent-green)",
+    },
+    formal: {
+      label: t("style.tone.formal.label"),
+      description: t("style.tone.formal.description"),
+      accent: "var(--color-accent-blue)",
+    },
+    technical: {
+      label: t("style.tone.technical.label"),
+      description: t("style.tone.technical.description"),
+      accent: "var(--color-accent-orange)",
+    },
+  };
+}
 
 export type StyleRuleSort = "pattern-asc" | "pattern-desc" | "tone" | "recent";
+
+export function getStyleSortLabels(
+  t: TFunction,
+): Record<StyleRuleSort, string> {
+  return {
+    "pattern-asc": t("style.sort.patternAsc"),
+    "pattern-desc": t("style.sort.patternDesc"),
+    tone: t("style.sort.tone"),
+    recent: t("style.sort.recent"),
+  };
+}
 
 function normalizeExePattern(pattern: string): string {
   const trimmed = pattern.trim();
@@ -91,14 +109,17 @@ export function resolveActiveTone(
 export function filterStyleRules(
   rules: AppContextRule[],
   query: string,
+  t: TFunction,
 ): AppContextRule[] {
+  const toneMeta = getToneMeta(t);
+  const matchTypeLabels = getMatchTypeLabels(t);
   const normalized = query.trim().toLowerCase();
   if (!normalized) {
     return rules;
   }
   return rules.filter((rule) => {
-    const toneLabel = TONE_META[rule.tone].label.toLowerCase();
-    const matchLabel = MATCH_TYPE_LABELS[rule.matchType].toLowerCase();
+    const toneLabel = toneMeta[rule.tone].label.toLowerCase();
+    const matchLabel = matchTypeLabels[rule.matchType].toLowerCase();
     return (
       rule.pattern.toLowerCase().includes(normalized) ||
       toneLabel.includes(normalized) ||
@@ -110,17 +131,20 @@ export function filterStyleRules(
 export function sortStyleRules(
   rules: AppContextRule[],
   sort: StyleRuleSort,
+  t: TFunction,
+  intlLocale: string,
 ): AppContextRule[] {
+  const toneMeta = getToneMeta(t);
   const sorted = [...rules];
   switch (sort) {
     case "pattern-desc":
       sorted.sort((a, b) =>
-        b.pattern.localeCompare(a.pattern, "fr", { sensitivity: "base" }),
+        b.pattern.localeCompare(a.pattern, intlLocale, { sensitivity: "base" }),
       );
       break;
     case "tone":
       sorted.sort((a, b) =>
-        TONE_META[a.tone].label.localeCompare(TONE_META[b.tone].label, "fr"),
+        toneMeta[a.tone].label.localeCompare(toneMeta[b.tone].label, intlLocale),
       );
       break;
     case "recent":
@@ -129,7 +153,7 @@ export function sortStyleRules(
     case "pattern-asc":
     default:
       sorted.sort((a, b) =>
-        a.pattern.localeCompare(b.pattern, "fr", { sensitivity: "base" }),
+        a.pattern.localeCompare(b.pattern, intlLocale, { sensitivity: "base" }),
       );
       break;
   }
@@ -142,13 +166,6 @@ export function nextStyleSort(current: StyleRuleSort): StyleRuleSort {
   if (current === "tone") return "recent";
   return "pattern-asc";
 }
-
-export const STYLE_SORT_LABELS: Record<StyleRuleSort, string> = {
-  "pattern-asc": "Tri A → Z",
-  "pattern-desc": "Tri Z → A",
-  tone: "Par ton",
-  recent: "Plus récents",
-};
 
 export const STYLE_SORT_ORDER: StyleRuleSort[] = [
   "pattern-asc",

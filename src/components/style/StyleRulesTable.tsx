@@ -1,6 +1,8 @@
+import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { ArrowRight, Trash2 } from "lucide-react";
 import type { AppContextRule } from "../../hooks/useAppContext";
-import { MATCH_TYPE_LABELS } from "./styleUtils";
+import { getMatchTypeLabels } from "./styleUtils";
 import { ToneBadge } from "./ToneBadge";
 
 interface StyleRulesTableProps {
@@ -14,6 +16,9 @@ export function StyleRulesTable({
   busy,
   onDelete,
 }: StyleRulesTableProps) {
+  const { t } = useTranslation();
+  const matchTypeLabels = useMemo(() => getMatchTypeLabels(t), [t]);
+
   return (
     <div className="overflow-hidden rounded-lg border border-hairline-strong bg-surface-card">
       <div className="overflow-x-auto">
@@ -35,7 +40,7 @@ export function StyleRulesTable({
                       aria-hidden
                     />
                     <span className="shrink-0 text-caption text-ash">
-                      {MATCH_TYPE_LABELS[rule.matchType]}
+                      {matchTypeLabels[rule.matchType]}
                     </span>
                     <ArrowRight
                       size={14}
@@ -50,7 +55,9 @@ export function StyleRulesTable({
                   <div className="flex justify-end opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
                     <button
                       type="button"
-                      aria-label={`Supprimer la règle ${rule.pattern}`}
+                      aria-label={t("style.modal.deleteRule", {
+                        pattern: rule.pattern,
+                      })}
                       disabled={busy}
                       onClick={() => onDelete(rule.id)}
                       className={[

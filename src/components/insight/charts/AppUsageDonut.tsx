@@ -1,4 +1,5 @@
 import type { AppUsageEntry } from "../../../hooks/useInsights";
+import { useUiLocale } from "../../../i18n/useUiLocale";
 import { APP_SEGMENT_COLORS } from "./chartTheme";
 
 interface AppUsageDonutProps {
@@ -12,6 +13,7 @@ const CENTER = SIZE / 2;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 
 export function AppUsageDonut({ data }: AppUsageDonutProps) {
+  const { t, formatNumber } = useUiLocale();
   const totalWords = data.reduce((sum, entry) => sum + entry.wordCount, 0);
   let offset = 0;
 
@@ -39,7 +41,7 @@ export function AppUsageDonut({ data }: AppUsageDonutProps) {
           height={SIZE}
           viewBox={`0 0 ${SIZE} ${SIZE}`}
           role="img"
-          aria-label="Répartition des mots dictés par application"
+          aria-label={t("insight.charts.appUsage.aria")}
           className="-rotate-90"
         >
           <circle
@@ -68,9 +70,11 @@ export function AppUsageDonut({ data }: AppUsageDonutProps) {
         </svg>
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
           <span className="text-heading-sm text-ink">
-            {totalWords.toLocaleString("fr-FR")}
+            {formatNumber(totalWords)}
           </span>
-          <span className="text-caption text-ash">mots</span>
+          <span className="text-caption text-ash">
+            {t("insight.charts.appUsage.centerWords")}
+          </span>
         </div>
       </figure>
 
@@ -94,7 +98,7 @@ export function AppUsageDonut({ data }: AppUsageDonutProps) {
                   </span>
                 </div>
                 <span className="shrink-0 text-caption text-ash">
-                  {percent} %
+                  {t("common.percent", { value: percent })}
                 </span>
               </div>
               <div className="h-1.5 overflow-hidden rounded-full border border-hairline bg-surface-deep">
