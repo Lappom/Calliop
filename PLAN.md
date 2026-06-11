@@ -166,10 +166,10 @@ Application desktop qui permet de **dicter dans n'importe quelle application** a
 **Objectif :** différenciation vs simple Whisper GUI.
 
 #### 3a — Auto-edits IA
-- [ ] Intégration llama.cpp (modèle 3B quantifié)
-- [ ] Prompt de nettoyage (fillers, ponctuation, reformulation)
-- [ ] Toggle on/off + mode « verbatim » (sans LLM)
-- [ ] Exécution async (ne bloque pas l'injection si LLM lent)
+- [x] Intégration llama.cpp (modèle 3B quantifié)
+- [x] Prompt de nettoyage (fillers, ponctuation, reformulation)
+- [x] Toggle on/off + mode « verbatim » (sans LLM)
+- [x] Exécution async (ne bloque pas l'injection si LLM lent)
 
 #### 3b — Dictionnaire personnel
 - [ ] CRUD mots / noms propres dans Settings
