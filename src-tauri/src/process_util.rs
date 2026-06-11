@@ -1,6 +1,7 @@
 //! Helpers for spawning child processes without flashing a console on Windows.
 
 /// Prevent a child process from allocating or attaching to a visible console window.
+#[cfg_attr(not(windows), allow(unused_variables))]
 pub fn hide_console(cmd: &mut std::process::Command) {
     #[cfg(windows)]
     {

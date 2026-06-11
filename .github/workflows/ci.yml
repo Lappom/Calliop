@@ -148,8 +148,8 @@ jobs:
 
       - name: Build Tauri app (Windows GPU)
         if: matrix.platform == 'windows-latest'
-        run: pnpm tauri build --features gpu --config '{"bundle":{"createUpdaterArtifacts":false}}'
+        run: pnpm tauri build --features gpu --config src-tauri/tauri.ci.conf.json
 
       - name: Build Tauri app
         if: matrix.platform != 'windows-latest'
-        run: pnpm tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}'
+        run: pnpm tauri build --config src-tauri/tauri.ci.conf.json
