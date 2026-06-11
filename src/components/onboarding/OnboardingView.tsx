@@ -29,11 +29,14 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
   const {
     modelProgress,
     modelReady,
+    modelLoading,
+    modelError,
     audioLevel,
     micProbing,
     dictationText,
     pipelineState,
     hotkey,
+    retryEnsureModel,
     startMicProbe,
     stopMicProbe,
     runDictationTest,
@@ -81,10 +84,31 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
                   label="Téléchargement du modèle Whisper…"
                 />
               )}
+              {modelLoading && modelProgress === null && !modelReady && (
+                <p className="text-body-sm text-charcoal">
+                  Chargement du modèle de transcription…
+                </p>
+              )}
               {modelReady && (
                 <p className="text-body-sm text-accent-green">
                   Modèle de transcription prêt.
                 </p>
+              )}
+              {modelError && (
+                <div className="space-y-3">
+                  <p className="text-body-sm text-accent-red">{modelError}</p>
+                  <Button
+                    variant="ghost"
+                    disabled={modelLoading}
+                    onClick={() => void retryEnsureModel()}
+                  >
+                    Réessayer le téléchargement
+                  </Button>
+                  <p className="text-caption text-ash">
+                    Vous pouvez continuer pour tester le micro ; la dictée
+                    nécessite le modèle.
+                  </p>
+                </div>
               )}
             </>
           )}
@@ -181,7 +205,7 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
         {!isLast ? (
           <Button
             variant="primary"
-            disabled={step === 1 && !modelReady}
+            disabled={step === 1 && (modelLoading || (!modelReady && !modelError))}
             onClick={() => setStep((s) => Math.min(STEPS.length, s + 1))}
           >
             Continuer

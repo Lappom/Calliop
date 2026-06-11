@@ -223,7 +223,7 @@ mod tests {
                 auto_edit: true,
                 auto_learn: false,
                 stt_language: "en".into(),
-                whisper_model: "medium".into(),
+                whisper_model: "distil-fr-dec16".into(),
                 llm_model: "qwen3-0.6b".into(),
                 hotkey: "Ctrl+Shift+Space".into(),
                 inference_backend: "cpu".into(),
@@ -233,7 +233,7 @@ mod tests {
         assert!(loaded.auto_edit);
         assert!(!loaded.auto_learn);
         assert_eq!(loaded.stt_language, "en");
-        assert_eq!(loaded.whisper_model, "medium");
+        assert_eq!(loaded.whisper_model, "distil-fr-dec16");
         assert_eq!(loaded.llm_model, "qwen3-0.6b");
 
         let _ = std::fs::remove_dir_all(dir);

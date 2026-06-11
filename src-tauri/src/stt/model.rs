@@ -11,14 +11,15 @@ pub const DEFAULT_MODEL_FILE: &str = "ggml-small.bin";
 pub enum WhisperModel {
     #[default]
     Small,
-    Medium,
+    DistilFrDec16,
 }
 
 impl WhisperModel {
     pub fn parse(value: &str) -> Option<Self> {
         match value.trim().to_lowercase().as_str() {
             "small" => Some(Self::Small),
-            "medium" => Some(Self::Medium),
+            // Legacy: medium replaced by distil-fr-dec16 (option 3 tier lineup).
+            "medium" | "distil-fr-dec16" => Some(Self::DistilFrDec16),
             _ => None,
         }
     }
@@ -26,28 +27,28 @@ impl WhisperModel {
     pub fn as_setting_value(self) -> &'static str {
         match self {
             Self::Small => "small",
-            Self::Medium => "medium",
+            Self::DistilFrDec16 => "distil-fr-dec16",
         }
     }
 
     pub fn file_name(self) -> &'static str {
         match self {
             Self::Small => "ggml-small.bin",
-            Self::Medium => "ggml-medium.bin",
+            Self::DistilFrDec16 => "whisper-distil-fr-dec16-q5_0.bin",
         }
     }
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Small => "Small (~466 Mo)",
-            Self::Medium => "Medium (~1,5 Go)",
+            Self::Small => "Rapide — Small (~466 Mo)",
+            Self::DistilFrDec16 => "Équilibré — Distil FR dec16 (~755 Mo)",
         }
     }
 
     pub fn min_bytes(self) -> u64 {
         match self {
             Self::Small => 450_000_000,
-            Self::Medium => 1_400_000_000,
+            Self::DistilFrDec16 => 750_000_000,
         }
     }
 
@@ -56,9 +57,9 @@ impl WhisperModel {
             Self::Small => {
                 &["https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin"]
             }
-            Self::Medium => {
-                &["https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin"]
-            }
+            Self::DistilFrDec16 => &[
+                "https://huggingface.co/bofenghuang/whisper-large-v3-french-distil-dec16/resolve/main/ggml-model-q5_0.bin",
+            ],
         }
     }
 
@@ -71,15 +72,31 @@ impl WhisperModel {
     }
 
     pub fn all() -> [Self; 2] {
-        [Self::Small, Self::Medium]
+        [Self::Small, Self::DistilFrDec16]
     }
 }
+
+pub const LEGACY_MEDIUM_MODEL_FILE: &str = "ggml-medium.bin";
 
 pub fn models_dir() -> PathBuf {
     dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("com.calliop.app")
         .join("models")
+}
+
+pub fn legacy_medium_model_path() -> PathBuf {
+    models_dir().join(LEGACY_MEDIUM_MODEL_FILE)
+}
+
+/// Remove orphaned Whisper medium weights after migration to distil-fr-dec16.
+pub fn remove_legacy_medium_model() -> std::io::Result<()> {
+    let path = legacy_medium_model_path();
+    if path.exists() {
+        std::fs::remove_file(path)
+    } else {
+        Ok(())
+    }
 }
 
 pub fn model_path(model: WhisperModel) -> PathBuf {
@@ -271,8 +288,26 @@ mod tests {
     }
 
     #[test]
+    fn legacy_medium_path_uses_expected_filename() {
+        assert!(legacy_medium_model_path()
+            .ends_with(LEGACY_MEDIUM_MODEL_FILE));
+    }
+
+    #[test]
+    fn remove_legacy_medium_is_ok_when_file_absent() {
+        assert!(remove_legacy_medium_model().is_ok());
+    }
+
+    #[test]
     fn parses_model_ids() {
-        assert_eq!(WhisperModel::parse("medium"), Some(WhisperModel::Medium));
+        assert_eq!(
+            WhisperModel::parse("medium"),
+            Some(WhisperModel::DistilFrDec16)
+        );
+        assert_eq!(
+            WhisperModel::parse("distil-fr-dec16"),
+            Some(WhisperModel::DistilFrDec16)
+        );
         assert_eq!(WhisperModel::parse("unknown"), None);
     }
 }

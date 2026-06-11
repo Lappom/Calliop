@@ -3,8 +3,8 @@ import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { SttLanguageCode } from "./useSttLanguage";
 
-export type WhisperModelId = "small" | "medium";
-export type LlmModelId = "qwen3-0.6b" | "qwen3-1.7b";
+export type WhisperModelId = "small" | "distil-fr-dec16";
+export type LlmModelId = "qwen3-0.6b" | "qwen3-1.7b" | "qwen3-4b";
 export type InferenceBackendId = "auto" | "cpu";
 
 export interface AppSettings {
@@ -55,12 +55,22 @@ interface DownloadProgress {
   source: string;
 }
 
+const WHISPER_MODEL_IDS = ["small", "distil-fr-dec16"] as const;
+const LLM_MODEL_IDS = ["qwen3-0.6b", "qwen3-1.7b", "qwen3-4b"] as const;
+
 function parseWhisperModel(value: string): WhisperModelId {
-  return value === "medium" ? "medium" : "small";
+  if (value === "medium") {
+    return "distil-fr-dec16";
+  }
+  return WHISPER_MODEL_IDS.includes(value as WhisperModelId)
+    ? (value as WhisperModelId)
+    : "small";
 }
 
 function parseLlmModel(value: string): LlmModelId {
-  return value === "qwen3-0.6b" ? "qwen3-0.6b" : "qwen3-1.7b";
+  return LLM_MODEL_IDS.includes(value as LlmModelId)
+    ? (value as LlmModelId)
+    : "qwen3-1.7b";
 }
 
 function parseInferenceBackend(value: string): InferenceBackendId {

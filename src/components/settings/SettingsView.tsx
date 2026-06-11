@@ -59,6 +59,9 @@ export function SettingsView() {
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
   const [recordingHotkey, setRecordingHotkey] = useState(false);
   const [pendingHotkey, setPendingHotkey] = useState<string | null>(null);
+  const [hotkeyRestoreError, setHotkeyRestoreError] = useState<string | null>(
+    null,
+  );
   const {
     settings,
     loaded,
@@ -104,22 +107,39 @@ export function SettingsView() {
     [setHotkey],
   );
 
+  const restoreGlobalHotkey = useCallback(async () => {
+    try {
+      await invoke("set_hotkey_capture_active", { active: false });
+      setHotkeyRestoreError(null);
+    } catch (err) {
+      setHotkeyRestoreError(String(err));
+      throw err;
+    }
+  }, []);
+
   useEffect(() => {
     if (!recordingHotkey) return;
 
-    void invoke("set_hotkey_capture_active", { active: true }).catch((err) => {
-      console.error("failed to suspend global hotkey during capture:", err);
-      setRecordingHotkey(false);
-    });
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        await invoke("set_hotkey_capture_active", { active: true });
+      } catch (err) {
+        if (!cancelled) {
+          setHotkeyRestoreError(String(err));
+          setRecordingHotkey(false);
+        }
+      }
+    })();
 
     window.addEventListener("keydown", handleHotkeyCapture, true);
     return () => {
+      cancelled = true;
       window.removeEventListener("keydown", handleHotkeyCapture, true);
-      void invoke("set_hotkey_capture_active", { active: false }).catch((err) => {
-        console.error("failed to restore global hotkey after capture:", err);
-      });
+      void restoreGlobalHotkey();
     };
-  }, [recordingHotkey, handleHotkeyCapture]);
+  }, [recordingHotkey, handleHotkeyCapture, restoreGlobalHotkey]);
 
   const displayHotkey = pendingHotkey ?? settings.hotkey;
 
@@ -245,14 +265,16 @@ export function SettingsView() {
               disabled={!loaded || saving}
               onChange={(e) => {
                 const value = e.target.value;
-                if (value === "small" || value === "medium") {
+                if (value === "small" || value === "distil-fr-dec16") {
                   void setWhisperModel(value);
                 }
               }}
               className="h-10 rounded-md border border-hairline-strong bg-surface-card px-3.5 text-ink disabled:opacity-50"
             >
-              <option value="small">Small (~466 Mo)</option>
-              <option value="medium">Medium (~1,5 Go)</option>
+              <option value="small">Rapide — Small (~466 Mo)</option>
+              <option value="distil-fr-dec16">
+                Équilibré — Distil FR dec16 (~755 Mo)
+              </option>
             </select>
           </div>
 
@@ -273,7 +295,11 @@ export function SettingsView() {
               disabled={!loaded || saving}
               onChange={(e) => {
                 const value = e.target.value;
-                if (value === "qwen3-0.6b" || value === "qwen3-1.7b") {
+                if (
+                  value === "qwen3-0.6b" ||
+                  value === "qwen3-1.7b" ||
+                  value === "qwen3-4b"
+                ) {
                   void setLlmModel(value);
                 }
               }}
@@ -284,6 +310,9 @@ export function SettingsView() {
               </option>
               <option value="qwen3-1.7b">
                 Qwen3 1.7B — meilleure fidélité FR (~1,1 Go)
+              </option>
+              <option value="qwen3-4b">
+                Qwen3 4B — haute fidélité (~2,5 Go, GPU recommandé)
               </option>
             </select>
           </div>
@@ -382,8 +411,27 @@ export function SettingsView() {
                 : "Modifier le raccourci"}
             </Button>
           </div>
-          {errorMessage && (
-            <p className="text-body-sm text-accent-red">{errorMessage}</p>
+          {(errorMessage || hotkeyRestoreError) && (
+            <div className="space-y-2">
+              {errorMessage && (
+                <p className="text-body-sm text-accent-red">{errorMessage}</p>
+              )}
+              {hotkeyRestoreError && (
+                <>
+                  <p className="text-body-sm text-accent-red">
+                    {hotkeyRestoreError}
+                  </p>
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      void restoreGlobalHotkey();
+                    }}
+                  >
+                    Réactiver le raccourci de dictée
+                  </Button>
+                </>
+              )}
+            </div>
           )}
         </Card>
       )}

@@ -10,7 +10,7 @@ pub mod pipeline;
 pub mod store;
 pub mod stt;
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -89,6 +89,7 @@ struct AppState {
     hotkey_press: Mutex<HotkeyPressState>,
     deferred_llm_on_boot: AtomicBool,
     current_hotkey: Mutex<Shortcut>,
+    hotkey_suspend_depth: AtomicU32,
     mic_probe: MicProbeState,
 }
 
@@ -261,6 +262,44 @@ fn unregister_current_hotkey(app: &AppHandle, state: &AppState) -> Result<(), St
         gs.unregister(current).map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+fn suspend_global_hotkey(app: &AppHandle, state: &AppState) -> Result<(), String> {
+    let prev = state.hotkey_suspend_depth.fetch_add(1, Ordering::SeqCst);
+    if prev == 0 {
+        unregister_current_hotkey(app, state)?;
+    }
+    Ok(())
+}
+
+fn resume_global_hotkey(app: &AppHandle, state: &AppState) -> Result<(), String> {
+    let mut current = state.hotkey_suspend_depth.load(Ordering::SeqCst);
+    loop {
+        if current == 0 {
+            return Ok(());
+        }
+        match state.hotkey_suspend_depth.compare_exchange_weak(
+            current,
+            current - 1,
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        ) {
+            Ok(_) => {
+                if current - 1 == 0 {
+                    let settings = state.store.load_settings().map_err(|e| e.to_string())?;
+                    let shortcut =
+                        hotkey::parse_shortcut(&settings.hotkey).map_err(|e| e.to_string())?;
+                    register_hotkey(app, shortcut)?;
+                }
+                return Ok(());
+            }
+            Err(actual) => current = actual,
+        }
+    }
+}
+
+fn is_mic_probe_active(state: &AppState) -> bool {
+    state.mic_probe.capture.lock().is_some()
 }
 
 fn register_hotkey(app: &AppHandle, shortcut: Shortcut) -> Result<(), String> {
@@ -567,11 +606,9 @@ fn set_hotkey_capture_active(
     active: bool,
 ) -> Result<(), String> {
     if active {
-        unregister_current_hotkey(&app, &state)
+        suspend_global_hotkey(&app, &state)
     } else {
-        let settings = state.store.load_settings().map_err(|e| e.to_string())?;
-        let shortcut = hotkey::parse_shortcut(&settings.hotkey).map_err(|e| e.to_string())?;
-        register_hotkey(&app, shortcut)
+        resume_global_hotkey(&app, &state)
     }
 }
 
@@ -1112,12 +1149,19 @@ async fn start_mic_probe(app: AppHandle, state: State<'_, AppState>) -> Result<(
     if capture_slot.is_some() {
         return Err("Le test micro est déjà en cours.".into());
     }
+    if state.pipeline.lock().state() != PipelineState::Idle {
+        return Err("Une dictée est en cours. Arrêtez-la avant de tester le micro.".into());
+    }
+
+    drop(capture_slot);
+    suspend_global_hotkey(&app, &state)?;
 
     let mut capture = audio::AudioCapture::new().map_err(|e| e.to_string())?;
     let (level_tx, level_rx) = std::sync::mpsc::channel::<f32>();
-    capture
-        .start_with_streaming(None, Some(level_tx))
-        .map_err(|e| e.to_string())?;
+    if let Err(err) = capture.start_with_streaming(None, Some(level_tx)) {
+        let _ = resume_global_hotkey(&app, &state);
+        return Err(err.to_string());
+    }
 
     let app_clone = app.clone();
     let level_task = tauri::async_runtime::spawn(async move {
@@ -1126,19 +1170,26 @@ async fn start_mic_probe(app: AppHandle, state: State<'_, AppState>) -> Result<(
         }
     });
 
+    let mut capture_slot = state.mic_probe.capture.lock();
     *state.mic_probe.level_task.lock() = Some(level_task);
     *capture_slot = Some(capture);
     Ok(())
 }
 
 #[tauri::command]
-async fn stop_mic_probe(state: State<'_, AppState>) -> Result<(), String> {
+async fn stop_mic_probe(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     let mut capture_slot = state.mic_probe.capture.lock();
+    let was_active = capture_slot.is_some();
     if let Some(mut capture) = capture_slot.take() {
         let _ = capture.stop();
     }
     if let Some(handle) = state.mic_probe.level_task.lock().take() {
         handle.abort();
+    }
+    drop(capture_slot);
+
+    if was_active {
+        resume_global_hotkey(&app, &state)?;
     }
     Ok(())
 }
@@ -1299,6 +1350,9 @@ async fn ensure_model_then_toggle(app: AppHandle) {
 
 fn handle_hotkey(app: &AppHandle, shortcut_state: ShortcutState) {
     let state = app.state::<AppState>();
+    if is_mic_probe_active(&state) {
+        return;
+    }
 
     match shortcut_state {
         ShortcutState::Pressed => {
@@ -1461,9 +1515,21 @@ pub fn run() {
         PipelineOrchestrator::new().expect("failed to initialize pipeline orchestrator"),
     ));
     let store = Arc::new(Store::open().expect("failed to open settings store"));
-    let initial_settings = store
+    let mut initial_settings = store
         .load_settings()
         .expect("failed to load initial settings");
+
+    if initial_settings.whisper_model == "medium" {
+        initial_settings.whisper_model = WhisperModel::DistilFrDec16.as_setting_value().into();
+        if let Err(err) = store.save_settings(&initial_settings) {
+            eprintln!("failed to migrate whisper_model from medium: {err}");
+        }
+    }
+
+    if let Err(err) = stt::remove_legacy_medium_model() {
+        eprintln!("failed to remove legacy whisper medium model: {err}");
+    }
+
     pipeline.lock().set_auto_edit(initial_settings.auto_edit);
     pipeline.lock().set_auto_learn(initial_settings.auto_learn);
     pipeline
@@ -1539,6 +1605,7 @@ pub fn run() {
             }),
             deferred_llm_on_boot: AtomicBool::new(start_minimized && initial_settings.auto_edit),
             current_hotkey: Mutex::new(hotkey::default_shortcut()),
+            hotkey_suspend_depth: AtomicU32::new(0),
             mic_probe: MicProbeState {
                 capture: Mutex::new(None),
                 level_task: Mutex::new(None),

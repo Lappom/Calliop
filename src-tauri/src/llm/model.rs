@@ -16,6 +16,8 @@ pub enum LlmModel {
     #[default]
     #[serde(rename = "qwen3-1.7b")]
     Qwen3_1_7B,
+    #[serde(rename = "qwen3-4b")]
+    Qwen3_4B,
 }
 
 impl LlmModel {
@@ -23,6 +25,7 @@ impl LlmModel {
         match value.trim().to_lowercase().as_str() {
             "qwen3-0.6b" | "qwen3_0.6b" => Some(Self::Qwen3_0_6B),
             "qwen3-1.7b" | "qwen3_1.7b" => Some(Self::Qwen3_1_7B),
+            "qwen3-4b" | "qwen3_4b" => Some(Self::Qwen3_4B),
             _ => None,
         }
     }
@@ -31,6 +34,7 @@ impl LlmModel {
         match self {
             Self::Qwen3_0_6B => "qwen3-0.6b",
             Self::Qwen3_1_7B => "qwen3-1.7b",
+            Self::Qwen3_4B => "qwen3-4b",
         }
     }
 
@@ -38,6 +42,7 @@ impl LlmModel {
         match self {
             Self::Qwen3_0_6B => "qwen3-0.6b-instruct-q4_k_m.gguf",
             Self::Qwen3_1_7B => "qwen3-1.7b-instruct-q4_k_m.gguf",
+            Self::Qwen3_4B => "qwen3-4b-instruct-q4_k_m.gguf",
         }
     }
 
@@ -45,6 +50,7 @@ impl LlmModel {
         match self {
             Self::Qwen3_0_6B => "Qwen3 0.6B Instruct Q4_K_M (~484 Mo)",
             Self::Qwen3_1_7B => "Qwen3 1.7B Instruct Q4_K_M (~1,1 Go)",
+            Self::Qwen3_4B => "Qwen3 4B Instruct Q4_K_M (~2,5 Go, GPU recommandé)",
         }
     }
 
@@ -52,6 +58,7 @@ impl LlmModel {
         match self {
             Self::Qwen3_0_6B => 450_000_000,
             Self::Qwen3_1_7B => 1_000_000_000,
+            Self::Qwen3_4B => 2_400_000_000,
         }
     }
 
@@ -62,6 +69,9 @@ impl LlmModel {
             ],
             Self::Qwen3_1_7B => &[
                 "https://huggingface.co/PatnaikAshish/Qwen3-1.7B-Instruct-Q4_K_M-GGUF/resolve/main/qwen3-1.7b-instruct-q4_k_m.gguf",
+            ],
+            Self::Qwen3_4B => &[
+                "https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/main/Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
             ],
         }
     }
@@ -74,8 +84,8 @@ impl LlmModel {
         is_valid_model_file(self, &self.path())
     }
 
-    pub fn all() -> [Self; 2] {
-        [Self::Qwen3_0_6B, Self::Qwen3_1_7B]
+    pub fn all() -> [Self; 3] {
+        [Self::Qwen3_0_6B, Self::Qwen3_1_7B, Self::Qwen3_4B]
     }
 }
 
@@ -270,5 +280,6 @@ mod tests {
     fn parses_model_ids() {
         assert_eq!(LlmModel::parse("qwen3-0.6b"), Some(LlmModel::Qwen3_0_6B));
         assert_eq!(LlmModel::parse("qwen3-1.7b"), Some(LlmModel::Qwen3_1_7B));
+        assert_eq!(LlmModel::parse("qwen3-4b"), Some(LlmModel::Qwen3_4B));
     }
 }

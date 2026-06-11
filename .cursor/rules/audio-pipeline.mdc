@@ -68,7 +68,7 @@ Hotkey OFF / release (toggle or PTT)
 - Cargo feature `gpu` enables Vulkan for whisper-rs + llama-cpp-2 sidecar (Windows dev/build via `scripts/tauri-cli.mjs`).
 - `auto` uses GPU layers when compiled with `gpu`; ggml falls back to CPU if no device.
 - STT: `WhisperEngine::new_with_gpu(path, use_gpu)`; LLM: sidecar `--ngl 99` or `--ngl 0`.
-- Whisper models: `small` / `medium` (`whisper_model` in SQLite); switch reloads engine via `set_settings`.
+- Whisper models: `small` / `distil-fr-dec16` (`whisper_model` in SQLite; legacy `medium` maps to distil); switch reloads engine via `set_settings`.
 
 ## Phase scope
 

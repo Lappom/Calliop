@@ -12,8 +12,9 @@ pub use engine::{
 };
 pub use language::{SttLanguage, DEFAULT_STT_LANGUAGE, STT_LANG_AUTO, SUPPORTED_STT_LANGUAGES};
 pub use model::{
-    ensure_model_blocking, is_valid_model_file, model_exists, model_path, models_dir,
-    ModelDownloadProgress, ModelError, WhisperModel, DEFAULT_MODEL_FILE,
+    ensure_model_blocking, is_valid_model_file, legacy_medium_model_path, model_exists,
+    model_path, models_dir, remove_legacy_medium_model, ModelDownloadProgress, ModelError,
+    WhisperModel, DEFAULT_MODEL_FILE, LEGACY_MEDIUM_MODEL_FILE,
 };
 pub use prompt_cache::WhisperPromptCache;
 

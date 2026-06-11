@@ -7,11 +7,28 @@ export function useOnboarding() {
   const [done, setDone] = useState(true);
   const [modelProgress, setModelProgress] = useState<number | null>(null);
   const [modelReady, setModelReady] = useState(false);
+  const [modelLoading, setModelLoading] = useState(false);
+  const [modelError, setModelError] = useState<string | null>(null);
   const [audioLevel, setAudioLevel] = useState(0);
   const [micProbing, setMicProbing] = useState(false);
   const [dictationText, setDictationText] = useState("");
   const [pipelineState, setPipelineState] = useState("idle");
   const [hotkey, setHotkey] = useState("Alt+Space");
+
+  const ensureModelForOnboarding = useCallback(async () => {
+    setModelLoading(true);
+    setModelError(null);
+    try {
+      await invoke("ensure_model");
+      setModelReady(true);
+      setModelProgress(null);
+    } catch (err) {
+      setModelReady(false);
+      setModelError(String(err));
+    } finally {
+      setModelLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -29,15 +46,8 @@ export function useOnboarding() {
           setHotkey(settings.hotkey);
           setLoading(false);
         }
-        if (!onboardingDone) {
-          try {
-            await invoke("ensure_model");
-            if (!cancelled) {
-              setModelReady(true);
-            }
-          } catch {
-            // model-ready listener or retry on next launch
-          }
+        if (!onboardingDone && !cancelled) {
+          await ensureModelForOnboarding();
         }
       } catch {
         if (!cancelled) {
@@ -58,6 +68,11 @@ export function useOnboarding() {
       listen("model-ready", () => {
         setModelReady(true);
         setModelProgress(null);
+        setModelError(null);
+      }),
+      listen<string>("model-init-error", (event) => {
+        setModelReady(false);
+        setModelError(event.payload);
       }),
       listen<{ level: number }>("audio-level", (event) => {
         setAudioLevel(event.payload.level);
@@ -81,7 +96,7 @@ export function useOnboarding() {
       void invoke("stop_mic_probe").catch(() => {});
       void unlisteners.then((drops) => drops.forEach((drop) => drop()));
     };
-  }, []);
+  }, [ensureModelForOnboarding]);
 
   const startMicProbe = useCallback(async () => {
     setMicProbing(true);
@@ -115,11 +130,14 @@ export function useOnboarding() {
     done,
     modelProgress,
     modelReady,
+    modelLoading,
+    modelError,
     audioLevel,
     micProbing,
     dictationText,
     pipelineState,
     hotkey,
+    retryEnsureModel: ensureModelForOnboarding,
     startMicProbe,
     stopMicProbe,
     runDictationTest,
