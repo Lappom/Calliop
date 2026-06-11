@@ -27,7 +27,13 @@ fn prepare_display_transcript(raw: &str, snippets: &[Snippet]) -> String {
     if trimmed.is_empty() {
         return String::new();
     }
-    post_process_transcript(&apply_snippets(trimmed, snippets))
+    let (shielded, shields) = shield_snippet_triggers(trimmed, snippets);
+    let processed = post_process_transcript(&shielded);
+    if shields.is_empty() {
+        processed
+    } else {
+        unshield_snippets(&processed, &shields)
+    }
 }
 
 /// Maximum time to wait for LLM cleanup (Qwen3 1.7B on CPU can take tens of seconds).
@@ -1109,5 +1115,17 @@ mod tests {
         let orchestrator = PipelineOrchestrator::new().expect("orchestrator");
         assert_eq!(orchestrator.state(), PipelineState::Idle);
         assert!(!orchestrator.is_model_loaded());
+    }
+
+    #[test]
+    fn prepare_display_transcript_preserves_snippet_body() {
+        let snippets = vec![Snippet {
+            id: 1,
+            trigger: "mon email".into(),
+            content: "contact at gmail point com".into(),
+            created_at: "now".into(),
+        }];
+        let result = prepare_display_transcript("voici mon email", &snippets);
+        assert_eq!(result, "voici contact at gmail point com");
     }
 }
