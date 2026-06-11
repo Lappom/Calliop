@@ -393,7 +393,6 @@ async fn set_settings(
         }
     } else {
         state.pipeline.lock().set_auto_edit(false);
-        shutdown_llm_engine(&state);
     }
 
     if let Err(err) = state
@@ -407,6 +406,10 @@ async fn set_settings(
     {
         rollback();
         return Err(err);
+    }
+
+    if !settings.auto_edit {
+        shutdown_llm_engine(&state);
     }
 
     if stt_language_changed {

@@ -875,7 +875,7 @@ fn transcribe_segment(
             });
             return;
         };
-        match engine.transcribe(&segment, prompt.as_deref()) {
+        match engine.transcribe_with_language(&segment, prompt.as_deref(), segment_language) {
             Ok(result) => result,
             Err(err) => {
                 eprintln!("segment transcription failed: {err}");
