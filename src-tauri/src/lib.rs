@@ -56,6 +56,10 @@ struct HotkeyPressState {
     was_idle_on_press: bool,
     /// True between Pressed and Released — filters OS key-repeat while holding.
     shortcut_down: bool,
+    /// Press from idle while Whisper is still loading.
+    deferred_start_pending: bool,
+    /// Captured on release during deferred load (short toggle tap).
+    deferred_toggle_intent: bool,
 }
 
 struct TrayHandles {
@@ -898,17 +902,38 @@ async fn ensure_model_then_start(app: AppHandle) {
         );
         if let Err(err) = ensure_model_inner(&app, &state).await {
             let _ = app.emit("model-init-error", err);
+            clear_deferred_hotkey_start(app.state::<AppState>().inner());
             return;
         }
         spawn_deferred_llm_if_needed(app.clone());
     }
 
     let state = app.state::<AppState>();
-    let still_holding = state.hotkey_press.lock().shortcut_down;
+    let should_start = take_deferred_hotkey_start(state.inner());
     let pipeline = state.pipeline.clone();
-    if still_holding && pipeline.lock().state() == PipelineState::Idle {
+    if should_start && pipeline.lock().state() == PipelineState::Idle {
         spawn_start(app, pipeline);
     }
+}
+
+fn clear_deferred_hotkey_start(state: &AppState) {
+    let mut press = state.hotkey_press.lock();
+    press.deferred_start_pending = false;
+    press.deferred_toggle_intent = false;
+}
+
+fn take_deferred_hotkey_start(state: &AppState) -> bool {
+    let mut press = state.hotkey_press.lock();
+    if !press.deferred_start_pending {
+        return false;
+    }
+    let should_start = hotkey::should_start_after_deferred_load(
+        press.shortcut_down,
+        press.deferred_toggle_intent,
+    );
+    press.deferred_start_pending = false;
+    press.deferred_toggle_intent = false;
+    should_start
 }
 
 async fn ensure_model_then_toggle(app: AppHandle) {
@@ -951,8 +976,12 @@ fn handle_hotkey(app: &AppHandle, shortcut_state: ShortcutState) {
             match current {
                 PipelineState::Idle => {
                     if state.model_ready.load(Ordering::SeqCst) {
+                        press.deferred_start_pending = false;
+                        press.deferred_toggle_intent = false;
                         spawn_start(app.clone(), state.pipeline.clone());
                     } else {
+                        press.deferred_start_pending = true;
+                        press.deferred_toggle_intent = false;
                         let app_clone = app.clone();
                         tauri::async_runtime::spawn(async move {
                             ensure_model_then_start(app_clone).await;
@@ -978,6 +1007,10 @@ fn handle_hotkey(app: &AppHandle, shortcut_state: ShortcutState) {
             };
             let was_idle = press.was_idle_on_press;
             let duration = start.elapsed();
+
+            if press.deferred_start_pending {
+                press.deferred_toggle_intent = hotkey::is_toggle_tap(was_idle, duration);
+            }
 
             if state.pipeline.lock().state() == PipelineState::Recording
                 && hotkey::should_stop_ptt_on_release(was_idle, duration)
@@ -1161,6 +1194,8 @@ pub fn run() {
                 press_start: None,
                 was_idle_on_press: false,
                 shortcut_down: false,
+                deferred_start_pending: false,
+                deferred_toggle_intent: false,
             }),
             deferred_llm_on_boot: AtomicBool::new(start_minimized && initial_settings.auto_edit),
         })

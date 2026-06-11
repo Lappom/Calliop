@@ -20,6 +20,19 @@ pub fn should_stop_ptt_on_release(was_idle_on_press: bool, press_duration: Durat
     was_idle_on_press && press_duration >= PTT_RELEASE_THRESHOLD
 }
 
+/// Short tap from idle while the model is still loading — start when load completes.
+pub fn is_toggle_tap(was_idle_on_press: bool, press_duration: Duration) -> bool {
+    was_idle_on_press && press_duration < PTT_RELEASE_THRESHOLD
+}
+
+/// Whether a deferred model load should start recording once Whisper is ready.
+pub fn should_start_after_deferred_load(
+    still_holding: bool,
+    deferred_toggle_intent: bool,
+) -> bool {
+    still_holding || deferred_toggle_intent
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -49,5 +62,19 @@ mod tests {
     #[test]
     fn long_release_after_idle_stops_push_to_talk() {
         assert!(should_stop_ptt_on_release(true, Duration::from_millis(500)));
+    }
+
+    #[test]
+    fn toggle_tap_is_short_press_from_idle() {
+        assert!(is_toggle_tap(true, Duration::from_millis(100)));
+        assert!(!is_toggle_tap(true, Duration::from_millis(500)));
+        assert!(!is_toggle_tap(false, Duration::from_millis(100)));
+    }
+
+    #[test]
+    fn deferred_load_starts_on_hold_or_toggle_tap() {
+        assert!(should_start_after_deferred_load(true, false));
+        assert!(should_start_after_deferred_load(false, true));
+        assert!(!should_start_after_deferred_load(false, false));
     }
 }
