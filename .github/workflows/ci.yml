@@ -120,7 +120,7 @@ jobs:
         if: matrix.platform == 'windows-latest'
         shell: pwsh
         run: |
-          choco install vulkan-sdk -y --no-progress
+          choco install vulkan-sdk ninja -y --no-progress
           $sdk = (Get-ChildItem "C:\VulkanSDK" -Directory | Sort-Object Name -Descending | Select-Object -First 1).FullName
           $bin = Join-Path $sdk "Bin"
           "VULKAN_SDK=$sdk" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
