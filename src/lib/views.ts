@@ -7,6 +7,18 @@ export type AppView =
   | "insight"
   | "settings";
 
+export function isAppView(value: string): value is AppView {
+  return (
+    value === "main" ||
+    value === "dictionary" ||
+    value === "snippets" ||
+    value === "style" ||
+    value === "history" ||
+    value === "insight" ||
+    value === "settings"
+  );
+}
+
 export const PRIMARY_VIEWS: { id: AppView; label: string }[] = [
   { id: "main", label: "Accueil" },
   { id: "dictionary", label: "Dictionnaire" },

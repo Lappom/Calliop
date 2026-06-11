@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { AppShell } from "./components/layout/AppShell";
 import { ModelDownloadToasts } from "./components/layout/ModelDownloadToasts";
 import { StyleView } from "./components/style/StyleView";
@@ -12,6 +13,7 @@ import { SettingsView } from "./components/settings/SettingsView";
 import { SnippetsView } from "./components/snippets/SnippetsView";
 import { usePipelineState } from "./hooks/usePipelineState";
 import type { AppView } from "./lib/views";
+import { isAppView } from "./lib/views";
 
 function App() {
   const [currentView, setCurrentView] = useState<AppView>("main");
@@ -35,6 +37,18 @@ function App() {
       });
     return () => {
       cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const unlisten = listen<{ view: string }>("navigate-view", (event) => {
+      const view = event.payload.view;
+      if (isAppView(view)) {
+        setCurrentView(view);
+      }
+    });
+    return () => {
+      void unlisten.then((drop) => drop());
     };
   }, []);
 

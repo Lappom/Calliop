@@ -72,6 +72,13 @@ struct HotkeyPressState {
 
 struct TrayHandles {
     autostart_item: CheckMenuItem<tauri::Wry>,
+    auto_edit_item: CheckMenuItem<tauri::Wry>,
+    language_item: MenuItem<tauri::Wry>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct NavigateViewPayload {
+    view: String,
 }
 
 struct MicProbeState {
@@ -519,6 +526,13 @@ fn parse_tone_profile(value: &str) -> Result<ToneProfile, String> {
 
 const MENU_OPEN: &str = "open";
 const MENU_TOGGLE: &str = "toggle";
+const MENU_CYCLE_LANGUAGE: &str = "cycle_language";
+const MENU_OPEN_SETTINGS: &str = "open_settings";
+const MENU_OPEN_HISTORY: &str = "open_history";
+const MENU_OPEN_DICTIONARY: &str = "open_dictionary";
+const MENU_OPEN_SNIPPETS: &str = "open_snippets";
+const MENU_OPEN_INSIGHT: &str = "open_insight";
+const MENU_AUTO_EDIT: &str = "auto_edit";
 const MENU_AUTOSTART: &str = "autostart";
 const MENU_QUIT: &str = "quit";
 
@@ -766,6 +780,7 @@ async fn set_settings(
             .notify_stt_language_changed(&app_for_notify);
     }
 
+    sync_tray_menus(&app);
     Ok(())
 }
 
@@ -1374,7 +1389,68 @@ fn set_autostart_enabled(app: AppHandle, enabled: bool) -> Result<(), String> {
     } else {
         autolaunch.disable().map_err(|e| e.to_string())?;
     }
-    sync_autostart_menu(&app);
+    sync_tray_menus(&app);
+    Ok(())
+}
+
+fn set_auto_edit_enabled(app: AppHandle, enabled: bool) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let mut settings = state.store.load_settings().map_err(|e| e.to_string())?;
+    if settings.auto_edit == enabled {
+        sync_tray_menus(&app);
+        return Ok(());
+    }
+
+    settings.auto_edit = enabled;
+    state
+        .store
+        .save_settings(&settings)
+        .map_err(|e| e.to_string())?;
+    state.pipeline.lock().set_auto_edit(enabled);
+
+    if enabled {
+        let app_clone = app.clone();
+        tauri::async_runtime::spawn(async move {
+            let state = app_clone.state::<AppState>();
+            if let Err(err) = ensure_llm_model_inner(&app_clone, &state).await {
+                eprintln!("llm init after tray auto-edit toggle failed: {err}");
+            }
+        });
+    } else {
+        shutdown_llm_engine(&state);
+    }
+
+    sync_tray_menus(&app);
+    Ok(())
+}
+
+fn cycle_stt_language_from_tray(app: AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let next = {
+        let mut pipeline = state.pipeline.lock();
+        if pipeline.state() == PipelineState::Recording {
+            pipeline.cycle_session_language(&app).map_err(|e| e.to_string())?
+        } else {
+            let next = pipeline.effective_stt_language().cycle();
+            pipeline.set_default_stt_language(next);
+            next
+        }
+    };
+
+    if state.pipeline.lock().state() != PipelineState::Recording {
+        let mut settings = state.store.load_settings().map_err(|e| e.to_string())?;
+        settings.stt_language = next.as_setting_value();
+        state
+            .store
+            .save_settings(&settings)
+            .map_err(|e| e.to_string())?;
+        state
+            .pipeline
+            .lock()
+            .notify_stt_language_changed(&app);
+    }
+
+    sync_tray_menus(&app);
     Ok(())
 }
 
@@ -1601,18 +1677,52 @@ fn hide_main_window(app: &AppHandle) {
 }
 
 fn show_main_window(app: &AppHandle) {
+    show_main_window_view(app, None);
+}
+
+fn show_main_window_view(app: &AppHandle, view: Option<&str>) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.maximize();
         let _ = window.set_focus();
     }
+    if let Some(view) = view {
+        let _ = app.emit(
+            "navigate-view",
+            NavigateViewPayload {
+                view: view.to_string(),
+            },
+        );
+    }
 }
 
-fn sync_autostart_menu(app: &AppHandle) {
-    let enabled = app.autolaunch().is_enabled().unwrap_or(false);
+fn tray_language_menu_text(app: &AppHandle) -> String {
+    let label = if let Some(state) = app.try_state::<AppState>() {
+        state
+            .pipeline
+            .lock()
+            .effective_stt_language()
+            .display_label()
+    } else {
+        "FR"
+    };
+    format!("Langue de dictée : {label}")
+}
+
+fn sync_tray_menus(app: &AppHandle) {
     if let Some(handles) = app.try_state::<TrayHandles>() {
-        let _ = handles.autostart_item.set_checked(enabled);
+        let autostart_enabled = app.autolaunch().is_enabled().unwrap_or(false);
+        let _ = handles.autostart_item.set_checked(autostart_enabled);
+
+        let auto_edit_enabled = app
+            .try_state::<AppState>()
+            .map(|state| state.pipeline.lock().auto_edit_enabled())
+            .unwrap_or(false);
+        let _ = handles.auto_edit_item.set_checked(auto_edit_enabled);
+        let _ = handles
+            .language_item
+            .set_text(tray_language_menu_text(app));
     }
 }
 
@@ -1623,6 +1733,60 @@ fn build_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         MENU_TOGGLE,
         "Démarrer / arrêter la dictée",
         true,
+        None::<&str>,
+    )?;
+    let language_item = MenuItem::with_id(
+        app,
+        MENU_CYCLE_LANGUAGE,
+        tray_language_menu_text(app),
+        true,
+        None::<&str>,
+    )?;
+    let settings_item = MenuItem::with_id(
+        app,
+        MENU_OPEN_SETTINGS,
+        "Paramètres",
+        true,
+        None::<&str>,
+    )?;
+    let history_item = MenuItem::with_id(
+        app,
+        MENU_OPEN_HISTORY,
+        "Historique",
+        true,
+        None::<&str>,
+    )?;
+    let dictionary_item = MenuItem::with_id(
+        app,
+        MENU_OPEN_DICTIONARY,
+        "Dictionnaire",
+        true,
+        None::<&str>,
+    )?;
+    let snippets_item = MenuItem::with_id(
+        app,
+        MENU_OPEN_SNIPPETS,
+        "Snippets",
+        true,
+        None::<&str>,
+    )?;
+    let insight_item = MenuItem::with_id(
+        app,
+        MENU_OPEN_INSIGHT,
+        "Statistiques",
+        true,
+        None::<&str>,
+    )?;
+    let auto_edit_checked = app
+        .try_state::<AppState>()
+        .map(|state| state.pipeline.lock().auto_edit_enabled())
+        .unwrap_or(false);
+    let auto_edit_item = CheckMenuItem::with_id(
+        app,
+        MENU_AUTO_EDIT,
+        "Auto-edits IA",
+        true,
+        auto_edit_checked,
         None::<&str>,
     )?;
     let autostart_checked = app.autolaunch().is_enabled().unwrap_or(false);
@@ -1641,6 +1805,15 @@ fn build_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         &[
             &open_item,
             &toggle_item,
+            &language_item,
+            &separator,
+            &settings_item,
+            &history_item,
+            &dictionary_item,
+            &snippets_item,
+            &insight_item,
+            &separator,
+            &auto_edit_item,
             &autostart_item,
             &separator,
             &quit_item,
@@ -1658,6 +1831,21 @@ fn build_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 tauri::async_runtime::spawn(async move {
                     ensure_model_then_toggle(app_clone).await;
                 });
+            }
+            MENU_CYCLE_LANGUAGE => {
+                let _ = cycle_stt_language_from_tray(app.clone());
+            }
+            MENU_OPEN_SETTINGS => show_main_window_view(app, Some("settings")),
+            MENU_OPEN_HISTORY => show_main_window_view(app, Some("history")),
+            MENU_OPEN_DICTIONARY => show_main_window_view(app, Some("dictionary")),
+            MENU_OPEN_SNIPPETS => show_main_window_view(app, Some("snippets")),
+            MENU_OPEN_INSIGHT => show_main_window_view(app, Some("insight")),
+            MENU_AUTO_EDIT => {
+                let enabled = app
+                    .try_state::<AppState>()
+                    .map(|state| state.pipeline.lock().auto_edit_enabled())
+                    .unwrap_or(false);
+                let _ = set_auto_edit_enabled(app.clone(), !enabled);
             }
             MENU_AUTOSTART => {
                 let enabled = app.autolaunch().is_enabled().unwrap_or(false);
@@ -1680,7 +1868,11 @@ fn build_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         })
         .build(app)?;
 
-    app.manage(TrayHandles { autostart_item });
+    app.manage(TrayHandles {
+        autostart_item,
+        auto_edit_item,
+        language_item,
+    });
 
     Ok(())
 }
@@ -1858,6 +2050,7 @@ pub fn run() {
         .setup(move |app| {
             let _modules = registered_modules();
             build_tray(app.handle()).map_err(|e| e.to_string())?;
+            sync_tray_menus(app.handle());
             let _ = app_context::get_active_window();
 
             let hotkey_setting = initial_settings.hotkey.clone();
@@ -1967,7 +2160,7 @@ pub fn run() {
         .expect("error while running tauri application")
         .run(|app, event| {
             if let RunEvent::Ready = event {
-                sync_autostart_menu(app);
+                sync_tray_menus(app);
             }
         });
 }
