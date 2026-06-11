@@ -24,6 +24,7 @@ export function useSnippets() {
       setErrorMessage(null);
     } catch (err) {
       setErrorMessage(String(err));
+      setLoaded(true);
     }
   }, []);
 

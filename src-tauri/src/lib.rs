@@ -141,10 +141,11 @@ fn refresh_whisper_prompt(
     let words = store.list_words().map_err(|e| e.to_string())?;
     let snippets = store.list_snippets().map_err(|e| e.to_string())?;
 
-    let mut prompt_words: Vec<String> = words.into_iter().map(|entry| entry.word).collect();
-    for snippet in &snippets {
-        prompt_words.push(snippet.trigger.clone());
-    }
+    let mut prompt_words: Vec<String> = snippets
+        .iter()
+        .map(|snippet| snippet.trigger.clone())
+        .collect();
+    prompt_words.extend(words.into_iter().map(|entry| entry.word));
 
     let prompt = build_initial_prompt(&prompt_words);
     let mut pipeline = pipeline.lock();
@@ -534,6 +535,11 @@ fn import_snippets(
         return Err("Le fichier ne contient aucun snippet.".into());
     }
 
+    let previous = state
+        .store
+        .export_snippet_imports()
+        .map_err(|e| e.to_string())?;
+
     let count = state
         .store
         .import_snippets(&entries)
@@ -544,7 +550,10 @@ fn import_snippets(
         );
     }
 
-    refresh_whisper_prompt_state(&state)?;
+    if let Err(err) = refresh_whisper_prompt_state(&state) {
+        let _ = state.store.replace_all_snippets(&previous);
+        return Err(err);
+    }
     emit_snippets_updated(&app);
     Ok(count)
 }

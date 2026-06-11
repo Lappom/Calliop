@@ -122,6 +122,30 @@ impl Store {
         Ok(count)
     }
 
+    /// Replaces all snippets with the given entries (used to roll back failed imports).
+    pub fn replace_all_snippets(&self, entries: &[SnippetImport]) -> Result<(), StoreError> {
+        let conn = self.connection().lock().expect("store mutex poisoned");
+        let tx = conn.unchecked_transaction()?;
+        tx.execute("DELETE FROM snippets", [])?;
+
+        for entry in entries {
+            let normalized_trigger = normalize_trigger(&entry.trigger);
+            let trimmed_content = entry.content.trim();
+            if !is_valid_trigger(&normalized_trigger) || !is_valid_snippet_content(trimmed_content)
+            {
+                continue;
+            }
+
+            tx.execute(
+                "INSERT INTO snippets (trigger, content) VALUES (?1, ?2)",
+                params![normalized_trigger, trimmed_content],
+            )?;
+        }
+
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn export_snippet_imports(&self) -> Result<Vec<SnippetImport>, StoreError> {
         Ok(self
             .list_snippets()?
@@ -233,6 +257,24 @@ mod tests {
             .find(|snippet| snippet.trigger == "mon calendrier")
             .expect("calendar snippet");
         assert_eq!(calendar.content, "v2");
+    }
+
+    #[test]
+    fn replace_all_snippets_swaps_table_contents() {
+        let store = test_store();
+        store.add_snippet("old", "old content").unwrap();
+
+        store
+            .replace_all_snippets(&[SnippetImport {
+                trigger: "new".into(),
+                content: "new content".into(),
+            }])
+            .unwrap();
+
+        let snippets = store.list_snippets().unwrap();
+        assert_eq!(snippets.len(), 1);
+        assert_eq!(snippets[0].trigger, "new");
+        assert_eq!(snippets[0].content, "new content");
     }
 
     #[test]

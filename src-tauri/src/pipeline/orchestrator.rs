@@ -346,19 +346,22 @@ impl PipelineOrchestrator {
 
         let stt_ms = streaming_stt_ms + fallback_stt_ms;
         let full_text = transcripts.join(" ").trim().to_string();
+        // Expand snippet triggers on raw Whisper output before LLM cleanup so
+        // paraphrasing cannot erase exact trigger phrases.
+        let text_after_snippets = self.apply_cached_snippets(&full_text);
 
         let auto_edit = self.auto_edit.load(Ordering::SeqCst);
-        if !full_text.is_empty() && auto_edit && self.llm.lock().is_none() {
+        if !text_after_snippets.is_empty() && auto_edit && self.llm.lock().is_none() {
             wait_for_llm_engine(&self.llm, LLM_INJECT_WAIT);
         }
 
         let (text_to_inject, llm_ms, llm_invalidated) =
-            if !full_text.is_empty() && auto_edit && self.llm.lock().is_some() {
+            if !text_after_snippets.is_empty() && auto_edit && self.llm.lock().is_some() {
                 let job = start_llm_cleanup(
                     Arc::clone(&self.llm),
                     Arc::clone(&self.llm_ready),
                     Arc::clone(&self.auto_edit),
-                    &full_text,
+                    &text_after_snippets,
                 );
                 match job.wait_for_inject(LLM_INJECT_WAIT) {
                     LlmCleanupWait::Completed {
@@ -369,25 +372,23 @@ impl PipelineOrchestrator {
                         let text = if self.auto_edit.load(Ordering::SeqCst) {
                             text
                         } else {
-                            full_text.clone()
+                            text_after_snippets.clone()
                         };
                         (text, llm_ms, invalidated)
                     }
                     LlmCleanupWait::Pending(job) => {
                         job.finalize_in_background(app.clone());
-                        (full_text.clone(), 0, false)
+                        (text_after_snippets.clone(), 0, false)
                     }
                 }
             } else {
-                (full_text.clone(), 0, false)
+                (text_after_snippets.clone(), 0, false)
             };
 
         if llm_invalidated && self.auto_edit.load(Ordering::SeqCst) {
             let _ = app.emit("llm-unready", ());
             crate::spawn_llm_recovery_if_needed(app.clone());
         }
-
-        let text_to_inject = self.apply_cached_snippets(&text_to_inject);
 
         self.set_state(app, PipelineState::Injecting, None);
         let inject_start = Instant::now();
