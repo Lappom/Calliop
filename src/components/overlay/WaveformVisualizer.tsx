@@ -32,7 +32,17 @@ export function WaveformVisualizer({ state, level }: WaveformVisualizerProps) {
   useEffect(() => {
     let raf = 0;
 
+    const cancel = () => {
+      cancelAnimationFrame(raf);
+      raf = 0;
+    };
+
     const tick = (now: number) => {
+      if (document.hidden) {
+        raf = 0;
+        return;
+      }
+
       const prevTime = timeRef.current;
       timeRef.current = now;
       const dt = prevTime > 0 ? Math.min((now - prevTime) / 16, 2) : 1;
@@ -65,8 +75,28 @@ export function WaveformVisualizer({ state, level }: WaveformVisualizerProps) {
       raf = requestAnimationFrame(tick);
     };
 
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
+    const startLoop = () => {
+      cancel();
+      if (!document.hidden) {
+        raf = requestAnimationFrame(tick);
+      }
+    };
+
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        cancel();
+      } else {
+        startLoop();
+      }
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    startLoop();
+
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      cancel();
+    };
   }, [isProcessing]);
 
   return (
