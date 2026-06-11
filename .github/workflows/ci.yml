@@ -122,9 +122,12 @@ jobs:
         run: |
           choco install vulkan-sdk -y --no-progress
           $sdk = (Get-ChildItem "C:\VulkanSDK" -Directory | Sort-Object Name -Descending | Select-Object -First 1).FullName
+          $bin = Join-Path $sdk "Bin"
           "VULKAN_SDK=$sdk" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "$sdk\Bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
-          glslc --version
+          "$bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          $env:VULKAN_SDK = $sdk
+          $env:PATH = "$bin;$env:PATH"
+          & (Join-Path $bin "glslc.exe") --version
 
       - name: Prepare LLM sidecar (Windows)
         if: matrix.platform == 'windows-latest'
