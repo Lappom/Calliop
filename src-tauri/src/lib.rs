@@ -1604,6 +1604,7 @@ fn show_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
         let _ = window.unminimize();
+        let _ = window.maximize();
         let _ = window.set_focus();
     }
 }
@@ -1876,6 +1877,10 @@ pub fn run() {
                         }
                     }
                 });
+
+                if !should_start_minimized() {
+                    let _ = main.maximize();
+                }
             }
 
             if should_start_minimized() {
