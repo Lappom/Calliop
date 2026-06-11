@@ -88,12 +88,7 @@ impl WhisperEngine {
             .map_err(|e| SttError::CreateState(e.to_string()))?;
 
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-        configure_full_params(
-            &mut params,
-            self.language,
-            self.n_threads(),
-            initial_prompt,
-        );
+        configure_full_params(&mut params, self.language, self.n_threads(), initial_prompt);
         state
             .full(params, audio)
             .map_err(|e| SttError::Transcribe(e.to_string()))?;

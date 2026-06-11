@@ -232,7 +232,10 @@ impl PipelineOrchestrator {
         *self.session_stt_language.read()
     }
 
-    pub fn cycle_session_language(&mut self, app: &AppHandle) -> Result<SttLanguage, PipelineError> {
+    pub fn cycle_session_language(
+        &mut self,
+        app: &AppHandle,
+    ) -> Result<SttLanguage, PipelineError> {
         if self.state != PipelineState::Recording {
             return Err(PipelineError::Busy(self.state));
         }

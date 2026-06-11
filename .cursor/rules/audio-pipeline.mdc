@@ -35,7 +35,7 @@ Hotkey OFF / release (toggle or PTT)
 | stt | `stt/` | Local transcription (whisper.cpp / whisper-rs) |
 | llm | `llm/` | Post-processing auto-edits via `calliop-llm-worker` sidecar (llama.cpp) |
 | inject | `inject/` | Paste/type into foreground app (enigo + clipboard fallback) |
-| store | `store/` | SQLite: config (`auto_edit`, `auto_learn`), dictionary, snippets, `app_context_rules`, history |
+| store | `store/` | SQLite: config (`auto_edit`, `auto_learn`, `stt_language`), dictionary, snippets, `app_context_rules`, history |
 | observe | `observe/` | Post-injection UIA watcher: detect user corrections in target app (Windows) |
 | app_context | `app_context/` | Foreground window detection (Win32), tone profile resolution per app |
 | pipeline | `pipeline/` | Orchestration, state machine, IPC bridge to frontend |
@@ -52,8 +52,8 @@ Hotkey OFF / release (toggle or PTT)
 
 - Frontend (React) handles overlay, settings, onboarding — no heavy ML in the webview.
 - Rust core exposes commands for start/stop dictation, settings read/write, history queries.
-- Commands: `get_settings`, `set_settings`, `ensure_llm_model`, `list_dictionary_words`, `add_dictionary_word`, `remove_dictionary_word`, `learn_from_correction`, `list_snippets`, `add_snippet`, `remove_snippet`, `import_snippets`, `export_snippets`, `get_active_window`, `list_app_context_rules`, `add_app_context_rule`, `remove_app_context_rule`
-- Events: `pipeline-state`, `partial-transcript`, `audio-level`, `latency-metrics`, `llm-model-download-progress`, `llm-ready`, `dictionary-updated`, `snippets-updated`, `app-context-updated`
+- Commands: `get_settings`, `set_settings`, `get_stt_language`, `cycle_dictation_language`, `ensure_llm_model`, `list_dictionary_words`, `add_dictionary_word`, `remove_dictionary_word`, `learn_from_correction`, `list_snippets`, `add_snippet`, `remove_snippet`, `import_snippets`, `export_snippets`, `get_active_window`, `list_app_context_rules`, `add_app_context_rule`, `remove_app_context_rule`
+- Events: `pipeline-state`, `partial-transcript`, `audio-level`, `latency-metrics`, `stt-language-changed`, `llm-model-download-progress`, `llm-ready`, `dictionary-updated`, `snippets-updated`, `app-context-updated`
 - Dictionary words and snippet triggers are cached as a Whisper `initial_prompt` string (`Arc<RwLock<Option<String>>>` in pipeline); refreshed on CRUD and on startup.
 - Snippet triggers are expanded deterministically in `pipeline/snippets.rs` after LLM cleanup (or on raw transcript in verbatim mode), before injection.
 - `auto_learn` (default on): after inject, `observe/` polls the focused control via UIA for ~60s; stabilized corrections call `apply_learned_correction` (same path as in-app `learn_from_correction`).
@@ -71,3 +71,4 @@ Hotkey OFF / release (toggle or PTT)
 - Audio capture runs on a dedicated thread (`cpal` streams are !Send)
 - Phase 3a: LLM auto-edits via sidecar, SQLite `auto_edit` toggle
 - Phase 3d: per-app tone profiles (`casual` / `formal` / `technical`) via `app_context_rules` + Win32 foreground detection; tone passed to LLM sidecar only when `auto_edit` is on
+- Phase 3e: STT language `fr` / `en` / `auto` in SQLite (`stt_language`); Whisper `set_detect_language` for auto; session override per dictation; overlay badge cycles language mid-recording via `cycle_dictation_language`

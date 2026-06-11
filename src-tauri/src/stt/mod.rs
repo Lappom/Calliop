@@ -9,9 +9,7 @@ pub use engine::{
     TranscriptResult, WhisperEngine, DEFAULT_LANGUAGE, MAX_INITIAL_PROMPT_WORDS,
     MAX_SNIPPET_PROMPT_WORDS,
 };
-pub use language::{
-    SttLanguage, DEFAULT_STT_LANGUAGE, STT_LANG_AUTO, SUPPORTED_STT_LANGUAGES,
-};
+pub use language::{SttLanguage, DEFAULT_STT_LANGUAGE, STT_LANG_AUTO, SUPPORTED_STT_LANGUAGES};
 pub use model::{
     ensure_model_blocking, is_valid_model_file, model_download_urls, model_exists, model_path,
     models_dir, ModelDownloadProgress, ModelError, DEFAULT_MODEL_FILE, EXPECTED_MODEL_MIN_BYTES,

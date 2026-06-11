@@ -340,10 +340,7 @@ fn get_stt_language(state: State<'_, AppState>) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn cycle_dictation_language(
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<String, String> {
+fn cycle_dictation_language(app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
     let language = state
         .pipeline
         .lock()
@@ -374,10 +371,7 @@ async fn set_settings(
     };
 
     state.pipeline.lock().set_auto_learn(settings.auto_learn);
-    state
-        .pipeline
-        .lock()
-        .set_default_stt_language(stt_language);
+    state.pipeline.lock().set_default_stt_language(stt_language);
 
     if settings.auto_edit {
         state.pipeline.lock().set_auto_edit(true);
