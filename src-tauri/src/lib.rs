@@ -386,13 +386,24 @@ fn remove_dictionary_word(
     state: State<'_, AppState>,
     id: i64,
 ) -> Result<(), String> {
-    let removed = state.store.remove_word(id).map_err(|e| e.to_string())?;
+    let entry = state
+        .store
+        .get_word_by_id(id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("Mot introuvable (id {id})."))?;
 
+    let removed = state.store.remove_word(id).map_err(|e| e.to_string())?;
     if !removed {
         return Err(format!("Mot introuvable (id {id})."));
     }
 
-    refresh_dictionary_prompt_state(&state)?;
+    if let Err(err) = refresh_dictionary_prompt_state(&state) {
+        let _ = state
+            .store
+            .add_word(&entry.word, entry.source);
+        return Err(err);
+    }
+
     emit_dictionary_updated(&app);
     Ok(())
 }

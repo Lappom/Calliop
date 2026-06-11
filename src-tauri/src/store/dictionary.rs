@@ -80,6 +80,31 @@ impl Store {
         Ok(changed > 0)
     }
 
+    pub fn get_word_by_id(&self, id: i64) -> Result<Option<DictionaryWord>, StoreError> {
+        let conn = self.connection().lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT id, word, source, created_at
+             FROM dictionary
+             WHERE id = ?1",
+        )?;
+
+        let mut rows = stmt.query(params![id])?;
+        if let Some(row) = rows.next()? {
+            let source_raw: String = row.get(2)?;
+            let source = DictionarySource::parse(&source_raw).ok_or_else(|| {
+                rusqlite::Error::InvalidColumnType(2, "source".into(), rusqlite::types::Type::Text)
+            })?;
+            return Ok(Some(DictionaryWord {
+                id: row.get(0)?,
+                word: row.get(1)?,
+                source,
+                created_at: row.get(3)?,
+            }));
+        }
+
+        Ok(None)
+    }
+
     pub fn remove_word(&self, id: i64) -> Result<bool, StoreError> {
         let conn = self.connection().lock().expect("store mutex poisoned");
         let changed = conn.execute("DELETE FROM dictionary WHERE id = ?1", params![id])?;
@@ -124,10 +149,65 @@ enum WordEditOp {
     Equal,
     Insert(String),
     Delete,
-    Substitute,
+    Substitute { from: String, to: String },
 }
 
-fn word_edit_ops(original_keys: &[String], corrected: &[(String, String)]) -> Vec<WordEditOp> {
+fn levenshtein_distance(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    if a.is_empty() {
+        return b.len();
+    }
+    if b.is_empty() {
+        return a.len();
+    }
+
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    let mut curr = vec![0; b.len() + 1];
+
+    for (i, ca) in a.iter().enumerate() {
+        curr[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            let cost = usize::from(ca != cb);
+            curr[j + 1] = (prev[j + 1] + 1)
+                .min(curr[j] + 1)
+                .min(prev[j] + cost);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+
+    prev[b.len()]
+}
+
+fn should_learn_substitution(original: &str, corrected: &str) -> bool {
+    if !is_valid_dictionary_word(corrected) {
+        return false;
+    }
+
+    let original_lower = original.to_lowercase();
+    let corrected_lower = corrected.to_lowercase();
+    if original_lower == corrected_lower {
+        return false;
+    }
+
+    let distance = levenshtein_distance(&original_lower, &corrected_lower);
+    if distance == 0 || distance > 3 {
+        return false;
+    }
+
+    // Skip short function-word swaps (articles, prepositions, etc.).
+    if original.chars().count() < 4 && corrected.chars().count() < 4 {
+        return false;
+    }
+
+    true
+}
+
+fn word_edit_ops(
+    original: &[(String, String)],
+    corrected: &[(String, String)],
+) -> Vec<WordEditOp> {
+    let original_keys: Vec<String> = original.iter().map(|(key, _)| key.clone()).collect();
     let n = original_keys.len();
     let m = corrected.len();
     let mut dp = vec![vec![0u32; m + 1]; n + 1];
@@ -160,7 +240,10 @@ fn word_edit_ops(original_keys: &[String], corrected: &[(String, String)]) -> Ve
             i -= 1;
             j -= 1;
         } else if i > 0 && j > 0 && dp[i][j] == dp[i - 1][j - 1] + 1 {
-            ops.push(WordEditOp::Substitute);
+            ops.push(WordEditOp::Substitute {
+                from: original[i - 1].1.clone(),
+                to: corrected[j - 1].1.clone(),
+            });
             i -= 1;
             j -= 1;
         } else if i > 0 && dp[i][j] == dp[i - 1][j] + 1 {
@@ -176,7 +259,7 @@ fn word_edit_ops(original_keys: &[String], corrected: &[(String, String)]) -> Ve
     ops
 }
 
-/// Returns words newly inserted in `corrected` relative to `original`.
+/// Returns vocabulary candidates newly introduced in `corrected` relative to `original`.
 pub fn extract_correction_words(original: &str, corrected: &str) -> Vec<String> {
     if original.trim() == corrected.trim() {
         return Vec::new();
@@ -184,14 +267,21 @@ pub fn extract_correction_words(original: &str, corrected: &str) -> Vec<String> 
 
     let original_tokens = tokenize_words(original);
     let corrected_tokens = tokenize_words(corrected);
-    let original_keys: Vec<String> = original_tokens.into_iter().map(|(key, _)| key).collect();
-    let ops = word_edit_ops(&original_keys, &corrected_tokens);
+    let ops = word_edit_ops(&original_tokens, &corrected_tokens);
 
     let mut seen = HashSet::new();
     let mut result = Vec::new();
 
     for op in ops {
-        if let WordEditOp::Insert(word) = op {
+        let candidate = match op {
+            WordEditOp::Insert(word) => Some(word),
+            WordEditOp::Substitute { from, to } if should_learn_substitution(&from, &to) => {
+                Some(to)
+            }
+            _ => None,
+        };
+
+        if let Some(word) = candidate {
             let key = word.to_lowercase();
             if is_valid_dictionary_word(&word) && seen.insert(key) {
                 result.push(word);
@@ -279,8 +369,14 @@ mod tests {
     }
 
     #[test]
-    fn extract_correction_words_ignores_substitutions() {
+    fn extract_correction_words_ignores_short_substitutions() {
         let words = extract_correction_words("le chat est ici", "la chat est ici");
         assert!(words.is_empty());
+    }
+
+    #[test]
+    fn extract_correction_words_learns_typo_substitutions() {
+        let words = extract_correction_words("bonjour Calliop", "bonjour Calliope");
+        assert_eq!(words, vec!["Calliope".to_string()]);
     }
 }

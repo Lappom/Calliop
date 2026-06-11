@@ -228,8 +228,6 @@ impl PipelineOrchestrator {
         self.audio
             .start_with_streaming(Some(chunk_tx), Some(level_tx))?;
 
-        self.observer_generation.fetch_add(1, Ordering::SeqCst);
-
         let stop_flag = Arc::new(AtomicBool::new(false));
         let worker_stop = Arc::clone(&stop_flag);
         let whisper = Arc::clone(&self.whisper);
