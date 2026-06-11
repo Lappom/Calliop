@@ -129,6 +129,18 @@ jobs:
           $env:PATH = "$bin;$env:PATH"
           & (Join-Path $bin "glslc.exe") --version
 
+      - name: Setup MSVC
+        if: matrix.platform == 'windows-latest'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Configure Windows GPU build paths
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          $ct = Join-Path $env:GITHUB_WORKSPACE "src-tauri/ct"
+          "CARGO_TARGET_DIR=$ct" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "CMAKE_OBJECT_PATH_MAX=1024" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       - name: Prepare LLM sidecar (Windows)
         if: matrix.platform == 'windows-latest'
         shell: pwsh

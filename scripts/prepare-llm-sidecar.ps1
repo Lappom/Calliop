@@ -35,6 +35,9 @@ $buildGpu = ($env:CALLIOP_BUILD_GPU -eq "1") -or ($env:VULKAN_SDK -and (Test-Pat
 
 if ($buildGpu) {
     Add-NinjaToPath
+    if (-not $env:CARGO_TARGET_DIR) {
+        $env:CARGO_TARGET_DIR = Join-Path $srcTauri "ct"
+    }
     $null = & (Join-Path $PSScriptRoot "ensure-vulkan-sdk.ps1") -InstallIfMissing
     # Cargo sets NUM_JOBS for build scripts; cmake-rs forwards it as `cmake --build --parallel N`,
     # which races MSBuild on vulkan-shaders-gen ExternalProject steps.
