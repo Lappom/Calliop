@@ -191,10 +191,7 @@ fn looks_like_list_line(line: &str) -> bool {
     let trimmed = line.trim_start();
     trimmed.starts_with("- ")
         || trimmed.starts_with("* ")
-        || trimmed
-            .chars()
-            .next()
-            .is_some_and(|ch| ch.is_ascii_digit())
+        || trimmed.chars().next().is_some_and(|ch| ch.is_ascii_digit())
 }
 
 pub fn validate_cleanup_output(raw: &str, cleaned: &str) -> Result<String, PromptError> {
@@ -218,7 +215,10 @@ pub fn validate_cleanup_output(raw: &str, cleaned: &str) -> Result<String, Promp
 
 fn prefer_list_structure_over_comma_flattening(raw: &str, cleaned: &str) -> String {
     if raw.contains('\n') && !cleaned.contains('\n') {
-        let list_lines = raw.lines().filter(|line| looks_like_list_line(line)).count();
+        let list_lines = raw
+            .lines()
+            .filter(|line| looks_like_list_line(line))
+            .count();
         if list_lines >= 2 {
             return raw.to_string();
         }
@@ -556,29 +556,164 @@ pub fn format_spoken_lists(text: &str) -> String {
 }
 
 const COMMA_LIST_IMPERATIVE_STARTERS: &[&str] = &[
-    "ajouter", "ajoute", "ajoutez", "mettre", "mets", "mettez", "supprimer", "supprime",
-    "supprimez", "créer", "creer", "crée", "cree", "créez", "creez", "modifier", "modifie",
-    "modifiez", "changer", "change", "changez", "clignoter", "clignote", "clignotez",
-    "afficher", "affiche", "affichez", "masquer", "cache", "cacher", "cachez", "ouvrir",
-    "ouvre", "ouvrez", "fermer", "ferme", "fermez", "déplacer", "deplacer", "déplace",
-    "deplace", "déplacez", "deplacez", "activer", "active", "activez", "désactiver",
-    "desactiver", "désactive", "desactive", "désactivez", "desactivez", "augmenter",
-    "augmente", "augmentez", "réduire", "reduire", "réduis", "reduis", "réduisez",
-    "reduisez", "centrer", "centre", "centrez", "aligner", "aligne", "alignez",
-    "colorier", "colorie", "coloriez", "passer", "passe", "passez", "retirer", "retire",
-    "retirez", "enlever", "enlève", "enleve", "enlevez", "inclure", "inclus", "incluez",
-    "exclure", "exclus", "excluez", "remplacer", "remplace", "remplacez", "implémenter",
-    "implementer", "implémente", "implemente", "corriger", "corrige", "corrigez",
-    "utiliser", "utilise", "utilisez", "rendre", "rend", "permettre", "permet",
-    "faciliter", "facilite", "add", "remove", "set", "show", "hide", "make", "enable",
-    "disable", "update", "fix", "move", "open", "close", "toggle", "implement",
+    "ajouter",
+    "ajoute",
+    "ajoutez",
+    "mettre",
+    "mets",
+    "mettez",
+    "supprimer",
+    "supprime",
+    "supprimez",
+    "créer",
+    "creer",
+    "crée",
+    "cree",
+    "créez",
+    "creez",
+    "modifier",
+    "modifie",
+    "modifiez",
+    "changer",
+    "change",
+    "changez",
+    "clignoter",
+    "clignote",
+    "clignotez",
+    "afficher",
+    "affiche",
+    "affichez",
+    "masquer",
+    "cache",
+    "cacher",
+    "cachez",
+    "ouvrir",
+    "ouvre",
+    "ouvrez",
+    "fermer",
+    "ferme",
+    "fermez",
+    "déplacer",
+    "deplacer",
+    "déplace",
+    "deplace",
+    "déplacez",
+    "deplacez",
+    "activer",
+    "active",
+    "activez",
+    "désactiver",
+    "desactiver",
+    "désactive",
+    "desactive",
+    "désactivez",
+    "desactivez",
+    "augmenter",
+    "augmente",
+    "augmentez",
+    "réduire",
+    "reduire",
+    "réduis",
+    "reduis",
+    "réduisez",
+    "reduisez",
+    "centrer",
+    "centre",
+    "centrez",
+    "aligner",
+    "aligne",
+    "alignez",
+    "colorier",
+    "colorie",
+    "coloriez",
+    "passer",
+    "passe",
+    "passez",
+    "retirer",
+    "retire",
+    "retirez",
+    "enlever",
+    "enlève",
+    "enleve",
+    "enlevez",
+    "inclure",
+    "inclus",
+    "incluez",
+    "exclure",
+    "exclus",
+    "excluez",
+    "remplacer",
+    "remplace",
+    "remplacez",
+    "implémenter",
+    "implementer",
+    "implémente",
+    "implemente",
+    "corriger",
+    "corrige",
+    "corrigez",
+    "utiliser",
+    "utilise",
+    "utilisez",
+    "rendre",
+    "rend",
+    "permettre",
+    "permet",
+    "faciliter",
+    "facilite",
+    "add",
+    "remove",
+    "set",
+    "show",
+    "hide",
+    "make",
+    "enable",
+    "disable",
+    "update",
+    "fix",
+    "move",
+    "open",
+    "close",
+    "toggle",
+    "implement",
 ];
 
 const COMMA_LIST_PROSE_STARTERS: &[&str] = &[
-    "je", "tu", "il", "elle", "on", "nous", "vous", "ils", "elles", "ce", "c'", "c'est",
-    "bonjour", "salut", "merci", "comment", "pourquoi", "est-ce", "peut-être", "peut",
-    "puis", "ensuite", "car", "parce", "mais", "donc", "or", "ni", "when", "if", "the",
-    "and", "but", "so", "because",
+    "je",
+    "tu",
+    "il",
+    "elle",
+    "on",
+    "nous",
+    "vous",
+    "ils",
+    "elles",
+    "ce",
+    "c'",
+    "c'est",
+    "bonjour",
+    "salut",
+    "merci",
+    "comment",
+    "pourquoi",
+    "est-ce",
+    "peut-être",
+    "peut",
+    "puis",
+    "ensuite",
+    "car",
+    "parce",
+    "mais",
+    "donc",
+    "or",
+    "ni",
+    "when",
+    "if",
+    "the",
+    "and",
+    "but",
+    "so",
+    "because",
 ];
 
 fn try_format_comma_separated_list(text: &str) -> Option<String> {
@@ -597,13 +732,7 @@ fn try_format_comma_separated_list(text: &str) -> Option<String> {
     let numbered_items: Vec<String> = segments
         .iter()
         .enumerate()
-        .map(|(index, segment)| {
-            format!(
-                "{}. {}",
-                index + 1,
-                capitalize_first_char(segment)
-            )
-        })
+        .map(|(index, segment)| format!("{}. {}", index + 1, capitalize_first_char(segment)))
         .collect();
     Some(numbered_items.join("\n"))
 }
@@ -620,14 +749,14 @@ fn split_comma_list_segments(text: &str) -> Vec<String> {
 fn trim_list_segment(segment: &str) -> String {
     segment
         .trim()
-        .trim_end_matches(|ch: char| matches!(ch, '.' | '!' | '?'))
+        .trim_end_matches(['.', '!', '?'])
         .trim()
         .to_string()
 }
 
 fn comma_list_first_word(segment: &str) -> Option<String> {
     segment.split_whitespace().next().map(|word| {
-        word.trim_end_matches(|ch: char| matches!(ch, '.' | '!' | '?' | ',' | ';' | ':'))
+        word.trim_end_matches(['.', '!', '?', ',', ';', ':'])
             .to_ascii_lowercase()
     })
 }
@@ -664,27 +793,70 @@ fn comma_separated_segments_are_list(segments: &[String]) -> bool {
         })
 }
 
-const IMPLICIT_LIST_INTRO_PHRASES: &[&str] = &[
-    " pour ",
-    " avec ",
-    " comprenant ",
-    " incluant ",
-    " : ",
-];
+const IMPLICIT_LIST_INTRO_PHRASES: &[&str] =
+    &[" pour ", " avec ", " comprenant ", " incluant ", " : "];
 
 const IMPLICIT_LIST_ITEM_BLOCKWORDS: &[&str] = &[
-    "et", "ou", "mais", "donc", "puis", "aussi", "encore", "très", "tres",
-    "demain", "aujourd'hui", "aujourdhui", "hier", "maintenant", "toujours", "jamais",
-    "bien", "mal", "vite", "peu", "plus", "moins", "comme", "chez", "dans", "sur",
-    "sous", "sans", "pour", "avec", "the", "and", "or", "de", "du", "des", "le",
-    "la", "les", "un", "une", "ce", "cette", "mon", "ton", "son", "mes", "tes",
-    "ses", "notre", "votre", "leur", "very", "really",
+    "et",
+    "ou",
+    "mais",
+    "donc",
+    "puis",
+    "aussi",
+    "encore",
+    "très",
+    "tres",
+    "demain",
+    "aujourd'hui",
+    "aujourdhui",
+    "hier",
+    "maintenant",
+    "toujours",
+    "jamais",
+    "bien",
+    "mal",
+    "vite",
+    "peu",
+    "plus",
+    "moins",
+    "comme",
+    "chez",
+    "dans",
+    "sur",
+    "sous",
+    "sans",
+    "pour",
+    "avec",
+    "the",
+    "and",
+    "or",
+    "de",
+    "du",
+    "des",
+    "le",
+    "la",
+    "les",
+    "un",
+    "une",
+    "ce",
+    "cette",
+    "mon",
+    "ton",
+    "son",
+    "mes",
+    "tes",
+    "ses",
+    "notre",
+    "votre",
+    "leur",
+    "very",
+    "really",
 ];
 
 const IMPLICIT_LIST_VERB_BLOCKWORDS: &[&str] = &[
-    "acheter", "aller", "venir", "faire", "être", "etre", "avoir", "courir", "marcher",
-    "parler", "dire", "voir", "prendre", "mettre", "passer", "devoir", "pouvoir",
-    "vouloir", "savoir", "falloir", "donner", "trouver", "demander", "rester",
+    "acheter", "aller", "venir", "faire", "être", "etre", "avoir", "courir", "marcher", "parler",
+    "dire", "voir", "prendre", "mettre", "passer", "devoir", "pouvoir", "vouloir", "savoir",
+    "falloir", "donner", "trouver", "demander", "rester",
 ];
 
 fn try_format_implicit_noun_list(text: &str) -> Option<String> {
@@ -714,7 +886,11 @@ fn try_format_implicit_noun_list(text: &str) -> Option<String> {
         .enumerate()
         .map(|(index, item)| format!("{}. {}", index + 1, capitalize_first_char(item)))
         .collect();
-    Some(format_list_output(intro, &numbered_items, ListStyle::Numbered))
+    Some(format_list_output(
+        intro,
+        &numbered_items,
+        ListStyle::Numbered,
+    ))
 }
 
 fn split_implicit_list_items(remainder: &str) -> Option<Vec<String>> {
@@ -754,7 +930,9 @@ fn implicit_list_items_are_valid(items: &[String]) -> bool {
             if IMPLICIT_LIST_VERB_BLOCKWORDS.contains(&lower.as_str()) {
                 return false;
             }
-            !word.chars().any(|ch| matches!(ch, '.' | '!' | '?' | ',' | ';' | ':'))
+            !word
+                .chars()
+                .any(|ch| matches!(ch, '.' | '!' | '?' | ',' | ';' | ':'))
         })
     })
 }
@@ -2265,7 +2443,8 @@ mod tests {
 
     #[test]
     fn formats_comma_separated_feature_list() {
-        let out = format_spoken_lists("ajouter un bouton, mettre un fond blanc, clignoter la page.");
+        let out =
+            format_spoken_lists("ajouter un bouton, mettre un fond blanc, clignoter la page.");
         assert!(out.contains("1. Ajouter un bouton"));
         assert!(out.contains("2. Mettre un fond blanc"));
         assert!(out.contains("3. Clignoter la page"));
@@ -2342,8 +2521,8 @@ mod tests {
 
     #[test]
     fn cleanup_user_message_hints_implicit_enumeration() {
-        let msg = build_cleanup_user_message("aller au magasin pour pommes bananes oranges")
-            .unwrap();
+        let msg =
+            build_cleanup_user_message("aller au magasin pour pommes bananes oranges").unwrap();
         assert!(msg.contains("liste numérotée"));
     }
 }

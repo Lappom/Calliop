@@ -212,6 +212,7 @@ impl FrozenLlmCoordinator {
         self.cleaned_prefix = None;
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn maybe_start_background(
         &mut self,
         segments: &[SegmentTranscript],
@@ -261,9 +262,7 @@ impl FrozenLlmCoordinator {
     }
 
     fn take_completed_prefix(&mut self, timeout: std::time::Duration) -> Option<FrozenLlmSnapshot> {
-        let Some(job) = self.job.take() else {
-            return None;
-        };
+        let job = self.job.take()?;
         let frozen_up_to_index = self.frozen_up_to_index?;
         let LlmCleanupWait::Completed {
             text, llm_status, ..

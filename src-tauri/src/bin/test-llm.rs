@@ -13,7 +13,9 @@ use calliop_lib::system::{resolve_llm_model, SystemCapabilities};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
-        eprintln!("Usage: test-llm [--raw] [--model qwen3-0.6b|qwen3-1.7b|qwen3-4b] \"text to clean\"");
+        eprintln!(
+            "Usage: test-llm [--raw] [--model qwen3-0.6b|qwen3-1.7b|qwen3-4b] \"text to clean\""
+        );
         eprintln!("  --raw  skip deterministic post_process (LLM-only, not production path)");
         eprintln!("After calliop-prompt changes, rebuild test-llm (validation runs in-process).");
         eprintln!("Rebuild the sidecar only when worker/LLM prompt logic changes:");

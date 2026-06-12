@@ -52,20 +52,37 @@ impl TrackedModifiers {
     }
 
     pub fn labels(&self) -> Vec<&'static str> {
-        let mut parts = Vec::new();
-        if self.ctrl.load(Ordering::SeqCst) || modifier_pressed(VK_CONTROL) {
+        let mut parts = self.labels_tracked();
+        if !parts.contains(&"Ctrl") && modifier_pressed(VK_CONTROL) {
             parts.push("Ctrl");
         }
-        if self.alt.load(Ordering::SeqCst) || modifier_pressed(VK_MENU) {
+        if !parts.contains(&"Alt") && modifier_pressed(VK_MENU) {
             parts.push("Alt");
         }
-        if self.shift.load(Ordering::SeqCst) || modifier_pressed(VK_SHIFT) {
+        if !parts.contains(&"Shift") && modifier_pressed(VK_SHIFT) {
             parts.push("Shift");
         }
-        if self.super_key.load(Ordering::SeqCst)
-            || modifier_pressed(VK_LWIN)
-            || modifier_pressed(VK_RWIN)
+        if !parts.contains(&"Super")
+            && (modifier_pressed(VK_LWIN) || modifier_pressed(VK_RWIN))
         {
+            parts.push("Super");
+        }
+        parts
+    }
+
+    /// Hook-tracked modifiers only (ignores live keyboard state).
+    pub fn labels_tracked(&self) -> Vec<&'static str> {
+        let mut parts = Vec::new();
+        if self.ctrl.load(Ordering::SeqCst) {
+            parts.push("Ctrl");
+        }
+        if self.alt.load(Ordering::SeqCst) {
+            parts.push("Alt");
+        }
+        if self.shift.load(Ordering::SeqCst) {
+            parts.push("Shift");
+        }
+        if self.super_key.load(Ordering::SeqCst) {
             parts.push("Super");
         }
         parts

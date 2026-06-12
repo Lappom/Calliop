@@ -101,8 +101,9 @@ function parseWhisperModel(value: string): WhisperModelId {
 }
 
 function parseLlmModel(value: string): LlmModelId {
-  return LLM_MODEL_IDS.includes(value as LlmModelId)
-    ? (value as LlmModelId)
+  const normalized = value.trim().toLowerCase().replace(/_/g, "-");
+  return LLM_MODEL_IDS.includes(normalized as LlmModelId)
+    ? (normalized as LlmModelId)
     : "auto";
 }
 
@@ -371,7 +372,14 @@ export function useSettings() {
 
         await invoke("set_settings", { settings: toPayload(next) });
 
-        await Promise.all([refreshModelsStatus(), refreshInferenceInfo()]);
+        const [syncedPayload] = await Promise.all([
+          invoke<SettingsPayload>("get_settings"),
+          refreshModelsStatus(),
+          refreshInferenceInfo(),
+        ]);
+        const syncedSettings = fromPayload(syncedPayload);
+        settingsRef.current = syncedSettings;
+        setSettings(syncedSettings);
       } catch (err) {
         settingsRef.current = previousSettings;
         llmReadyRef.current = previousLlmReady;
@@ -422,6 +430,9 @@ export function useSettings() {
 
   const setWhisperModel = useCallback(
     async (whisperModel: WhisperModelId) => {
+      if (settingsRef.current.whisperModel === whisperModel) {
+        return;
+      }
       await saveSettings({ ...settingsRef.current, whisperModel });
     },
     [saveSettings],
@@ -429,6 +440,9 @@ export function useSettings() {
 
   const setLlmModel = useCallback(
     async (llmModel: LlmModelId) => {
+      if (settingsRef.current.llmModel === llmModel) {
+        return;
+      }
       await saveSettings({ ...settingsRef.current, llmModel });
     },
     [saveSettings],

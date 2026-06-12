@@ -379,6 +379,13 @@ fn llm_engine_matches(state: &AppState, expected: llm::LlmModel) -> bool {
     llm_engine_is_live(state) && *state.loaded_llm.lock() == Some(expected)
 }
 
+fn llm_engine_stale(state: &AppState, expected: llm::LlmModel) -> bool {
+    match *state.loaded_llm.lock() {
+        Some(loaded) => loaded != expected,
+        None => llm_engine_is_live(state),
+    }
+}
+
 async fn ensure_whisper_model_file(app: &AppHandle, model: WhisperModel) -> Result<(), String> {
     if !model.is_concrete() {
         return Ok(());
@@ -928,7 +935,9 @@ async fn set_settings(
     let stt_language_changed = prev_stt != next_stt;
     let ui_language_changed = previous.ui_language != parse_ui_language(&settings.ui_language);
     let whisper_changed = previous.whisper_model() != whisper_model;
-    let llm_changed = previous.llm_model() != llm_model;
+    let llm_setting_changed =
+        previous.llm_model.trim().to_lowercase() != llm_model.as_setting_value();
+    let llm_changed = previous.llm_model() != llm_model || llm_setting_changed;
     let inference_changed = previous.inference_backend() != inference_backend;
     let low_power_changed = previous.low_power_mode != settings.low_power_mode;
     let adaptive_changed = previous.adaptive_perf != settings.adaptive_perf;
@@ -1026,14 +1035,18 @@ async fn set_settings(
     let need_llm_file =
         llm_changed || llm_effective_changed || (adaptive_changed && settings.adaptive_perf);
 
+    let llm_engine_out_of_sync = llm_engine_stale(&state, next_effective_llm);
     let llm_reload_needed = llm_changed
         || inference_changed
         || llm_effective_changed
         || low_power_changed
-        || (adaptive_changed && settings.adaptive_perf);
+        || (adaptive_changed && settings.adaptive_perf)
+        || llm_engine_out_of_sync;
     let llm_lazy_load = state.perf_config.lock().llm_lazy_load;
-    let will_load_llm_engine =
-        settings.auto_edit && !llm_lazy_load && (llm_reload_needed || !llm_engine_is_live(&state));
+    let llm_model_preference_changed = llm_changed || llm_effective_changed;
+    let will_load_llm_engine = settings.auto_edit
+        && (!llm_lazy_load || llm_model_preference_changed)
+        && (llm_reload_needed || !llm_engine_is_live(&state));
 
     if need_whisper_file {
         if let Err(err) = ensure_whisper_model_file(&app, next_effective_whisper).await {
@@ -1075,7 +1088,7 @@ async fn set_settings(
         if llm_reload_needed || !llm_engine_is_live(&state) {
             shutdown_llm_engine(&state);
             let _ = app.emit("llm-unready", ());
-            if !state.perf_config.lock().llm_lazy_load {
+            if !llm_lazy_load || llm_model_preference_changed || llm_engine_out_of_sync {
                 if let Err(err) = ensure_llm_model_inner(&app, &state).await {
                     if let Err(rollback_err) =
                         rollback_settings(&app, &state, &previous, rollback_ctx).await

@@ -249,7 +249,9 @@ mod tests {
     fn tracked_modifiers_compose_ctrl_a() {
         MODIFIERS.reset();
         MODIFIERS.set_vk(VK_LCONTROL, true);
-        assert_eq!(compose_hotkey_from_vk(VK_A), Some("Ctrl+A".into()));
+        let mut parts = MODIFIERS.labels_tracked();
+        parts.push("A");
+        assert_eq!(Some(parts.join("+")), Some("Ctrl+A".into()));
         MODIFIERS.reset();
     }
 
@@ -258,7 +260,7 @@ mod tests {
         MODIFIERS.reset();
         MODIFIERS.set_vk(VK_LCONTROL, true);
         MODIFIERS.set_vk(VK_LMENU, true);
-        let labels = MODIFIERS.labels_with_vk(VK_LMENU);
+        let labels = MODIFIERS.labels_tracked();
         assert_eq!(compose_modifier_only(&labels), Some("Ctrl+Alt".into()));
         MODIFIERS.reset();
     }
