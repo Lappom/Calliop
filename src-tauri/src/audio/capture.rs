@@ -571,7 +571,7 @@ pub fn compute_band_levels(samples: &[f32], bands: usize) -> [f32; AUDIO_BAND_CO
 
     let half_width = (n / band_count as f32) * 1.15;
 
-    for band in 0..band_count {
+    for (band, slot) in out.iter_mut().take(band_count).enumerate() {
         let center = (band as f32 + 0.5) / band_count as f32 * n;
         let mut weighted_sum_sq = 0.0f32;
         let mut weight_sum = 0.0f32;
@@ -590,7 +590,7 @@ pub fn compute_band_levels(samples: &[f32], bands: usize) -> [f32; AUDIO_BAND_CO
         } else {
             0.0
         };
-        out[band] = (band_rms / global_rms).min(1.0);
+        *slot = (band_rms / global_rms).min(1.0);
     }
 
     out
