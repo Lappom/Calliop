@@ -89,3 +89,23 @@ export function findModelEntry(
 ): ModelStatusEntry | undefined {
   return entries?.find((item) => item.id === id);
 }
+
+export function listInstalledModels(
+  entries: ModelStatusEntry[] | undefined,
+): ModelStatusEntry[] {
+  return entries?.filter((entry) => entry.installed) ?? [];
+}
+
+export function getModelLabel(
+  kind: "whisper" | "llm",
+  id: string,
+  t: TFunction,
+): string {
+  if (kind === "whisper" && id in WHISPER_LABEL_KEYS) {
+    return t(WHISPER_LABEL_KEYS[id as keyof typeof WHISPER_LABEL_KEYS]);
+  }
+  if (kind === "llm" && id in LLM_LABEL_KEYS) {
+    return t(LLM_LABEL_KEYS[id as keyof typeof LLM_LABEL_KEYS]);
+  }
+  return id;
+}

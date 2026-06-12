@@ -3,12 +3,12 @@ import { useTranslation } from "react-i18next";
 import type { InferenceInfo, ModelsStatus } from "../../hooks/useSettings";
 import { ProgressBar } from "../ui/ProgressBar";
 import { Select } from "../ui/Select";
-import { ModelManageActions } from "./ModelManageActions";
 import {
-  buildLlmSelectOptions,
-  buildWhisperSelectOptions,
-  findModelEntry,
-} from "./modelCatalog";
+  InstalledModelsList,
+  makeModelBusyKey,
+  type ModelBusyKey,
+} from "./InstalledModelsList";
+import { buildLlmSelectOptions, buildWhisperSelectOptions } from "./modelCatalog";
 
 interface ModelsSettingsPanelProps {
   whisperModel: string;
@@ -27,8 +27,6 @@ interface ModelsSettingsPanelProps {
   onDeleteModel: (kind: "whisper" | "llm", modelId: string) => Promise<void>;
   onReinstallModel: (kind: "whisper" | "llm", modelId: string) => Promise<void>;
 }
-
-type ModelBusyKey = "whisper-delete" | "whisper-reinstall" | "llm-delete" | "llm-reinstall";
 
 export function ModelsSettingsPanel({
   whisperModel,
@@ -66,19 +64,6 @@ export function ModelsSettingsPanel({
     [],
   );
 
-  const whisperBusyAction =
-    busyKey === "whisper-delete"
-      ? "delete"
-      : busyKey === "whisper-reinstall"
-        ? "reinstall"
-        : null;
-  const llmBusyAction =
-    busyKey === "llm-delete"
-      ? "delete"
-      : busyKey === "llm-reinstall"
-        ? "reinstall"
-        : null;
-
   return (
     <div className="space-y-6">
       <div className="space-y-3">
@@ -91,21 +76,20 @@ export function ModelsSettingsPanel({
           onChange={onWhisperChange}
         />
 
-        <ModelManageActions
+        <InstalledModelsList
           kind="whisper"
-          modelId={whisperModel}
-          entry={findModelEntry(modelsStatus?.whisper, whisperModel)}
+          entries={modelsStatus?.whisper}
           formatBytes={formatBytes}
           disabled={disabled}
-          busyAction={whisperBusyAction}
-          onDelete={() =>
-            runModelAction("whisper-delete", () =>
-              onDeleteModel("whisper", whisperModel),
+          busyKey={busyKey}
+          onDelete={(modelId) =>
+            runModelAction(makeModelBusyKey("whisper", modelId, "delete"), () =>
+              onDeleteModel("whisper", modelId),
             )
           }
-          onReinstall={() =>
-            runModelAction("whisper-reinstall", () =>
-              onReinstallModel("whisper", whisperModel),
+          onReinstall={(modelId) =>
+            runModelAction(makeModelBusyKey("whisper", modelId, "reinstall"), () =>
+              onReinstallModel("whisper", modelId),
             )
           }
         />
@@ -130,19 +114,20 @@ export function ModelsSettingsPanel({
           onChange={onLlmChange}
         />
 
-        <ModelManageActions
+        <InstalledModelsList
           kind="llm"
-          modelId={llmModel}
-          entry={findModelEntry(modelsStatus?.llm, llmModel)}
+          entries={modelsStatus?.llm}
           formatBytes={formatBytes}
           disabled={disabled}
-          busyAction={llmBusyAction}
-          onDelete={() =>
-            runModelAction("llm-delete", () => onDeleteModel("llm", llmModel))
+          busyKey={busyKey}
+          onDelete={(modelId) =>
+            runModelAction(makeModelBusyKey("llm", modelId, "delete"), () =>
+              onDeleteModel("llm", modelId),
+            )
           }
-          onReinstall={() =>
-            runModelAction("llm-reinstall", () =>
-              onReinstallModel("llm", llmModel),
+          onReinstall={(modelId) =>
+            runModelAction(makeModelBusyKey("llm", modelId, "reinstall"), () =>
+              onReinstallModel("llm", modelId),
             )
           }
         />

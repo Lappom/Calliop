@@ -191,6 +191,7 @@
         "qwen35_4": "Qwen3.5 4B (~2,7 Go)"
       },
       "manage": {
+        "installedTitle": "Modèles installés",
         "diskSize": "{{size}} sur disque",
         "delete": "Supprimer",
         "reinstall": "Réinstaller",
