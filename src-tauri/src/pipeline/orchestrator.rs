@@ -344,7 +344,9 @@ impl FrozenLlmCoordinator {
     fn finish_inflight_job(&mut self, timeout: std::time::Duration) -> Option<FrozenLlmSnapshot> {
         if let Some(job) = self.job.take() {
             let frozen_up_to_index = self.frozen_up_to_index?;
-            let LlmCleanupWait::Completed { text, llm_status, .. } = job.wait_for_inject(timeout);
+            let LlmCleanupWait::Completed {
+                text, llm_status, ..
+            } = job.wait_for_inject(timeout);
             if !matches!(llm_status, LlmStatus::Applied) {
                 return None;
             }
@@ -426,13 +428,7 @@ fn split_sentences(text: &str) -> Vec<String> {
     let mut current = String::new();
     for ch in text.chars() {
         current.push(ch);
-        if matches!(ch, '.' | '!' | '?' | '…') {
-            let trimmed = current.trim().to_string();
-            if !trimmed.is_empty() {
-                sentences.push(trimmed);
-            }
-            current.clear();
-        } else if ch == '\n' {
+        if matches!(ch, '.' | '!' | '?' | '…') || ch == '\n' {
             let trimmed = current.trim().to_string();
             if !trimmed.is_empty() {
                 sentences.push(trimmed);
@@ -459,17 +455,20 @@ fn split_by_char_budget(text: &str) -> Vec<String> {
         let end = (start + max_chars).min(chars.len());
         let mut split_at = end;
         if end < chars.len() {
-            if let Some(rel) = chars[start..end]
-                .iter()
-                .rposition(|ch| ch.is_whitespace())
-            {
+            if let Some(rel) = chars[start..end].iter().rposition(|ch| ch.is_whitespace()) {
                 split_at = start + rel;
             }
         }
         if split_at <= start {
             split_at = end;
         }
-        parts.push(chars[start..split_at].iter().collect::<String>().trim().to_string());
+        parts.push(
+            chars[start..split_at]
+                .iter()
+                .collect::<String>()
+                .trim()
+                .to_string(),
+        );
         start = split_at;
         while start < chars.len() && chars[start].is_whitespace() {
             start += 1;
@@ -544,7 +543,8 @@ fn plan_llm_chunks_from_segments(
         }
 
         if best_end >= start {
-            if let Some(chunk) = build_llm_ready_text(&segments[start..=best_end], rules, snippets) {
+            if let Some(chunk) = build_llm_ready_text(&segments[start..=best_end], rules, snippets)
+            {
                 chunks.push(chunk);
             }
             start = best_end + 1;
@@ -569,6 +569,7 @@ struct LlmCleanupAggregate {
     invalidated: bool,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_llm_cleanup_for_segments(
     llm: Arc<Mutex<Option<LlamaEngine>>>,
     llm_ready: Arc<AtomicBool>,

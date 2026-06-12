@@ -2432,7 +2432,9 @@ mod tests {
 
     #[test]
     fn fits_llm_cleanup_budget_accepts_short_text() {
-        assert!(fits_llm_cleanup_budget("Bonjour, ceci est une phrase courte."));
+        assert!(fits_llm_cleanup_budget(
+            "Bonjour, ceci est une phrase courte."
+        ));
     }
 
     #[test]

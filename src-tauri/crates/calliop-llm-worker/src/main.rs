@@ -27,7 +27,10 @@ use serde::{Deserialize, Serialize};
 const CLEANUP_CONTEXT_TOKENS: u32 = 2048;
 const CLEANUP_MAX_OUTPUT_TOKENS: i32 = 256;
 
-fn resolve_chat_template(model: &LlamaModel, model_path: &Path) -> Result<LlamaChatTemplate, String> {
+fn resolve_chat_template(
+    model: &LlamaModel,
+    model_path: &Path,
+) -> Result<LlamaChatTemplate, String> {
     let force_qwen3_fallback = model_path
         .file_name()
         .and_then(|name| name.to_str())
@@ -138,8 +141,7 @@ impl InferenceEngine {
                 })
             })
             .collect();
-        let messages_json =
-            serde_json::to_string(&payload).map_err(|err| err.to_string())?;
+        let messages_json = serde_json::to_string(&payload).map_err(|err| err.to_string())?;
         let params = OpenAIChatTemplateParams {
             messages_json: &messages_json,
             tools_json: None,
@@ -167,7 +169,8 @@ impl InferenceEngine {
         let chat_messages: Vec<LlamaChatMessage> = messages
             .iter()
             .map(|(role, content)| {
-                LlamaChatMessage::new((*role).into(), (*content).into()).map_err(|err| err.to_string())
+                LlamaChatMessage::new((*role).into(), (*content).into())
+                    .map_err(|err| err.to_string())
             })
             .collect::<Result<_, _>>()?;
 
@@ -228,10 +231,7 @@ impl InferenceEngine {
 
         let user_message = build_cleanup_user_message(raw).map_err(|err| err.to_string())?;
         let system_prompt = self.system_prompt(tone);
-        let messages = [
-            ("system", system_prompt),
-            ("user", user_message.as_str()),
-        ];
+        let messages = [("system", system_prompt), ("user", user_message.as_str())];
 
         let full_tokens = self.tokenize_prompt(&messages)?;
         let system_tokens = self.tokenize_system_prefix(tone)?;
