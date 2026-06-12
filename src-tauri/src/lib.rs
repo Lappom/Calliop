@@ -1896,34 +1896,34 @@ fn sync_tray_menus(app: &AppHandle) {
         let ui_language = current_ui_language(app);
         let _ = handles
             .open_item
-            .set_text(&ui::locale::tr("tray.open", &ui_language));
+            .set_text(ui::locale::tr("tray.open", &ui_language));
         let _ = handles
             .toggle_item
-            .set_text(&ui::locale::tr("tray.toggle", &ui_language));
+            .set_text(ui::locale::tr("tray.toggle", &ui_language));
         let _ = handles
             .settings_item
-            .set_text(&ui::locale::tr("tray.settings", &ui_language));
+            .set_text(ui::locale::tr("tray.settings", &ui_language));
         let _ = handles
             .history_item
-            .set_text(&ui::locale::tr("tray.history", &ui_language));
+            .set_text(ui::locale::tr("tray.history", &ui_language));
         let _ = handles
             .dictionary_item
-            .set_text(&ui::locale::tr("tray.dictionary", &ui_language));
+            .set_text(ui::locale::tr("tray.dictionary", &ui_language));
         let _ = handles
             .snippets_item
-            .set_text(&ui::locale::tr("tray.snippets", &ui_language));
+            .set_text(ui::locale::tr("tray.snippets", &ui_language));
         let _ = handles
             .insight_item
-            .set_text(&ui::locale::tr("tray.insight", &ui_language));
+            .set_text(ui::locale::tr("tray.insight", &ui_language));
         let _ = handles
             .quit_item
-            .set_text(&ui::locale::tr("tray.quit", &ui_language));
+            .set_text(ui::locale::tr("tray.quit", &ui_language));
         let _ = handles
             .auto_edit_item
-            .set_text(&ui::locale::tr("tray.autoEdit", &ui_language));
+            .set_text(ui::locale::tr("tray.autoEdit", &ui_language));
         let _ = handles
             .autostart_item
-            .set_text(&ui::locale::tr("tray.autostart", &ui_language));
+            .set_text(ui::locale::tr("tray.autostart", &ui_language));
 
         let autostart_enabled = app.autolaunch().is_enabled().unwrap_or(false);
         let _ = handles.autostart_item.set_checked(autostart_enabled);
@@ -1942,14 +1942,14 @@ fn build_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let open_item = MenuItem::with_id(
         app,
         MENU_OPEN,
-        &ui::locale::tr("tray.open", &ui_language),
+        ui::locale::tr("tray.open", &ui_language),
         true,
         None::<&str>,
     )?;
     let toggle_item = MenuItem::with_id(
         app,
         MENU_TOGGLE,
-        &ui::locale::tr("tray.toggle", &ui_language),
+        ui::locale::tr("tray.toggle", &ui_language),
         true,
         None::<&str>,
     )?;
@@ -1963,35 +1963,35 @@ fn build_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let settings_item = MenuItem::with_id(
         app,
         MENU_OPEN_SETTINGS,
-        &ui::locale::tr("tray.settings", &ui_language),
+        ui::locale::tr("tray.settings", &ui_language),
         true,
         None::<&str>,
     )?;
     let history_item = MenuItem::with_id(
         app,
         MENU_OPEN_HISTORY,
-        &ui::locale::tr("tray.history", &ui_language),
+        ui::locale::tr("tray.history", &ui_language),
         true,
         None::<&str>,
     )?;
     let dictionary_item = MenuItem::with_id(
         app,
         MENU_OPEN_DICTIONARY,
-        &ui::locale::tr("tray.dictionary", &ui_language),
+        ui::locale::tr("tray.dictionary", &ui_language),
         true,
         None::<&str>,
     )?;
     let snippets_item = MenuItem::with_id(
         app,
         MENU_OPEN_SNIPPETS,
-        &ui::locale::tr("tray.snippets", &ui_language),
+        ui::locale::tr("tray.snippets", &ui_language),
         true,
         None::<&str>,
     )?;
     let insight_item = MenuItem::with_id(
         app,
         MENU_OPEN_INSIGHT,
-        &ui::locale::tr("tray.insight", &ui_language),
+        ui::locale::tr("tray.insight", &ui_language),
         true,
         None::<&str>,
     )?;
@@ -2002,7 +2002,7 @@ fn build_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let auto_edit_item = CheckMenuItem::with_id(
         app,
         MENU_AUTO_EDIT,
-        &ui::locale::tr("tray.autoEdit", &ui_language),
+        ui::locale::tr("tray.autoEdit", &ui_language),
         true,
         auto_edit_checked,
         None::<&str>,
@@ -2011,7 +2011,7 @@ fn build_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let autostart_item = CheckMenuItem::with_id(
         app,
         MENU_AUTOSTART,
-        &ui::locale::tr("tray.autostart", &ui_language),
+        ui::locale::tr("tray.autostart", &ui_language),
         true,
         autostart_checked,
         None::<&str>,
@@ -2019,7 +2019,7 @@ fn build_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let quit_item = MenuItem::with_id(
         app,
         MENU_QUIT,
-        &ui::locale::tr("tray.quit", &ui_language),
+        ui::locale::tr("tray.quit", &ui_language),
         true,
         None::<&str>,
     )?;
