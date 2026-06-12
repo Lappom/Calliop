@@ -296,6 +296,7 @@ fn tokenize_words(text: &str) -> Vec<(String, String)> {
 
 enum WordEditOp {
     Equal,
+    #[allow(dead_code)]
     Insert(String),
     Delete,
     Substitute { from: String, to: String },
@@ -419,7 +420,8 @@ pub fn extract_correction_words(original: &str, corrected: &str) -> Vec<String> 
 
     for op in ops {
         let candidate = match op {
-            WordEditOp::Insert(word) => Some(word),
+            // Only learn word substitutions (typo fixes). Plain insertions are ignored
+            // because trailing user typing after dictation would otherwise pollute the dictionary.
             WordEditOp::Substitute { from, to } if should_learn_substitution(&from, &to) => {
                 Some(to)
             }
@@ -552,12 +554,12 @@ mod tests {
     }
 
     #[test]
-    fn extract_correction_words_detects_new_tokens() {
+    fn extract_correction_words_ignores_appended_tokens() {
         let words = extract_correction_words(
             "bonjour ceci est un test",
             "bonjour ceci est un test Calliop",
         );
-        assert_eq!(words, vec!["Calliop".to_string()]);
+        assert!(words.is_empty());
     }
 
     #[test]
@@ -567,9 +569,9 @@ mod tests {
     }
 
     #[test]
-    fn extract_correction_words_is_case_insensitive() {
-        let words = extract_correction_words("bonjour", "Bonjour Calliop");
-        assert_eq!(words, vec!["Calliop".to_string()]);
+    fn extract_correction_words_ignores_case_only_changes() {
+        let words = extract_correction_words("bonjour", "Bonjour");
+        assert!(words.is_empty());
     }
 
     #[test]
