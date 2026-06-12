@@ -47,7 +47,7 @@ jobs:
         if: matrix.platform == 'windows-latest' && steps.vulkan_sdk.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
-          choco install vulkan-sdk ninja -y --no-progress
+          choco install vulkan-sdk ninja -y --no-progress --version=1.4.350.0
           $sdk = (Get-ChildItem "C:\VulkanSDK" -Directory | Sort-Object Name -Descending | Select-Object -First 1).FullName
           if (-not $sdk) { throw "Vulkan SDK install did not populate C:\VulkanSDK" }
 
