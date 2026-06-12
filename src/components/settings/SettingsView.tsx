@@ -15,6 +15,7 @@ import { TextInput } from "../ui/TextInput";
 import { AudioInputPanel } from "./AudioInputPanel";
 import { ModelsSettingsPanel } from "./ModelsSettingsPanel";
 import { SettingsSection } from "./SettingsSection";
+import { UpdatesSettingsPanel } from "./UpdatesSettingsPanel";
 import { SettingsToggleRow } from "./SettingsToggleRow";
 import {
   captureHotkey,
@@ -435,25 +436,27 @@ export function SettingsView() {
           </SettingsSection>
 
           <SettingsSection
+            id="updates"
+            title={sectionMeta.updates.label}
+            description={sectionMeta.updates.description}
+            glow="blue"
+          >
+            <UpdatesSettingsPanel
+              appVersion={appVersion}
+              autoUpdate={settings.autoUpdate}
+              disabled={!loaded || saving}
+              onAutoUpdateChange={(checked: boolean) => {
+                void setAutoUpdate(checked);
+              }}
+            />
+          </SettingsSection>
+
+          <SettingsSection
             id="advanced"
             title={sectionMeta.advanced.label}
             description={sectionMeta.advanced.description}
             glow="blue"
           >
-            <SettingsToggleRow
-              label={t("settings.autoUpdate.label")}
-              description={
-                settings.autoUpdate
-                  ? t("settings.autoUpdate.descriptionOn")
-                  : t("settings.autoUpdate.descriptionOff")
-              }
-              checked={settings.autoUpdate}
-              disabled={!loaded}
-              onCheckedChange={(checked) => {
-                void setAutoUpdate(checked);
-              }}
-            />
-
             <SettingsToggleRow
               label={t("settings.autostart.label")}
               checked={autostartEnabled}

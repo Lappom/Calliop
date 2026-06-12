@@ -112,9 +112,13 @@
         "label": "Shortcuts",
         "description": "Global shortcut to start dictation."
       },
+      "updates": {
+        "label": "Updates",
+        "description": "Installed version, manual check, and automatic updates."
+      },
       "advanced": {
         "label": "Advanced",
-        "description": "Updates, launch at startup, and inference backend."
+        "description": "Launch at startup, power usage, and inference backend."
       }
     },
     "uiLanguage": {
@@ -202,6 +206,20 @@
     },
     "shortcutsPanel": {
       "globalLabel": "Global shortcut"
+    },
+    "updatesPanel": {
+      "currentVersion": "Installed version",
+      "check": "Check for updates",
+      "checking": "Checking for updates…",
+      "upToDate": "Calliop is up to date ({{version}}).",
+      "downloading": "Downloading version {{version}}…",
+      "ready": "Version {{version}} is ready to install.",
+      "install": "Install and restart",
+      "installing": "Installing…",
+      "installError": "Could not install the update.",
+      "error": "Could not check for updates.",
+      "devUnavailable": "Updates are not available in development builds.",
+      "alreadyChecking": "An update check is already in progress."
     },
     "inferenceBackend": {
       "label": "Inference backend",

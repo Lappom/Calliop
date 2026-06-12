@@ -15,7 +15,7 @@ pub mod ui;
 pub mod update;
 pub mod user_error;
 
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -130,6 +130,7 @@ struct AppState {
     loaded_llm: Mutex<Option<llm::LlmModel>>,
     mic_probe: MicProbeState,
     pending_update: update::PendingUpdateStore,
+    update_check_in_progress: AtomicBool,
 }
 
 /// Held while `set_settings` downloads or reloads the active Whisper model.
@@ -2515,6 +2516,108 @@ fn build_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+async fn fetch_available_update(
+    app: &AppHandle,
+    ignore_dismissed: bool,
+) -> Result<Option<tauri_plugin_updater::Update>, String> {
+    let updater = app
+        .updater()
+        .map_err(|err| format!("Updater unavailable: {err}"))?;
+
+    match updater.check().await {
+        Ok(Some(update)) => {
+            if !ignore_dismissed
+                && update::dismissed_update_version().as_deref() == Some(update.version.as_str())
+            {
+                return Ok(None);
+            }
+            Ok(Some(update))
+        }
+        Ok(None) => Ok(None),
+        Err(err) => Err(format!("Update check failed: {err}")),
+    }
+}
+
+async fn download_and_store_update(
+    app: &AppHandle,
+    update: tauri_plugin_updater::Update,
+    pending_update: update::PendingUpdateStore,
+) -> Result<(), String> {
+    let version = update.version.clone();
+    let downloaded_acc = Arc::new(AtomicU64::new(0));
+    let app_for_progress = app.clone();
+    let version_for_progress = version.clone();
+    let downloaded_for_progress = Arc::clone(&downloaded_acc);
+
+    let bytes = update
+        .download(
+            move |chunk_len, total| {
+                let current = downloaded_for_progress.fetch_add(chunk_len as u64, Ordering::Relaxed)
+                    + chunk_len as u64;
+                let percent = total
+                    .map(|total_bytes| (current as f32 / total_bytes as f32) * 100.0)
+                    .unwrap_or(0.0);
+                let _ = app_for_progress.emit(
+                    "update-download-progress",
+                    update::UpdateDownloadProgress {
+                        version: version_for_progress.clone(),
+                        downloaded: current,
+                        total,
+                        percent,
+                    },
+                );
+            },
+            || {},
+        )
+        .await
+        .map_err(|err| format!("Update download failed: {err}"))?;
+
+    let bytes_path = update::store_pending_update_bytes(&bytes)?;
+    *pending_update.lock() = Some(update::PendingUpdate {
+        version: version.clone(),
+        update,
+        bytes_path,
+    });
+    let _ = app.emit(
+        "update-ready",
+        update::UpdateReadyPayload {
+            version,
+        },
+    );
+    Ok(())
+}
+
+async fn run_update_download(
+    app: AppHandle,
+    store: Arc<Store>,
+    update: tauri_plugin_updater::Update,
+) {
+    let settings = match store.load_settings() {
+        Ok(settings) => settings,
+        Err(err) => {
+            eprintln!("auto-update: failed to load settings: {err}");
+            return;
+        }
+    };
+
+    wait_before_app_update_download(&app, &settings).await;
+
+    let state = app.state::<AppState>();
+    let pending_update = Arc::clone(&state.pending_update);
+    if let Err(err) = download_and_store_update(&app, update, pending_update).await {
+        eprintln!("auto-update: {err}");
+        let _ = app.emit(
+            "update-check-failed",
+            update::UpdateCheckFailedPayload {
+                message: err,
+            },
+        );
+    }
+    app.state::<AppState>()
+        .update_check_in_progress
+        .store(false, Ordering::SeqCst);
+}
+
 fn spawn_update_check_if_enabled(app: AppHandle, store: Arc<Store>) {
     tauri::async_runtime::spawn(async move {
         if cfg!(debug_assertions) {
@@ -2535,51 +2638,77 @@ fn spawn_update_check_if_enabled(app: AppHandle, store: Arc<Store>) {
             return;
         }
 
-        let updater = match app.updater() {
-            Ok(updater) => updater,
+        let update = match fetch_available_update(&app, false).await {
+            Ok(Some(update)) => update,
+            Ok(None) => return,
             Err(err) => {
-                eprintln!("auto-update: updater unavailable: {err}");
+                eprintln!("auto-update: {err}");
                 return;
             }
         };
 
-        match updater.check().await {
-            Ok(Some(update)) => {
-                if update::dismissed_update_version().as_deref() == Some(update.version.as_str()) {
-                    return;
-                }
-
-                wait_before_app_update_download(&app, &settings).await;
-
-                let version = update.version.clone();
-                match update.download(|_, _| {}, || {}).await {
-                    Ok(bytes) => {
-                        let bytes_path = match update::store_pending_update_bytes(&bytes) {
-                            Ok(path) => path,
-                            Err(err) => {
-                                eprintln!("auto-update: failed to store update: {err}");
-                                return;
-                            }
-                        };
-
-                        let payload = update::UpdateReadyPayload {
-                            version: version.clone(),
-                        };
-                        let state = app.state::<AppState>();
-                        *state.pending_update.lock() = Some(update::PendingUpdate {
-                            version,
-                            update,
-                            bytes_path,
-                        });
-                        let _ = app.emit("update-ready", payload);
-                    }
-                    Err(err) => eprintln!("auto-update: download failed: {err}"),
-                }
-            }
-            Ok(None) => {}
-            Err(err) => eprintln!("auto-update: check failed: {err}"),
+        let state = app.state::<AppState>();
+        if state
+            .update_check_in_progress
+            .swap(true, Ordering::SeqCst)
+        {
+            return;
         }
+
+        run_update_download(app, store, update).await;
     });
+}
+
+#[tauri::command]
+async fn check_for_updates(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<update::UpdateCheckResult, String> {
+    if cfg!(debug_assertions) {
+        return Ok(update::UpdateCheckResult::UnavailableInDev);
+    }
+
+    if let Some(version) = state
+        .pending_update
+        .lock()
+        .as_ref()
+        .map(|pending| pending.version.clone())
+    {
+        return Ok(update::UpdateCheckResult::Ready { version });
+    }
+
+    if state
+        .update_check_in_progress
+        .swap(true, Ordering::SeqCst)
+    {
+        return Err("Une vérification de mise à jour est déjà en cours.".into());
+    }
+
+    let update = match fetch_available_update(&app, true).await {
+        Ok(Some(update)) => update,
+        Ok(None) => {
+            state
+                .update_check_in_progress
+                .store(false, Ordering::SeqCst);
+            return Ok(update::UpdateCheckResult::UpToDate);
+        }
+        Err(err) => {
+            state
+                .update_check_in_progress
+                .store(false, Ordering::SeqCst);
+            return Err(err);
+        }
+    };
+
+    let version = update.version.clone();
+    let store = Arc::clone(&state.store);
+    let app_for_download = app.clone();
+
+    tauri::async_runtime::spawn(async move {
+        run_update_download(app_for_download, store, update).await;
+    });
+
+    Ok(update::UpdateCheckResult::Downloading { version })
 }
 
 async fn wait_before_app_update_download(app: &AppHandle, settings: &AppSettings) {
@@ -2793,6 +2922,7 @@ pub fn run() {
                 level_task: Mutex::new(None),
             },
             pending_update: Arc::new(Mutex::new(None)),
+            update_check_in_progress: AtomicBool::new(false),
         })
         .setup(move |app| {
             let _modules = registered_modules();
@@ -2899,6 +3029,7 @@ pub fn run() {
             is_autostart_enabled,
             set_autostart_enabled,
             get_pending_update_version,
+            check_for_updates,
             install_pending_update,
             dismiss_pending_update,
             list_dictionary_words,

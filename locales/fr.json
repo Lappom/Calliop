@@ -112,9 +112,13 @@
         "label": "Raccourcis",
         "description": "Combinaison globale pour démarrer une dictée."
       },
+      "updates": {
+        "label": "Mise à jour",
+        "description": "Version installée, vérification manuelle et mises à jour automatiques."
+      },
       "advanced": {
         "label": "Avancé",
-        "description": "Mises à jour, démarrage automatique et backend d'inférence."
+        "description": "Démarrage automatique, consommation et backend d'inférence."
       }
     },
     "uiLanguage": {
@@ -202,6 +206,20 @@
     },
     "shortcutsPanel": {
       "globalLabel": "Raccourci global"
+    },
+    "updatesPanel": {
+      "currentVersion": "Version installée",
+      "check": "Rechercher les mises à jour",
+      "checking": "Recherche en cours…",
+      "upToDate": "Calliop est à jour ({{version}}).",
+      "downloading": "Téléchargement de la version {{version}}…",
+      "ready": "La version {{version}} est prête à installer.",
+      "install": "Installer et redémarrer",
+      "installing": "Installation…",
+      "installError": "Impossible d'installer la mise à jour.",
+      "error": "Impossible de vérifier les mises à jour.",
+      "devUnavailable": "Les mises à jour ne sont pas disponibles en build de développement.",
+      "alreadyChecking": "Une vérification est déjà en cours."
     },
     "inferenceBackend": {
       "label": "Backend d'inférence",

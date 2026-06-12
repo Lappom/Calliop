@@ -107,3 +107,27 @@ pub type PendingUpdateStore = Arc<Mutex<Option<PendingUpdate>>>;
 pub struct UpdateReadyPayload {
     pub version: String,
 }
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase", tag = "status")]
+pub enum UpdateCheckResult {
+    UpToDate,
+    Downloading { version: String },
+    Ready { version: String },
+    UnavailableInDev,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateDownloadProgress {
+    pub version: String,
+    pub downloaded: u64,
+    pub total: Option<u64>,
+    pub percent: f32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateCheckFailedPayload {
+    pub message: String,
+}

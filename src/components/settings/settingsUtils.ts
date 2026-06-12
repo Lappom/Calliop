@@ -1,6 +1,11 @@
 import type { TFunction } from "i18next";
 
-export type SettingsSectionId = "general" | "models" | "shortcuts" | "advanced";
+export type SettingsSectionId =
+  | "general"
+  | "models"
+  | "shortcuts"
+  | "updates"
+  | "advanced";
 
 export function getSettingsSections(t: TFunction): {
   id: SettingsSectionId;
@@ -22,6 +27,11 @@ export function getSettingsSections(t: TFunction): {
       id: "shortcuts",
       label: t("settings.sections.shortcuts.label"),
       description: t("settings.sections.shortcuts.description"),
+    },
+    {
+      id: "updates",
+      label: t("settings.sections.updates.label"),
+      description: t("settings.sections.updates.description"),
     },
     {
       id: "advanced",
