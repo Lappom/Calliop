@@ -5,6 +5,8 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 use calliop_prompt::ToneProfile;
 use serde::{Deserialize, Serialize};
 
+use crate::llm::validate_cleanup_output;
+
 use std::path::Path;
 
 use crate::process_util::hide_console;
@@ -121,9 +123,12 @@ impl WorkerClient {
             return Err(LlmError::Worker(error));
         }
 
-        response
+        let cleaned = response
             .text
-            .ok_or_else(|| LlmError::Worker("worker returned empty text".into()))
+            .ok_or_else(|| LlmError::Worker("worker returned empty text".into()))?;
+        // Re-validate in the host process so calliop-prompt fixes apply without rebuilding
+        // the llama sidecar (which requires cmake and a full llama-cpp-sys rebuild).
+        validate_cleanup_output(raw, &cleaned).map_err(LlmError::from)
     }
 }
 

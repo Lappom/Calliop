@@ -1,4 +1,9 @@
 [env]
-# whisper-rs-sys invokes cmake during build. CMake 4.x is required for VS 18 toolchains.
-# From repo root, use: pnpm tauri:dev  (runs scripts/dev.ps1 which adds CMake to PATH)
-# Manual install: winget install Kitware.CMake  — then restart the terminal
+# whisper-rs-sys / llama-cpp-sys invoke cmake during build. CMake 4.x is required for VS 18 toolchains.
+# Portable install (via scripts/ensure-cmake.ps1): %LOCALAPPDATA%\Calliop\tools\cmake\bin\cmake.exe
+# From repo root:
+#   pnpm tauri:dev              -> scripts/dev.ps1 prepends CMake to PATH
+#   .\scripts\build-llm-worker.ps1
+# Manual: winget install Kitware.CMake — then restart the terminal
+# If `cmake --version` fails but builds worked before, check for a stale User PATH entry
+# pointing to C:\Program Files\CMake\bin without a real cmake.exe.
