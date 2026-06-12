@@ -87,10 +87,23 @@ Pour les adresses et chemins, colle les symboles aux tokens voisins \
 Place la ponctuation au bon endroit même si la transcription STT a omis ou décalé les espaces. \
 Reformule légèrement si nécessaire pour améliorer la fluidité, sans changer le sens. \
 Conserve les jetons ⟦CALLIOP0⟧, ⟦CALLIOP1⟧, etc. inchangés s'ils apparaissent dans la transcription. \
-Si l'utilisateur dicte une énumération (numéros, « premièrement/deuxièmement », « tiret » répété), \
-formate en liste : un item par ligne, numéros ou tirets selon le cas — \
-ex. « aller au magasin pour 1 pommes 2 bananes 3 oranges » → \
-« Aller au magasin pour :\n1. Pommes\n2. Bananes\n3. Oranges ». \
+Si l'utilisateur dicte une énumération explicite (numéros, « premièrement/deuxièmement », « tiret » répété), \
+formate en liste numérotée ou à puces — un item par ligne. \
+Si l'utilisateur énumère implicitement plusieurs éléments sans numéros ni « tiret » \
+(après « pour », « avec », « comprenant », « : », ou une série de noms séparés par des pauses), \
+formate aussi en liste — ne te contente jamais de virgules. \
+Si l'utilisateur dicte une liste de tâches ou de features séparées par des virgules \
+(instructions impératives courtes), formate en liste numérotée — un item par ligne. \
+Ex. « aller au magasin pour 1 pommes 2 bananes 3 oranges » → \
+« Aller au magasin pour :\n1. Pommes\n2. Bananes\n3. Oranges » ; \
+« aller au magasin pour pommes bananes oranges » → \
+« Aller au magasin pour :\n1. Pommes\n2. Bananes\n3. Oranges » ; \
+« courses : lait oeufs pain beurre » → \
+« Courses :\n1. Lait\n2. Oeufs\n3. Pain\n4. Beurre » ; \
+« ajouter un bouton, mettre un fond blanc, clignoter la page » → \
+« 1. Ajouter un bouton\n2. Mettre un fond blanc\n3. Clignoter la page ». \
+Si le texte contient déjà une liste formatée (lignes « 1. … », « - … », sauts de ligne), \
+conserve sa structure — ne fusionne pas les items sur une seule ligne et ne change pas le nombre. \
 Ne commente pas, ne pose pas de questions. \
 Réponds uniquement avec le texte nettoyé final, sans guillemets ni préambule.";
 
@@ -154,9 +167,34 @@ pub fn build_cleanup_user_message(raw: &str) -> Result<String, PromptError> {
     if raw.is_empty() {
         return Err(PromptError::EmptyInput);
     }
+    let hint = cleanup_user_hint(raw);
     Ok(format!(
-        "/no_think\nTranscription brute à nettoyer :\n{raw}"
+        "/no_think\nTranscription brute à nettoyer :\n{raw}{hint}"
     ))
+}
+
+fn cleanup_user_hint(raw: &str) -> &'static str {
+    if raw.contains('\n') && raw.lines().any(looks_like_list_line) {
+        return "\nConserve la structure de liste (sauts de ligne, numéros ou tirets).\n";
+    }
+    if looks_like_implicit_enumeration(raw) {
+        return "\nÉnumération détectée : formate en liste numérotée (un item par ligne), pas en virgules.\n";
+    }
+    ""
+}
+
+pub fn looks_like_implicit_enumeration(text: &str) -> bool {
+    try_format_implicit_noun_list(text).is_some() || try_format_comma_separated_list(text).is_some()
+}
+
+fn looks_like_list_line(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    trimmed.starts_with("- ")
+        || trimmed.starts_with("* ")
+        || trimmed
+            .chars()
+            .next()
+            .is_some_and(|ch| ch.is_ascii_digit())
 }
 
 pub fn validate_cleanup_output(raw: &str, cleaned: &str) -> Result<String, PromptError> {
@@ -168,6 +206,7 @@ pub fn validate_cleanup_output(raw: &str, cleaned: &str) -> Result<String, Promp
     cleaned = strip_wrapping_quotes(&cleaned);
     cleaned = interpret_oral_punctuation(&cleaned);
     cleaned = polish_llm_output(&cleaned);
+    cleaned = prefer_list_structure_over_comma_flattening(raw, &cleaned);
 
     let max_len = raw.len().saturating_mul(3).max(512);
     if cleaned.len() > max_len {
@@ -175,6 +214,52 @@ pub fn validate_cleanup_output(raw: &str, cleaned: &str) -> Result<String, Promp
     }
 
     Ok(cleaned)
+}
+
+fn prefer_list_structure_over_comma_flattening(raw: &str, cleaned: &str) -> String {
+    if raw.contains('\n') && !cleaned.contains('\n') {
+        let list_lines = raw.lines().filter(|line| looks_like_list_line(line)).count();
+        if list_lines >= 2 {
+            return raw.to_string();
+        }
+    }
+
+    if !cleaned.contains('\n') {
+        if let Some(recovered) = try_recover_merged_numbered_list_line(cleaned) {
+            return recovered;
+        }
+    }
+
+    if let Some(formatted) = try_format_implicit_noun_list(raw) {
+        if formatted.contains('\n') && !cleaned.contains('\n') {
+            return formatted;
+        }
+    }
+
+    if let Some(formatted) = try_format_comma_separated_list(raw) {
+        if formatted.contains('\n') && !cleaned.contains('\n') {
+            return formatted;
+        }
+    }
+
+    cleaned.to_string()
+}
+
+/// LLMs often keep only the first list marker and merge items with commas on one line.
+fn try_recover_merged_numbered_list_line(text: &str) -> Option<String> {
+    if text.contains('\n') {
+        return None;
+    }
+
+    let trimmed = text.trim();
+    let dot_space = trimmed.find(". ")?;
+    let prefix = trimmed[..dot_space].trim();
+    if prefix.is_empty() || !prefix.chars().all(|ch| ch.is_ascii_digit()) {
+        return None;
+    }
+
+    let remainder = trimmed[dot_space + 2..].trim();
+    try_format_comma_separated_list(remainder)
 }
 
 fn strip_thinking_blocks(text: &str) -> String {
@@ -363,6 +448,8 @@ pub fn post_process_transcript(text: &str) -> String {
     let text = normalize_stt_oral_mishearings(text);
     let text = format_spoken_lists(&text);
     let text = interpret_oral_punctuation(&text);
+    // Second pass: oral « virgule » is converted to commas only after the punctuation pass.
+    let text = format_spoken_lists(&text);
     polish_transcript(&text)
 }
 
@@ -459,7 +546,217 @@ pub fn format_spoken_lists(text: &str) -> String {
     if let Some(formatted) = try_format_bullet_list(text) {
         return formatted;
     }
-    try_format_numbered_list(text).unwrap_or_else(|| text.to_string())
+    if let Some(formatted) = try_format_numbered_list(text) {
+        return formatted;
+    }
+    if let Some(formatted) = try_format_comma_separated_list(text) {
+        return formatted;
+    }
+    try_format_implicit_noun_list(text).unwrap_or_else(|| text.to_string())
+}
+
+const COMMA_LIST_IMPERATIVE_STARTERS: &[&str] = &[
+    "ajouter", "ajoute", "ajoutez", "mettre", "mets", "mettez", "supprimer", "supprime",
+    "supprimez", "créer", "creer", "crée", "cree", "créez", "creez", "modifier", "modifie",
+    "modifiez", "changer", "change", "changez", "clignoter", "clignote", "clignotez",
+    "afficher", "affiche", "affichez", "masquer", "cache", "cacher", "cachez", "ouvrir",
+    "ouvre", "ouvrez", "fermer", "ferme", "fermez", "déplacer", "deplacer", "déplace",
+    "deplace", "déplacez", "deplacez", "activer", "active", "activez", "désactiver",
+    "desactiver", "désactive", "desactive", "désactivez", "desactivez", "augmenter",
+    "augmente", "augmentez", "réduire", "reduire", "réduis", "reduis", "réduisez",
+    "reduisez", "centrer", "centre", "centrez", "aligner", "aligne", "alignez",
+    "colorier", "colorie", "coloriez", "passer", "passe", "passez", "retirer", "retire",
+    "retirez", "enlever", "enlève", "enleve", "enlevez", "inclure", "inclus", "incluez",
+    "exclure", "exclus", "excluez", "remplacer", "remplace", "remplacez", "implémenter",
+    "implementer", "implémente", "implemente", "corriger", "corrige", "corrigez",
+    "utiliser", "utilise", "utilisez", "rendre", "rend", "permettre", "permet",
+    "faciliter", "facilite", "add", "remove", "set", "show", "hide", "make", "enable",
+    "disable", "update", "fix", "move", "open", "close", "toggle", "implement",
+];
+
+const COMMA_LIST_PROSE_STARTERS: &[&str] = &[
+    "je", "tu", "il", "elle", "on", "nous", "vous", "ils", "elles", "ce", "c'", "c'est",
+    "bonjour", "salut", "merci", "comment", "pourquoi", "est-ce", "peut-être", "peut",
+    "puis", "ensuite", "car", "parce", "mais", "donc", "or", "ni", "when", "if", "the",
+    "and", "but", "so", "because",
+];
+
+fn try_format_comma_separated_list(text: &str) -> Option<String> {
+    if text.contains('\n') {
+        return None;
+    }
+
+    let segments = split_comma_list_segments(text);
+    if segments.len() < 2 || segments.len() > 12 {
+        return None;
+    }
+    if !comma_separated_segments_are_list(&segments) {
+        return None;
+    }
+
+    let numbered_items: Vec<String> = segments
+        .iter()
+        .enumerate()
+        .map(|(index, segment)| {
+            format!(
+                "{}. {}",
+                index + 1,
+                capitalize_first_char(segment)
+            )
+        })
+        .collect();
+    Some(numbered_items.join("\n"))
+}
+
+fn split_comma_list_segments(text: &str) -> Vec<String> {
+    let normalized = replace_phrase_ci(text, " virgule ", ", ");
+    normalized
+        .split(", ")
+        .map(trim_list_segment)
+        .filter(|segment| !segment.is_empty())
+        .collect()
+}
+
+fn trim_list_segment(segment: &str) -> String {
+    segment
+        .trim()
+        .trim_end_matches(|ch: char| matches!(ch, '.' | '!' | '?'))
+        .trim()
+        .to_string()
+}
+
+fn comma_list_first_word(segment: &str) -> Option<String> {
+    segment.split_whitespace().next().map(|word| {
+        word.trim_end_matches(|ch: char| matches!(ch, '.' | '!' | '?' | ',' | ';' | ':'))
+            .to_ascii_lowercase()
+    })
+}
+
+fn comma_separated_segments_are_list(segments: &[String]) -> bool {
+    for segment in segments {
+        if segment.is_empty() || segment.contains('?') {
+            return false;
+        }
+        if segment.split_whitespace().count() > 12 {
+            return false;
+        }
+    }
+
+    let imperative_count = segments
+        .iter()
+        .filter(|segment| {
+            comma_list_first_word(segment)
+                .is_some_and(|word| COMMA_LIST_IMPERATIVE_STARTERS.contains(&word.as_str()))
+        })
+        .count();
+    if imperative_count >= 2 {
+        return true;
+    }
+
+    segments.len() >= 3
+        && segments.iter().all(|segment| {
+            let words = segment.split_whitespace().count();
+            (1..=4).contains(&words)
+        })
+        && segments.iter().all(|segment| {
+            comma_list_first_word(segment)
+                .is_none_or(|word| !COMMA_LIST_PROSE_STARTERS.contains(&word.as_str()))
+        })
+}
+
+const IMPLICIT_LIST_INTRO_PHRASES: &[&str] = &[
+    " pour ",
+    " avec ",
+    " comprenant ",
+    " incluant ",
+    " : ",
+];
+
+const IMPLICIT_LIST_ITEM_BLOCKWORDS: &[&str] = &[
+    "et", "ou", "mais", "donc", "puis", "aussi", "encore", "très", "tres",
+    "demain", "aujourd'hui", "aujourdhui", "hier", "maintenant", "toujours", "jamais",
+    "bien", "mal", "vite", "peu", "plus", "moins", "comme", "chez", "dans", "sur",
+    "sous", "sans", "pour", "avec", "the", "and", "or", "de", "du", "des", "le",
+    "la", "les", "un", "une", "ce", "cette", "mon", "ton", "son", "mes", "tes",
+    "ses", "notre", "votre", "leur", "very", "really",
+];
+
+const IMPLICIT_LIST_VERB_BLOCKWORDS: &[&str] = &[
+    "acheter", "aller", "venir", "faire", "être", "etre", "avoir", "courir", "marcher",
+    "parler", "dire", "voir", "prendre", "mettre", "passer", "devoir", "pouvoir",
+    "vouloir", "savoir", "falloir", "donner", "trouver", "demander", "rester",
+];
+
+fn try_format_implicit_noun_list(text: &str) -> Option<String> {
+    if text.contains('\n') || text.contains(',') || text.contains(';') {
+        return None;
+    }
+
+    let lower = text.to_lowercase();
+    let (trigger_pos, trigger_len) = IMPLICIT_LIST_INTRO_PHRASES
+        .iter()
+        .filter_map(|phrase| lower.rfind(phrase).map(|pos| (pos, phrase.len())))
+        .max_by_key(|(pos, _)| *pos)?;
+
+    let intro = text[..trigger_pos + trigger_len].trim_end();
+    let remainder = text[trigger_pos + trigger_len..].trim();
+    if remainder.is_empty() {
+        return None;
+    }
+
+    let item_tokens = split_implicit_list_items(remainder)?;
+    if !implicit_list_items_are_valid(&item_tokens) {
+        return None;
+    }
+
+    let numbered_items: Vec<String> = item_tokens
+        .iter()
+        .enumerate()
+        .map(|(index, item)| format!("{}. {}", index + 1, capitalize_first_char(item)))
+        .collect();
+    Some(format_list_output(intro, &numbered_items, ListStyle::Numbered))
+}
+
+fn split_implicit_list_items(remainder: &str) -> Option<Vec<String>> {
+    let parts: Vec<&str> = if remainder.contains(" et ") {
+        remainder.split(" et ").collect()
+    } else {
+        remainder.split_whitespace().collect()
+    };
+
+    let items: Vec<String> = parts
+        .iter()
+        .map(|part| part.trim())
+        .filter(|part| !part.is_empty())
+        .map(|part| part.to_string())
+        .collect();
+
+    if items.len() < 3 || items.len() > 12 {
+        return None;
+    }
+    Some(items)
+}
+
+fn implicit_list_items_are_valid(items: &[String]) -> bool {
+    items.iter().all(|item| {
+        let words: Vec<&str> = item.split_whitespace().collect();
+        if words.is_empty() || words.len() > 4 {
+            return false;
+        }
+        words.iter().all(|word| {
+            let lower = word.to_ascii_lowercase();
+            if lower.len() < 2 {
+                return false;
+            }
+            if IMPLICIT_LIST_ITEM_BLOCKWORDS.contains(&lower.as_str()) {
+                return false;
+            }
+            if IMPLICIT_LIST_VERB_BLOCKWORDS.contains(&lower.as_str()) {
+                return false;
+            }
+            !word.chars().any(|ch| matches!(ch, '.' | '!' | '?' | ',' | ';' | ':'))
+        })
+    })
 }
 
 fn try_format_bullet_list(text: &str) -> Option<String> {
@@ -1935,5 +2232,118 @@ mod tests {
             ("suite".to_string(), 2000),
         ];
         assert_eq!(find_latest_frozen_boundary(&segments), None);
+    }
+
+    #[test]
+    fn formats_implicit_noun_list_after_pour() {
+        let out = format_spoken_lists("aller au magasin pour pommes bananes oranges");
+        assert!(out.contains("1. Pommes"));
+        assert!(out.contains("2. Bananes"));
+        assert!(out.contains("3. Oranges"));
+        assert!(out.contains('\n'));
+    }
+
+    #[test]
+    fn formats_implicit_list_with_et() {
+        let out = format_spoken_lists("courses pour lait et oeufs et pain");
+        assert!(out.contains("1. Lait"));
+        assert!(out.contains('\n'));
+    }
+
+    #[test]
+    fn implicit_list_skips_prose_without_enough_items() {
+        let out = format_spoken_lists("aller au magasin pour demain");
+        assert_eq!(out, "aller au magasin pour demain");
+    }
+
+    #[test]
+    fn looks_like_implicit_enumeration_detects_shopping_list() {
+        assert!(looks_like_implicit_enumeration(
+            "aller au magasin pour pommes bananes oranges"
+        ));
+    }
+
+    #[test]
+    fn formats_comma_separated_feature_list() {
+        let out = format_spoken_lists("ajouter un bouton, mettre un fond blanc, clignoter la page.");
+        assert!(out.contains("1. Ajouter un bouton"));
+        assert!(out.contains("2. Mettre un fond blanc"));
+        assert!(out.contains("3. Clignoter la page"));
+        assert!(out.contains('\n'));
+    }
+
+    #[test]
+    fn formats_comma_separated_feature_list_after_oral_virgule() {
+        let out = post_process_transcript(
+            "ajouter un bouton virgule mettre un fond blanc virgule clignoter la page",
+        );
+        assert!(out.contains("1. Ajouter un bouton"));
+        assert!(out.contains("2. Mettre un fond blanc"));
+        assert!(out.contains("3. Clignoter la page"));
+    }
+
+    #[test]
+    fn comma_feature_list_skips_conversational_commas() {
+        let out = format_spoken_lists("Bonjour, comment allez-vous");
+        assert_eq!(out, "Bonjour, comment allez-vous");
+    }
+
+    #[test]
+    fn looks_like_implicit_enumeration_detects_comma_feature_list() {
+        assert!(looks_like_implicit_enumeration(
+            "ajouter un bouton, mettre un fond blanc, clignoter la page"
+        ));
+    }
+
+    #[test]
+    fn validate_output_recovers_comma_feature_list_from_flattening() {
+        let raw = "1. Ajouter un bouton\n2. Mettre un fond blanc\n3. Clignoter la page";
+        let flattened = "Ajouter un bouton, mettre un fond blanc, clignoter la page.";
+        let out = validate_cleanup_output(raw, flattened).unwrap();
+        assert!(out.contains('\n'));
+        assert!(out.contains("1. Ajouter un bouton"));
+    }
+
+    #[test]
+    fn validate_output_recovers_llm_merged_numbered_feature_list() {
+        let raw = "1. Ajouter un bouton\n2. Mettre un fond blanc\n3. Clignoter la page";
+        let merged = "1. Ajouter un bouton, mettre un fond blanc, clignoter la page";
+        let out = validate_cleanup_output(raw, merged).unwrap();
+        assert!(out.contains('\n'));
+        assert!(out.contains("2. Mettre un fond blanc"));
+        assert!(out.contains("3. Clignoter la page"));
+    }
+
+    #[test]
+    fn recover_merged_numbered_list_without_multiline_raw() {
+        let merged = "1. Ajouter un bouton, mettre un fond blanc, clignoter la page";
+        let out = validate_cleanup_output(merged, merged).unwrap();
+        assert!(out.contains('\n'));
+        assert!(out.contains("3. Clignoter la page"));
+    }
+
+    #[test]
+    fn validate_output_restores_list_when_llm_flattens_to_commas() {
+        let raw = "Aller au magasin pour:\n1. Pommes\n2. Bananes\n3. Oranges";
+        let flattened = "Aller au magasin pour pommes, bananes, oranges.";
+        let out = validate_cleanup_output(raw, flattened).unwrap();
+        assert!(out.contains('\n'));
+        assert!(out.contains("1. Pommes"));
+    }
+
+    #[test]
+    fn validate_output_recovers_implicit_list_from_comma_flattening() {
+        let raw = "Aller au magasin pour pommes bananes oranges";
+        let flattened = "Aller au magasin pour pommes, bananes, oranges.";
+        let out = validate_cleanup_output(raw, flattened).unwrap();
+        assert!(out.contains('\n'));
+        assert!(out.contains("1. Pommes"));
+    }
+
+    #[test]
+    fn cleanup_user_message_hints_implicit_enumeration() {
+        let msg = build_cleanup_user_message("aller au magasin pour pommes bananes oranges")
+            .unwrap();
+        assert!(msg.contains("liste numérotée"));
     }
 }

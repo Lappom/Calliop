@@ -9,8 +9,8 @@ use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize};
 use thiserror::Error;
 
 use calliop_prompt::{
-    find_latest_frozen_boundary, join_transcript_segments, join_transcript_segments_with_pauses,
-    post_process_transcript, ToneProfile,
+    find_latest_frozen_boundary, join_transcript_segments_with_pauses, post_process_transcript,
+    ToneProfile,
 };
 
 use crate::app_context::{get_active_window, resolve_tone, ActiveWindow};
@@ -1309,8 +1309,7 @@ fn transcribe_segment(
     let raw = {
         let mut transcripts = stt.transcripts.lock();
         transcripts.push((text.text.clone(), segment.leading_silence_ms));
-        let text_only: Vec<String> = transcripts.iter().map(|(value, _)| value.clone()).collect();
-        join_transcript_segments(&text_only)
+        join_transcript_segments_with_pauses(transcripts.as_slice())
     };
 
     if stt.auto_edit.load(Ordering::SeqCst) {

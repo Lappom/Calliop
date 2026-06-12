@@ -5,6 +5,7 @@ mod capture;
 mod capture_win;
 #[cfg(windows)]
 mod dictation_hook_win;
+#[cfg(windows)]
 mod modifiers;
 mod shortcut;
 
