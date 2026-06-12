@@ -508,16 +508,46 @@ fn resume_global_hotkey(app: &AppHandle, state: &AppState) -> Result<(), String>
         ) {
             Ok(_) => {
                 if current - 1 == 0 {
-                    let settings = state.store.load_settings().map_err(|e| e.to_string())?;
-                    let binding = hotkey::parse_hotkey_setting(&settings.hotkey)
-                        .map_err(|e| e.to_string())?;
-                    register_hotkey_binding(app, binding)?;
+                    register_hotkey_from_settings(app, state)?;
                 }
                 return Ok(());
             }
             Err(actual) => current = actual,
         }
     }
+}
+
+struct HotkeySuspendGuard<'a> {
+    app: &'a AppHandle,
+    state: &'a AppState,
+    active: bool,
+}
+
+impl Drop for HotkeySuspendGuard<'_> {
+    fn drop(&mut self) {
+        if self.active {
+            let _ = resume_global_hotkey(self.app, self.state);
+        }
+    }
+}
+
+fn register_hotkey_from_settings(app: &AppHandle, state: &AppState) -> Result<(), String> {
+    let settings = state.store.load_settings().map_err(|e| e.to_string())?;
+    let binding = hotkey::parse_hotkey_setting(&settings.hotkey).unwrap_or_else(|err| {
+        eprintln!(
+            "invalid stored hotkey ({}): {err}, using default",
+            settings.hotkey
+        );
+        hotkey::HotkeyBinding::KeyCombo(hotkey::default_shortcut())
+    });
+    register_hotkey_binding(app, binding)
+}
+
+fn ensure_dictation_hotkey_registered(app: &AppHandle, state: &AppState) -> Result<(), String> {
+    if state.hotkey_suspend_depth.load(Ordering::SeqCst) > 0 {
+        return Ok(());
+    }
+    register_hotkey_from_settings(app, state)
 }
 
 fn is_mic_probe_active(state: &AppState) -> bool {
@@ -1951,6 +1981,7 @@ async fn ensure_model_inner(app: &AppHandle, state: &AppState) -> Result<(), Str
     let expected = state.perf_config.lock().whisper;
     if whisper_engine_matches(state, expected) {
         let _ = app.emit("model-ready", ());
+        ensure_dictation_hotkey_registered(app, state)?;
         return Ok(());
     }
 
@@ -1962,12 +1993,20 @@ async fn ensure_model_inner(app: &AppHandle, state: &AppState) -> Result<(), Str
 
     if whisper_engine_matches(state, expected) {
         let _ = app.emit("model-ready", ());
+        ensure_dictation_hotkey_registered(app, state)?;
         return Ok(());
     }
 
     if state.model_ready.load(Ordering::SeqCst) || state.whisper_engine.lock().is_some() {
         invalidate_whisper_engine(state);
     }
+
+    suspend_global_hotkey(app, state)?;
+    let _hotkey_guard = HotkeySuspendGuard {
+        app,
+        state,
+        active: true,
+    };
 
     let settings = state.store.load_settings().map_err(|e| e.to_string())?;
     let perf = *state.perf_config.lock();
@@ -2119,6 +2158,9 @@ pub(crate) fn dispatch_dictation_hotkey(app: &AppHandle, shortcut_state: Shortcu
 fn handle_hotkey(app: &AppHandle, shortcut_state: ShortcutState) {
     let state = app.state::<AppState>();
     if is_mic_probe_active(&state) {
+        return;
+    }
+    if state.hotkey_suspend_depth.load(Ordering::SeqCst) > 0 {
         return;
     }
 
@@ -2747,12 +2789,15 @@ pub fn run() {
             sync_tray_menus(app.handle());
             let _ = app_context::get_active_window();
 
-            let hotkey_setting = initial_settings.hotkey.clone();
-            let binding = hotkey::parse_hotkey_setting(&hotkey_setting).unwrap_or_else(|err| {
-                eprintln!("invalid stored hotkey ({hotkey_setting}): {err}, using default");
-                hotkey::HotkeyBinding::KeyCombo(hotkey::default_shortcut())
-            });
-            register_hotkey_binding(app.handle(), binding)?;
+            let preload_whisper = initial_perf.preload_whisper;
+            let preload_llm = initial_perf.preload_llm && initial_settings.auto_edit;
+
+            if !preload_whisper {
+                let state = app.state::<AppState>();
+                if let Err(err) = register_hotkey_from_settings(app.handle(), state.inner()) {
+                    eprintln!("failed to register dictation hotkey: {err}");
+                }
+            }
 
             if let Some(overlay) = app.get_webview_window("overlay") {
                 let _ = overlay.set_background_color(Some(tauri::window::Color(0, 0, 0, 0)));
@@ -2788,9 +2833,6 @@ pub fn run() {
 
             let app_for_watchdog = app.handle().clone();
             spawn_whisper_idle_watchdog(app_for_watchdog);
-
-            let preload_whisper = initial_perf.preload_whisper;
-            let preload_llm = initial_perf.preload_llm && initial_settings.auto_edit;
 
             if preload_whisper {
                 let app_handle = app.handle().clone();
