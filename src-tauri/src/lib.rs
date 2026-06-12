@@ -804,8 +804,7 @@ async fn set_settings(
     let next_stt = settings.stt_language.clone();
     let app_for_notify = app.clone();
     let stt_language_changed = prev_stt != next_stt;
-    let ui_language_changed =
-        previous.ui_language != parse_ui_language(&settings.ui_language);
+    let ui_language_changed = previous.ui_language != parse_ui_language(&settings.ui_language);
     let whisper_changed = previous.whisper_model() != whisper_model;
     let llm_changed = previous.llm_model() != llm_model;
     let inference_changed = previous.inference_backend() != inference_backend;
@@ -936,10 +935,7 @@ async fn set_settings(
     }
 
     if ui_language_changed {
-        let _ = app.emit(
-            "ui-language-changed",
-            next_settings.ui_language.clone(),
-        );
+        let _ = app.emit("ui-language-changed", next_settings.ui_language.clone());
     }
 
     sync_tray_menus(&app);
@@ -1309,8 +1305,8 @@ fn import_snippets(
     state: State<'_, AppState>,
     json: String,
 ) -> Result<usize, String> {
-    let entries: Vec<SnippetImport> =
-        serde_json::from_str(&json).map_err(|_| user_error_string(UserError::InvalidSnippetJson))?;
+    let entries: Vec<SnippetImport> = serde_json::from_str(&json)
+        .map_err(|_| user_error_string(UserError::InvalidSnippetJson))?;
     if entries.is_empty() {
         return Err(user_error_string(UserError::SnippetImportEmpty));
     }
@@ -1892,11 +1888,7 @@ fn tray_language_menu_text(app: &AppHandle) -> String {
     } else {
         "FR"
     };
-    ui::locale::tr_with_vars(
-        "tray.dictationLanguage",
-        &ui_language,
-        &[("label", label)],
-    )
+    ui::locale::tr_with_vars("tray.dictationLanguage", &ui_language, &[("label", label)])
 }
 
 fn sync_tray_menus(app: &AppHandle) {
@@ -1941,9 +1933,7 @@ fn sync_tray_menus(app: &AppHandle) {
             .map(|state| state.pipeline.lock().auto_edit_enabled())
             .unwrap_or(false);
         let _ = handles.auto_edit_item.set_checked(auto_edit_enabled);
-        let _ = handles
-            .language_item
-            .set_text(tray_language_menu_text(app));
+        let _ = handles.language_item.set_text(tray_language_menu_text(app));
     }
 }
 

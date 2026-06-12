@@ -971,9 +971,33 @@ const DOT_RIGHT_BLOCKWORDS: &[&str] = &[
 
 /// Common French words that must not form fake domains with a TLD (e.g. « comme . com »).
 const DOT_LEFT_BLOCKWORDS: &[&str] = &[
-    "comme", "partie", "statistique", "affichage", "graphique", "sections", "problemes",
-    "problèmes", "largeur", "barre", "attence", "latence", "donc", "alors", "aussi", "encore",
-    "tres", "très", "bien", "tout", "tous", "toute", "cette", "cela", "ceci", "notre", "votre",
+    "comme",
+    "partie",
+    "statistique",
+    "affichage",
+    "graphique",
+    "sections",
+    "problemes",
+    "problèmes",
+    "largeur",
+    "barre",
+    "attence",
+    "latence",
+    "donc",
+    "alors",
+    "aussi",
+    "encore",
+    "tres",
+    "très",
+    "bien",
+    "tout",
+    "tous",
+    "toute",
+    "cette",
+    "cela",
+    "ceci",
+    "notre",
+    "votre",
 ];
 
 fn is_domain_label(token: &str) -> bool {
