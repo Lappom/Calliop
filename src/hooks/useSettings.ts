@@ -8,7 +8,7 @@ import { translateError } from "../lib/translateError";
 import type { SttLanguageCode } from "./useSttLanguage";
 
 export type WhisperModelId = "auto" | "small" | "distil-fr-dec16";
-export type LlmModelId = "auto" | "qwen3-0.6b" | "qwen3-1.7b" | "qwen3-4b";
+export type LlmModelId = "auto" | "qwen3-0.6b" | "qwen3-1.7b" | "qwen3.5-4b";
 export type InferenceBackendId = "auto" | "cpu";
 
 export interface AppSettings {
@@ -76,7 +76,7 @@ interface DownloadProgress {
 }
 
 const WHISPER_MODEL_IDS = ["auto", "small", "distil-fr-dec16"] as const;
-const LLM_MODEL_IDS = ["auto", "qwen3-0.6b", "qwen3-1.7b", "qwen3-4b"] as const;
+const LLM_MODEL_IDS = ["auto", "qwen3-0.6b", "qwen3-1.7b", "qwen3.5-4b"] as const;
 
 function isModelInstalled(
   modelsStatus: ModelsStatus | null,
@@ -102,6 +102,9 @@ function parseWhisperModel(value: string): WhisperModelId {
 
 function parseLlmModel(value: string): LlmModelId {
   const normalized = value.trim().toLowerCase().replace(/_/g, "-");
+  if (normalized === "qwen3-4b") {
+    return "qwen3.5-4b";
+  }
   return LLM_MODEL_IDS.includes(normalized as LlmModelId)
     ? (normalized as LlmModelId)
     : "auto";

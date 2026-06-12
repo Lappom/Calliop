@@ -159,7 +159,7 @@ fn tier_defaults(tier: PerfTier, cpu_cores: u32) -> TierDefaults {
         },
         PerfTier::Performance => TierDefaults {
             whisper: WhisperModel::DistilFrDec16,
-            llm: LlmModel::Qwen3_4B,
+            llm: LlmModel::Qwen3_5_4B,
             vad_chunk_size: 1024,
             stt_threads: stt_threads_for_cores(cpu_cores, 8),
         },
@@ -216,7 +216,7 @@ mod tests {
         let c = caps(32, 16, true, 8);
         let cfg = resolve_perf_config(&settings("auto", "auto", false, true), &c, false);
         assert_eq!(cfg.whisper, WhisperModel::DistilFrDec16);
-        assert_eq!(cfg.llm, LlmModel::Qwen3_4B);
+        assert_eq!(cfg.llm, LlmModel::Qwen3_5_4B);
         assert_eq!(cfg.vad_chunk_size, 1024);
         assert_eq!(cfg.tier, PerfTier::Performance);
     }

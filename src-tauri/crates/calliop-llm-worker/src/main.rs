@@ -19,6 +19,7 @@ use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::model::params::LlamaModelParams;
 use llama_cpp_2::model::{AddBos, LlamaChatMessage, LlamaChatTemplate, LlamaModel};
+use llama_cpp_2::openai::OpenAIChatTemplateParams;
 use llama_cpp_2::sampling::LlamaSampler;
 use llama_cpp_2::token::LlamaToken;
 use serde::{Deserialize, Serialize};
@@ -26,7 +27,16 @@ use serde::{Deserialize, Serialize};
 const CLEANUP_CONTEXT_TOKENS: u32 = 2048;
 const CLEANUP_MAX_OUTPUT_TOKENS: i32 = 256;
 
-fn resolve_chat_template(model: &LlamaModel) -> Result<LlamaChatTemplate, String> {
+fn resolve_chat_template(model: &LlamaModel, model_path: &Path) -> Result<LlamaChatTemplate, String> {
+    let force_qwen3_fallback = model_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.contains("qwen3.5"));
+
+    if force_qwen3_fallback {
+        return LlamaChatTemplate::new(QWEN3_CHAT_TEMPLATE).map_err(|e| e.to_string());
+    }
+
     match model.chat_template(None) {
         Ok(template) => Ok(template),
         Err(err) => {
@@ -75,7 +85,7 @@ impl InferenceEngine {
         let model_params = LlamaModelParams::default().with_n_gpu_layers(n_gpu_layers);
         let model = LlamaModel::load_from_file(&backend, model_path, &model_params)
             .map_err(|err| err.to_string())?;
-        let chat_template = resolve_chat_template(&model)?;
+        let chat_template = resolve_chat_template(&model, model_path)?;
         let system_prompts = [
             build_system_prompt(ToneProfile::Default),
             build_system_prompt(ToneProfile::Casual),
@@ -114,11 +124,60 @@ impl InferenceEngine {
         Ok((ctx, batch))
     }
 
-    fn tokenize_prompt(&self, messages: &[LlamaChatMessage]) -> Result<Vec<LlamaToken>, String> {
-        let prompt = self
+    fn render_chat_prompt(
+        &self,
+        messages: &[(&str, &str)],
+        add_generation_prompt: bool,
+    ) -> Result<String, String> {
+        let payload: Vec<serde_json::Value> = messages
+            .iter()
+            .map(|(role, content)| {
+                serde_json::json!({
+                    "role": role,
+                    "content": content,
+                })
+            })
+            .collect();
+        let messages_json =
+            serde_json::to_string(&payload).map_err(|err| err.to_string())?;
+        let params = OpenAIChatTemplateParams {
+            messages_json: &messages_json,
+            tools_json: None,
+            tool_choice: None,
+            json_schema: None,
+            grammar: None,
+            reasoning_format: None,
+            chat_template_kwargs: Some(r#"{"enable_thinking":false}"#),
+            add_generation_prompt,
+            use_jinja: true,
+            parallel_tool_calls: false,
+            enable_thinking: false,
+            add_bos: false,
+            add_eos: false,
+            parse_tool_calls: false,
+        };
+
+        if let Ok(result) = self
             .model
-            .apply_chat_template(&self.chat_template, messages, true)
-            .map_err(|err| err.to_string())?;
+            .apply_chat_template_oaicompat(&self.chat_template, &params)
+        {
+            return Ok(result.prompt);
+        }
+
+        let chat_messages: Vec<LlamaChatMessage> = messages
+            .iter()
+            .map(|(role, content)| {
+                LlamaChatMessage::new((*role).into(), (*content).into()).map_err(|err| err.to_string())
+            })
+            .collect::<Result<_, _>>()?;
+
+        self.model
+            .apply_chat_template(&self.chat_template, &chat_messages, add_generation_prompt)
+            .map_err(|err| err.to_string())
+    }
+
+    fn tokenize_prompt(&self, messages: &[(&str, &str)]) -> Result<Vec<LlamaToken>, String> {
+        let prompt = self.render_chat_prompt(messages, true)?;
         self.model
             .str_to_token(&prompt, AddBos::Never)
             .map_err(|err| err.to_string())
@@ -126,14 +185,8 @@ impl InferenceEngine {
 
     fn tokenize_system_prefix(&self, tone: ToneProfile) -> Result<Vec<LlamaToken>, String> {
         let system_prompt = self.system_prompt(tone);
-        let messages = vec![
-            LlamaChatMessage::new("system".into(), system_prompt.to_string())
-                .map_err(|err| err.to_string())?,
-        ];
-        let prompt = self
-            .model
-            .apply_chat_template(&self.chat_template, &messages, false)
-            .map_err(|err| err.to_string())?;
+        let messages = [("system", system_prompt)];
+        let prompt = self.render_chat_prompt(&messages, false)?;
         self.model
             .str_to_token(&prompt, AddBos::Never)
             .map_err(|err| err.to_string())
@@ -174,10 +227,10 @@ impl InferenceEngine {
         }
 
         let user_message = build_cleanup_user_message(raw).map_err(|err| err.to_string())?;
-        let messages = vec![
-            LlamaChatMessage::new("system".into(), self.system_prompt(tone).to_string())
-                .map_err(|err| err.to_string())?,
-            LlamaChatMessage::new("user".into(), user_message).map_err(|err| err.to_string())?,
+        let system_prompt = self.system_prompt(tone);
+        let messages = [
+            ("system", system_prompt),
+            ("user", user_message.as_str()),
         ];
 
         let full_tokens = self.tokenize_prompt(&messages)?;

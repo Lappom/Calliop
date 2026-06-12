@@ -188,7 +188,7 @@
         "auto": "Automatique (recommandé)",
         "qwen06": "Qwen3 0.6B (~484 Mo)",
         "qwen17": "Qwen3 1.7B (~1,1 Go)",
-        "qwen4": "Qwen3 4B (~2,5 Go)"
+        "qwen35_4": "Qwen3.5 4B (~2,7 Go)"
       },
       "manage": {
         "diskSize": "{{size}} sur disque",

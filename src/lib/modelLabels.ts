@@ -7,7 +7,7 @@ const MODEL_LABEL_KEYS: Record<string, string> = {
   medium: "settings.modelsPanel.whisper.distilFr",
   "qwen3-0.6b": "settings.modelsPanel.llm.qwen06",
   "qwen3-1.7b": "settings.modelsPanel.llm.qwen17",
-  "qwen3-4b": "settings.modelsPanel.llm.qwen4",
+  "qwen3.5-4b": "settings.modelsPanel.llm.qwen35_4",
 };
 
 export function getModelDownloadLabels(t: TFunction) {

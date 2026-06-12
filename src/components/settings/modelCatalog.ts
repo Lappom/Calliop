@@ -5,7 +5,7 @@ import type { SelectOption } from "../ui/Select";
 export type ModelInstallStatus = "active" | "installed" | "missing";
 
 const WHISPER_MODEL_IDS = ["auto", "small", "distil-fr-dec16"] as const;
-const LLM_MODEL_IDS = ["auto", "qwen3-0.6b", "qwen3-1.7b", "qwen3-4b"] as const;
+const LLM_MODEL_IDS = ["auto", "qwen3-0.6b", "qwen3-1.7b", "qwen3.5-4b"] as const;
 
 const WHISPER_LABEL_KEYS: Record<(typeof WHISPER_MODEL_IDS)[number], string> = {
   auto: "settings.modelsPanel.whisper.auto",
@@ -17,7 +17,7 @@ const LLM_LABEL_KEYS: Record<(typeof LLM_MODEL_IDS)[number], string> = {
   auto: "settings.modelsPanel.llm.auto",
   "qwen3-0.6b": "settings.modelsPanel.llm.qwen06",
   "qwen3-1.7b": "settings.modelsPanel.llm.qwen17",
-  "qwen3-4b": "settings.modelsPanel.llm.qwen4",
+  "qwen3.5-4b": "settings.modelsPanel.llm.qwen35_4",
 };
 
 function resolveModelStatus(

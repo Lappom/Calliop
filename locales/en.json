@@ -188,7 +188,7 @@
         "auto": "Automatic (recommended)",
         "qwen06": "Qwen3 0.6B (~484 MB)",
         "qwen17": "Qwen3 1.7B (~1.1 GB)",
-        "qwen4": "Qwen3 4B (~2.5 GB)"
+        "qwen35_4": "Qwen3.5 4B (~2.7 GB)"
       },
       "manage": {
         "diskSize": "{{size}} on disk",

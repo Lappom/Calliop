@@ -2675,8 +2675,19 @@ pub fn run() {
         }
     }
 
+    if initial_settings.llm_model == "qwen3-4b" {
+        initial_settings.llm_model = llm::LlmModel::Qwen3_5_4B.as_setting_value().into();
+        if let Err(err) = store.save_settings(&initial_settings) {
+            eprintln!("failed to migrate llm_model from qwen3-4b: {err}");
+        }
+    }
+
     if let Err(err) = stt::remove_legacy_medium_model() {
         eprintln!("failed to remove legacy whisper medium model: {err}");
+    }
+
+    if let Err(err) = llm::remove_legacy_qwen3_4b_model() {
+        eprintln!("failed to remove legacy qwen3 4b model: {err}");
     }
 
     pipeline.lock().set_auto_edit(initial_settings.auto_edit);

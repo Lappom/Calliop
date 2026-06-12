@@ -367,7 +367,7 @@ export function SettingsView() {
                   value === "auto" ||
                   value === "qwen3-0.6b" ||
                   value === "qwen3-1.7b" ||
-                  value === "qwen3-4b"
+                  value === "qwen3.5-4b"
                 ) {
                   void setLlmModel(value);
                 }

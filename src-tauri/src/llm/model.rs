@@ -11,7 +11,7 @@ pub const DEFAULT_MODEL_FILE: &str = "qwen3-1.7b-instruct-q4_k_m.gguf";
 // Published Hugging Face release sizes (bytes).
 const QWEN3_0_6B_BYTES: u64 = 396_705_472;
 const QWEN3_1_7B_BYTES: u64 = 1_107_404_512;
-const QWEN3_4B_BYTES: u64 = 2_497_281_120;
+const QWEN3_5_4B_BYTES: u64 = 2_740_937_888;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -23,8 +23,8 @@ pub enum LlmModel {
     Qwen3_0_6B,
     #[serde(rename = "qwen3-1.7b")]
     Qwen3_1_7B,
-    #[serde(rename = "qwen3-4b")]
-    Qwen3_4B,
+    #[serde(rename = "qwen3.5-4b")]
+    Qwen3_5_4B,
 }
 
 impl LlmModel {
@@ -33,7 +33,7 @@ impl LlmModel {
             "auto" => Some(Self::Auto),
             "qwen3-0.6b" | "qwen3_0.6b" => Some(Self::Qwen3_0_6B),
             "qwen3-1.7b" | "qwen3_1.7b" => Some(Self::Qwen3_1_7B),
-            "qwen3-4b" | "qwen3_4b" => Some(Self::Qwen3_4B),
+            "qwen3-4b" | "qwen3_4b" | "qwen3.5-4b" | "qwen3_5_4b" => Some(Self::Qwen3_5_4B),
             _ => None,
         }
     }
@@ -43,7 +43,7 @@ impl LlmModel {
             Self::Auto => "auto",
             Self::Qwen3_0_6B => "qwen3-0.6b",
             Self::Qwen3_1_7B => "qwen3-1.7b",
-            Self::Qwen3_4B => "qwen3-4b",
+            Self::Qwen3_5_4B => "qwen3.5-4b",
         }
     }
 
@@ -56,7 +56,7 @@ impl LlmModel {
             Self::Auto => None,
             Self::Qwen3_0_6B => Some("qwen3-0.6b-instruct-q4_k_m.gguf"),
             Self::Qwen3_1_7B => Some("qwen3-1.7b-instruct-q4_k_m.gguf"),
-            Self::Qwen3_4B => Some("qwen3-4b-instruct-q4_k_m.gguf"),
+            Self::Qwen3_5_4B => Some("qwen3.5-4b-instruct-q4_k_m.gguf"),
         }
     }
 
@@ -65,7 +65,7 @@ impl LlmModel {
             Self::Auto => "Automatique (recommandé)",
             Self::Qwen3_0_6B => "Qwen3 0.6B Instruct Q4_K_M (~378 Mo)",
             Self::Qwen3_1_7B => "Qwen3 1.7B Instruct Q4_K_M (~1,1 Go)",
-            Self::Qwen3_4B => "Qwen3 4B Instruct Q4_K_M (~2,5 Go, GPU recommandé)",
+            Self::Qwen3_5_4B => "Qwen3.5 4B Instruct Q4_K_M (~2,7 Go, GPU recommandé)",
         }
     }
 
@@ -74,7 +74,7 @@ impl LlmModel {
             Self::Auto => 0,
             Self::Qwen3_0_6B => 370_000_000,
             Self::Qwen3_1_7B => 1_000_000_000,
-            Self::Qwen3_4B => 2_497_000_000,
+            Self::Qwen3_5_4B => 2_600_000_000,
         }
     }
 
@@ -83,7 +83,7 @@ impl LlmModel {
             Self::Auto => None,
             Self::Qwen3_0_6B => Some(QWEN3_0_6B_BYTES),
             Self::Qwen3_1_7B => Some(QWEN3_1_7B_BYTES),
-            Self::Qwen3_4B => Some(QWEN3_4B_BYTES),
+            Self::Qwen3_5_4B => Some(QWEN3_5_4B_BYTES),
         }
     }
 
@@ -96,8 +96,8 @@ impl LlmModel {
             Self::Qwen3_1_7B => &[
                 "https://huggingface.co/PatnaikAshish/Qwen3-1.7B-Instruct-Q4_K_M-GGUF/resolve/main/qwen3-1.7b-instruct-q4_k_m.gguf",
             ],
-            Self::Qwen3_4B => &[
-                "https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/main/Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+            Self::Qwen3_5_4B => &[
+                "https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/resolve/main/Qwen3.5-4B-Q4_K_M.gguf",
             ],
         }
     }
@@ -114,7 +114,7 @@ impl LlmModel {
     }
 
     pub fn all_concrete() -> [Self; 3] {
-        [Self::Qwen3_0_6B, Self::Qwen3_1_7B, Self::Qwen3_4B]
+        [Self::Qwen3_0_6B, Self::Qwen3_1_7B, Self::Qwen3_5_4B]
     }
 
     pub fn all_selectable() -> [Self; 4] {
@@ -122,8 +122,24 @@ impl LlmModel {
             Self::Auto,
             Self::Qwen3_0_6B,
             Self::Qwen3_1_7B,
-            Self::Qwen3_4B,
+            Self::Qwen3_5_4B,
         ]
+    }
+}
+
+pub const LEGACY_QWEN3_4B_MODEL_FILE: &str = "qwen3-4b-instruct-q4_k_m.gguf";
+
+pub fn legacy_qwen3_4b_model_path() -> PathBuf {
+    models_dir().join(LEGACY_QWEN3_4B_MODEL_FILE)
+}
+
+/// Remove orphaned Qwen3 4B weights after migration to Qwen3.5 4B.
+pub fn remove_legacy_qwen3_4b_model() -> std::io::Result<()> {
+    let path = legacy_qwen3_4b_model_path();
+    if path.exists() {
+        std::fs::remove_file(path)
+    } else {
+        Ok(())
     }
 }
 
@@ -391,19 +407,19 @@ mod tests {
     }
 
     #[test]
-    fn qwen3_min_bytes_fit_huggingface_releases() {
+    fn llm_model_release_sizes_fit_min_bytes() {
         assert!(QWEN3_0_6B_BYTES >= LlmModel::Qwen3_0_6B.min_bytes());
         assert!(QWEN3_1_7B_BYTES >= LlmModel::Qwen3_1_7B.min_bytes());
-        assert!(QWEN3_4B_BYTES >= LlmModel::Qwen3_4B.min_bytes());
+        assert!(QWEN3_5_4B_BYTES >= LlmModel::Qwen3_5_4B.min_bytes());
     }
 
     #[test]
-    fn rejects_truncated_qwen3_4b_file() {
-        let dir = std::env::temp_dir().join("calliop-llm-4b-truncated-test");
+    fn rejects_truncated_qwen3_5_4b_file() {
+        let dir = std::env::temp_dir().join("calliop-llm-35-4b-truncated-test");
         let _ = std::fs::create_dir_all(&dir);
-        let path = dir.join("qwen3-4b-instruct-q4_k_m.gguf");
-        std::fs::write(&path, vec![0u8; 2_432_419_585]).unwrap();
-        assert!(!is_valid_model_file(LlmModel::Qwen3_4B, &path));
+        let path = dir.join("qwen3.5-4b-instruct-q4_k_m.gguf");
+        std::fs::write(&path, vec![0u8; 2_600_000_000]).unwrap();
+        assert!(!is_valid_model_file(LlmModel::Qwen3_5_4B, &path));
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -423,9 +439,20 @@ mod tests {
     }
 
     #[test]
+    fn legacy_qwen3_4b_path_uses_expected_filename() {
+        assert!(legacy_qwen3_4b_model_path().ends_with(LEGACY_QWEN3_4B_MODEL_FILE));
+    }
+
+    #[test]
+    fn remove_legacy_qwen3_4b_is_ok_when_file_absent() {
+        assert!(remove_legacy_qwen3_4b_model().is_ok());
+    }
+
+    #[test]
     fn parses_model_ids() {
         assert_eq!(LlmModel::parse("qwen3-0.6b"), Some(LlmModel::Qwen3_0_6B));
         assert_eq!(LlmModel::parse("qwen3-1.7b"), Some(LlmModel::Qwen3_1_7B));
-        assert_eq!(LlmModel::parse("qwen3-4b"), Some(LlmModel::Qwen3_4B));
+        assert_eq!(LlmModel::parse("qwen3.5-4b"), Some(LlmModel::Qwen3_5_4B));
+        assert_eq!(LlmModel::parse("qwen3-4b"), Some(LlmModel::Qwen3_5_4B));
     }
 }
