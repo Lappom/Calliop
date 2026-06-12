@@ -149,7 +149,7 @@
     },
     "autoUpdate": {
       "label": "Mises à jour automatiques",
-      "descriptionOn": "Vérifie les nouvelles versions sur GitHub au démarrage et installe les mises à jour signées.",
+      "descriptionOn": "Vérifie les nouvelles versions sur GitHub au démarrage et les télécharge en arrière-plan.",
       "descriptionOff": "Désactivé : aucune vérification réseau pour les mises à jour de l'application."
     },
     "autostart": {
@@ -611,6 +611,7 @@
     "INVALID_MODEL_KIND": "Type de modèle invalide (whisper ou llm).",
     "UNKNOWN_WHISPER_MODEL": "Modèle Whisper inconnu.",
     "UNKNOWN_LLM_MODEL": "Modèle LLM inconnu.",
+    "LLM_ENGINE_LOAD_FAILED": "Le modèle a été enregistré, mais son chargement a échoué (mémoire insuffisante ou erreur du moteur LLM). Réessayez ou choisissez un modèle plus léger.",
     "INVALID_INFERENCE_BACKEND": "Backend d'inférence invalide.",
     "WORD_EMPTY": "Le mot ne peut pas être vide.",
     "WORD_TOO_LONG": "Le mot ne peut pas être vide et ne peut pas être uniquement numérique.",
@@ -669,6 +670,14 @@
         "worker_error": "Le moteur IA a rencontré une erreur. Texte post-traité injecté.",
         "unknown": "Le nettoyage IA n'a pas pu s'exécuter."
       }
+    },
+    "appUpdate": {
+      "title": "Mise à jour {{version}} prête",
+      "description": "L'application reste utilisable normalement. Installez quand vous le souhaitez.",
+      "install": "Installer",
+      "installing": "Installation…",
+      "later": "Plus tard",
+      "installError": "Impossible d'installer la mise à jour."
     }
   },
   "window": {

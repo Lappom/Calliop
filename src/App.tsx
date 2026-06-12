@@ -6,6 +6,7 @@ import { AppFrame } from "./components/layout/AppFrame";
 import { AppShell } from "./components/layout/AppShell";
 import { LlmSkipToast } from "./components/layout/LlmSkipToast";
 import { ModelDownloadToasts } from "./components/layout/ModelDownloadToasts";
+import { UpdateToast } from "./components/layout/UpdateToast";
 import { PageTransition } from "./components/motion/PageTransition";
 import { StyleView } from "./components/style/StyleView";
 import { DictionaryView } from "./components/dictionary/DictionaryView";
@@ -67,6 +68,7 @@ function App() {
         </AppFrame>
         <ModelDownloadToasts />
         <LlmSkipToast />
+        <UpdateToast />
       </>
     );
   }
@@ -84,6 +86,7 @@ function App() {
         </AppFrame>
         <ModelDownloadToasts />
         <LlmSkipToast />
+        <UpdateToast />
       </>
     );
   }
@@ -107,6 +110,7 @@ function App() {
       </AppFrame>
       <ModelDownloadToasts />
       <LlmSkipToast />
+      <UpdateToast />
     </>
   );
 }

@@ -12,6 +12,7 @@ pub mod store;
 pub mod stt;
 pub mod system;
 pub mod ui;
+pub mod update;
 pub mod user_error;
 
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -43,7 +44,6 @@ use tauri::{
 };
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
-use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_updater::UpdaterExt;
 
 use user_error::{user_error_string, UserError};
@@ -127,6 +127,7 @@ struct AppState {
     loaded_whisper: Mutex<Option<WhisperModel>>,
     loaded_llm: Mutex<Option<llm::LlmModel>>,
     mic_probe: MicProbeState,
+    pending_update: update::PendingUpdateStore,
 }
 
 /// Held while `set_settings` downloads or reloads the active Whisper model.
@@ -1090,12 +1091,9 @@ async fn set_settings(
             let _ = app.emit("llm-unready", ());
             if !llm_lazy_load || llm_model_preference_changed || llm_engine_out_of_sync {
                 if let Err(err) = ensure_llm_model_inner(&app, &state).await {
-                    if let Err(rollback_err) =
-                        rollback_settings(&app, &state, &previous, rollback_ctx).await
-                    {
-                        eprintln!("settings rollback failed: {rollback_err}");
-                    }
-                    return Err(err);
+                    // Preference is already persisted; keep it and surface the load error.
+                    eprintln!("llm reload after settings change failed: {err}");
+                    return Err(user_error_string(UserError::LlmEngineLoadFailed));
                 }
             } else {
                 state.deferred_llm_on_boot.store(true, Ordering::SeqCst);
@@ -2381,11 +2379,7 @@ fn build_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn spawn_update_check_if_enabled(
-    app: AppHandle,
-    store: Arc<Store>,
-    pipeline: Arc<Mutex<PipelineOrchestrator>>,
-) {
+fn spawn_update_check_if_enabled(app: AppHandle, store: Arc<Store>) {
     tauri::async_runtime::spawn(async move {
         if cfg!(debug_assertions) {
             return;
@@ -2415,42 +2409,70 @@ fn spawn_update_check_if_enabled(
 
         match updater.check().await {
             Ok(Some(update)) => {
+                if update::dismissed_update_version().as_deref() == Some(update.version.as_str()) {
+                    return;
+                }
+
+                wait_before_app_update_download(&app, &settings).await;
+
                 let version = update.version.clone();
-                let _ = app.emit("update-available", version.clone());
-                wait_for_pipeline_idle(&pipeline).await;
-                let _ = app
-                    .notification()
-                    .builder()
-                    .title("Calliop")
-                    .body(format!(
-                        "Mise à jour {version} disponible. Téléchargement en cours…"
-                    ))
-                    .show();
-                match update.download_and_install(|_, _| {}, || {}).await {
-                    Ok(()) => {
-                        let _ = app
-                            .notification()
-                            .builder()
-                            .title("Calliop")
-                            .body(format!("Mise à jour {version} installée. Redémarrage…"))
-                            .show();
-                        app.restart();
+                match update.download(|_, _| {}, || {}).await {
+                    Ok(bytes) => {
+                        let bytes_path = match update::store_pending_update_bytes(&bytes) {
+                            Ok(path) => path,
+                            Err(err) => {
+                                eprintln!("auto-update: failed to store update: {err}");
+                                return;
+                            }
+                        };
+
+                        let payload = update::UpdateReadyPayload {
+                            version: version.clone(),
+                        };
+                        let state = app.state::<AppState>();
+                        *state.pending_update.lock() = Some(update::PendingUpdate {
+                            version,
+                            update,
+                            bytes_path,
+                        });
+                        let _ = app.emit("update-ready", payload);
                     }
-                    Err(err) => {
-                        eprintln!("auto-update: download failed: {err}");
-                        let _ = app
-                            .notification()
-                            .builder()
-                            .title("Calliop")
-                            .body(format!("Échec de la mise à jour : {err}"))
-                            .show();
-                    }
+                    Err(err) => eprintln!("auto-update: download failed: {err}"),
                 }
             }
             Ok(None) => {}
             Err(err) => eprintln!("auto-update: check failed: {err}"),
         }
     });
+}
+
+async fn wait_before_app_update_download(app: &AppHandle, settings: &AppSettings) {
+    let preload_whisper = app
+        .state::<AppState>()
+        .perf_config
+        .lock()
+        .preload_whisper;
+    let preload_llm = settings.auto_edit
+        && app.state::<AppState>().perf_config.lock().preload_llm;
+
+    loop {
+        let state = app.state::<AppState>();
+        let pipeline_idle = state.pipeline.lock().state() == PipelineState::Idle;
+
+        let whisper_busy = preload_whisper
+            && !state.model_ready.load(Ordering::SeqCst)
+            && state.whisper_engine.lock().is_none();
+        let llm_busy = preload_llm
+            && !state.llm_ready.load(Ordering::SeqCst)
+            && state.llm_engine.lock().is_none();
+
+        if pipeline_idle && !whisper_busy && !llm_busy {
+            return;
+        }
+
+        drop(state);
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+    }
 }
 
 async fn wait_for_pipeline_idle(pipeline: &Arc<Mutex<PipelineOrchestrator>>) {
@@ -2460,6 +2482,49 @@ async fn wait_for_pipeline_idle(pipeline: &Arc<Mutex<PipelineOrchestrator>>) {
         }
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
     }
+}
+
+#[tauri::command]
+fn get_pending_update_version(state: State<'_, AppState>) -> Option<String> {
+    state
+        .pending_update
+        .lock()
+        .as_ref()
+        .map(|pending| pending.version.clone())
+}
+
+#[tauri::command]
+async fn install_pending_update(
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let pending = state.pending_update.lock().take();
+    let Some(pending) = pending else {
+        return Err("Aucune mise à jour en attente.".into());
+    };
+
+    wait_for_pipeline_idle(&state.pipeline).await;
+
+    let bytes = update::read_pending_update_bytes(&pending.bytes_path)?;
+    update::mark_show_after_update();
+    update::clear_dismissed_update_version();
+    let result = pending.update.install(&bytes);
+    pending.clear();
+    result.map_err(|err| format!("Échec de l'installation : {err}"))
+}
+
+#[tauri::command]
+fn dismiss_pending_update(state: State<'_, AppState>) -> Result<(), String> {
+    let dismissed_version = state.pending_update.lock().take().map(|pending| {
+        let version = pending.version.clone();
+        pending.clear();
+        version
+    });
+    if let Some(version) = dismissed_version {
+        update::mark_update_dismissed(&version);
+    } else {
+        update::clear_pending_update_files();
+    }
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -2584,6 +2649,7 @@ pub fn run() {
                 capture: Mutex::new(None),
                 level_task: Mutex::new(None),
             },
+            pending_update: Arc::new(Mutex::new(None)),
         })
         .setup(move |app| {
             let _modules = registered_modules();
@@ -2602,6 +2668,8 @@ pub fn run() {
                 let _ = overlay.set_background_color(Some(tauri::window::Color(0, 0, 0, 0)));
             }
 
+            let show_after_update = update::take_show_after_update_flag();
+
             if let Some(main) = app.get_webview_window("main") {
                 let _ = main.set_theme(Some(Theme::Dark));
                 let app_handle = app.handle().clone();
@@ -2614,12 +2682,17 @@ pub fn run() {
                     }
                 });
 
-                if !should_start_minimized() {
+                if show_after_update {
+                    let _ = main.show();
+                    let _ = main.unminimize();
+                    let _ = main.maximize();
+                    let _ = main.set_focus();
+                } else if !should_start_minimized() {
                     let _ = main.maximize();
                 }
             }
 
-            if should_start_minimized() {
+            if should_start_minimized() && !show_after_update {
                 hide_main_window(app.handle());
             }
 
@@ -2653,11 +2726,7 @@ pub fn run() {
             {
                 let app_for_update = app.handle().clone();
                 let state = app.state::<AppState>();
-                spawn_update_check_if_enabled(
-                    app_for_update,
-                    Arc::clone(&state.store),
-                    Arc::clone(&state.pipeline),
-                );
+                spawn_update_check_if_enabled(app_for_update, Arc::clone(&state.store));
             }
 
             Ok(())
@@ -2685,6 +2754,9 @@ pub fn run() {
             cycle_dictation_language,
             is_autostart_enabled,
             set_autostart_enabled,
+            get_pending_update_version,
+            install_pending_update,
+            dismiss_pending_update,
             list_dictionary_words,
             add_dictionary_word,
             update_dictionary_word,

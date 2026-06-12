@@ -381,17 +381,26 @@ export function useSettings() {
         settingsRef.current = syncedSettings;
         setSettings(syncedSettings);
       } catch (err) {
-        settingsRef.current = previousSettings;
-        llmReadyRef.current = previousLlmReady;
-        llmProgressRef.current = previousLlmProgress;
-        setSettings(previousSettings);
-        setLlmReady(previousLlmReady);
-        setLlmProgress(previousLlmProgress);
-        setLlmProgressModel(null);
-        setSttProgress(null);
-        setSttProgressModel(null);
+        try {
+          const payload = await invoke<SettingsPayload>("get_settings");
+          const syncedSettings = fromPayload(payload);
+          settingsRef.current = syncedSettings;
+          setSettings(syncedSettings);
+          void refreshModelsStatus();
+          void refreshInferenceInfo();
+        } catch {
+          settingsRef.current = previousSettings;
+          llmReadyRef.current = previousLlmReady;
+          llmProgressRef.current = previousLlmProgress;
+          setSettings(previousSettings);
+          setLlmReady(previousLlmReady);
+          setLlmProgress(previousLlmProgress);
+          setLlmProgressModel(null);
+          setSttProgress(null);
+          setSttProgressModel(null);
+          void refreshModelsStatus();
+        }
         setErrorMessage(translateError(err, t));
-        void refreshModelsStatus();
         throw err;
       } finally {
         setSaving(false);
