@@ -88,8 +88,18 @@ try {
     }
 
     $staging = "$dest.tmp"
-    Copy-Item -Force $builtWorker $staging
-    Move-Item -Force $staging $dest
+    if (Test-Path $staging) {
+        Remove-Item -Force $staging -ErrorAction SilentlyContinue
+    }
+    try {
+        Copy-Item -Force $builtWorker $dest
+    } catch {
+        throw @"
+Failed to copy LLM sidecar to $dest
+Close Calliop if it is running, then retry the build.
+$($_.Exception.Message)
+"@
+    }
     Write-Host "LLM sidecar ready: $dest"
 } finally {
     Pop-Location

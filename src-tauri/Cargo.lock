@@ -485,7 +485,7 @@ dependencies = [
 
 [[package]]
 name = "calliop"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "arboard",
  "calliop-prompt",
@@ -517,7 +517,7 @@ dependencies = [
 
 [[package]]
 name = "calliop-llm-worker"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "calliop-prompt",
  "encoding_rs",
@@ -528,7 +528,7 @@ dependencies = [
 
 [[package]]
 name = "calliop-prompt"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "serde_json",
