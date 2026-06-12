@@ -20,6 +20,7 @@ import {
   getSettingsSections,
   hotkeyPartLabel,
   hotkeyParts,
+  isHotkeySupported,
   type SettingsSectionId,
 } from "./settingsUtils";
 
@@ -27,6 +28,9 @@ export function SettingsView() {
   const { t } = useTranslation();
   const [recordingHotkey, setRecordingHotkey] = useState(false);
   const [pendingHotkey, setPendingHotkey] = useState<string | null>(null);
+  const [hotkeyCaptureError, setHotkeyCaptureError] = useState<string | null>(
+    null,
+  );
   const [hotkeyRestoreError, setHotkeyRestoreError] = useState<string | null>(
     null,
   );
@@ -73,21 +77,34 @@ export function SettingsView() {
   const handleHotkeyCapture = useCallback(
     (event: KeyboardEvent) => {
       void (async () => {
-        const captured = captureHotkey(event);
-        if (captured === null) {
+        const result = captureHotkey(event);
+        if (result.action === "ignore") {
+          return;
+        }
+        if (result.action === "cancel") {
           setPendingHotkey(null);
           setRecordingHotkey(false);
           return;
         }
-        setPendingHotkey(captured);
+        if (result.action === "invalid") {
+          setHotkeyCaptureError(t("keys.hotkeyUnsupported"));
+          return;
+        }
+        if (!isHotkeySupported(result.hotkey)) {
+          return;
+        }
+        setPendingHotkey(result.hotkey);
         try {
-          await setHotkey(captured);
+          await setHotkey(result.hotkey);
+          setPendingHotkey(null);
+        } catch {
+          setPendingHotkey(null);
         } finally {
           setRecordingHotkey(false);
         }
       })();
     },
-    [setHotkey],
+    [setHotkey, t],
   );
 
   const restoreGlobalHotkey = useCallback(async () => {
@@ -237,6 +254,7 @@ export function SettingsView() {
             <ModelsSettingsPanel
               whisperModel={settings.whisperModel}
               llmModel={settings.llmModel}
+              lowPowerMode={settings.lowPowerMode}
               sttProgress={sttProgress}
               llmProgress={llmProgress}
               sttProgressModel={sttProgressModel}
@@ -291,6 +309,7 @@ export function SettingsView() {
                 variant={recordingHotkey ? "primary" : "ghost"}
                 disabled={saving}
                 onClick={() => {
+                  setHotkeyCaptureError(null);
                   setRecordingHotkey((current) => !current);
                   setPendingHotkey(null);
                 }}
@@ -302,6 +321,10 @@ export function SettingsView() {
                   : t("keys.hotkeyEdit")}
               </Button>
             </div>
+
+            {hotkeyCaptureError && (
+              <p className="text-body-sm text-accent-red">{hotkeyCaptureError}</p>
+            )}
 
             {hotkeyRestoreError && (
               <div className="space-y-2">

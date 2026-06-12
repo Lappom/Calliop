@@ -78,6 +78,19 @@ interface DownloadProgress {
 const WHISPER_MODEL_IDS = ["auto", "small", "distil-fr-dec16"] as const;
 const LLM_MODEL_IDS = ["auto", "qwen3-0.6b", "qwen3-1.7b", "qwen3-4b"] as const;
 
+function isModelInstalled(
+  modelsStatus: ModelsStatus | null,
+  kind: "whisper" | "llm",
+  modelId: string,
+): boolean {
+  if (modelId === "auto") {
+    return true;
+  }
+  const entries =
+    kind === "whisper" ? modelsStatus?.whisper : modelsStatus?.llm;
+  return entries?.find((entry) => entry.id === modelId)?.installed ?? false;
+}
+
 function parseWhisperModel(value: string): WhisperModelId {
   if (value === "medium") {
     return "distil-fr-dec16";
@@ -179,9 +192,14 @@ export function useSettings() {
   const settingsRef = useRef(settings);
   const llmReadyRef = useRef(llmReady);
   const llmProgressRef = useRef(llmProgress);
+  const modelsStatusRef = useRef(modelsStatus);
+  const progressRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
 
   const refreshModelsStatus = useCallback(async () => {
     const status = await invoke<ModelsStatus>("get_models_status");
+    modelsStatusRef.current = status;
     setModelsStatus(status);
   }, []);
 
@@ -189,6 +207,20 @@ export function useSettings() {
     const info = await invoke<InferenceInfo>("get_inference_info");
     setInferenceInfo(info);
   }, []);
+
+  const scheduleModelsStatusRefresh = useCallback(() => {
+    if (progressRefreshTimerRef.current !== null) {
+      clearTimeout(progressRefreshTimerRef.current);
+    }
+    progressRefreshTimerRef.current = setTimeout(() => {
+      progressRefreshTimerRef.current = null;
+      void refreshModelsStatus();
+    }, 500);
+  }, [refreshModelsStatus]);
+
+  useEffect(() => {
+    modelsStatusRef.current = modelsStatus;
+  }, [modelsStatus]);
 
   useEffect(() => {
     let cancelled = false;
@@ -233,15 +265,26 @@ export function useSettings() {
         setLlmReady(false);
         setLlmProgress(null);
         setLlmProgressModel(null);
+        void refreshModelsStatus();
       }),
       listen<DownloadProgress>("llm-model-download-progress", (event) => {
         llmProgressRef.current = event.payload.percent;
         setLlmProgress(event.payload.percent);
         setLlmProgressModel(event.payload.model_id);
+        if (event.payload.percent >= 100) {
+          void refreshModelsStatus();
+        } else {
+          scheduleModelsStatusRefresh();
+        }
       }),
       listen<DownloadProgress>("model-download-progress", (event) => {
         setSttProgress(event.payload.percent);
         setSttProgressModel(event.payload.model_id);
+        if (event.payload.percent >= 100) {
+          void refreshModelsStatus();
+        } else {
+          scheduleModelsStatusRefresh();
+        }
       }),
       listen("model-ready", () => {
         setSttProgress(null);
@@ -259,9 +302,13 @@ export function useSettings() {
 
     return () => {
       cancelled = true;
+      if (progressRefreshTimerRef.current !== null) {
+        clearTimeout(progressRefreshTimerRef.current);
+        progressRefreshTimerRef.current = null;
+      }
       void unlisteners.then((drops) => drops.forEach((drop) => drop()));
     };
-  }, [refreshModelsStatus, refreshInferenceInfo, t]);
+  }, [refreshModelsStatus, refreshInferenceInfo, scheduleModelsStatusRefresh, t]);
 
   const saveSettings = useCallback(
     async (next: AppSettings) => {
@@ -286,9 +333,29 @@ export function useSettings() {
 
         const whisperChanged =
           next.whisperModel !== previousSettings.whisperModel ||
-          next.inferenceBackend !== previousSettings.inferenceBackend;
-        if (whisperChanged) {
+          next.inferenceBackend !== previousSettings.inferenceBackend ||
+          next.adaptivePerf !== previousSettings.adaptivePerf;
+        const llmChanged =
+          next.llmModel !== previousSettings.llmModel ||
+          next.adaptivePerf !== previousSettings.adaptivePerf;
+
+        if (
+          whisperChanged &&
+          !isModelInstalled(
+            modelsStatusRef.current,
+            "whisper",
+            next.whisperModel,
+          )
+        ) {
           setSttProgress(0);
+        }
+
+        if (
+          llmChanged &&
+          !isModelInstalled(modelsStatusRef.current, "llm", next.llmModel)
+        ) {
+          setLlmProgress(0);
+          setLlmProgressModel(next.llmModel);
         }
 
         await invoke("set_settings", { settings: toPayload(next) });
@@ -302,6 +369,7 @@ export function useSettings() {
         setLlmReady(previousLlmReady);
         setLlmProgress(previousLlmProgress);
         setErrorMessage(translateError(err, t));
+        void refreshModelsStatus();
         throw err;
       } finally {
         setSaving(false);

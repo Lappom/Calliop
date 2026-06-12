@@ -187,6 +187,14 @@ pub fn ensure_llm_model_blocking(
     rt.block_on(download_model(app, model, &path))
 }
 
+/// Ensures model weights exist on disk without loading the inference engine.
+pub fn ensure_llm_model_file_blocking(
+    app: Option<&AppHandle>,
+    model: LlmModel,
+) -> Result<PathBuf, LlmModelError> {
+    ensure_llm_model_blocking(app, model)
+}
+
 pub async fn download_model(
     app: Option<&AppHandle>,
     model: LlmModel,
@@ -307,6 +315,11 @@ mod tests {
         std::fs::write(&path, vec![0u8; 1024]).unwrap();
         assert!(!is_valid_model_file(LlmModel::Qwen3_1_7B, &path));
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn ensure_llm_model_file_rejects_auto() {
+        assert!(ensure_llm_model_file_blocking(None, LlmModel::Auto).is_err());
     }
 
     #[test]

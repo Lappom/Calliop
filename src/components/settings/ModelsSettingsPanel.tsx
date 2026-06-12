@@ -7,6 +7,7 @@ import { buildLlmSelectOptions, buildWhisperSelectOptions } from "./modelCatalog
 interface ModelsSettingsPanelProps {
   whisperModel: string;
   llmModel: string;
+  lowPowerMode: boolean;
   sttProgress: number | null;
   llmProgress: number | null;
   sttProgressModel: string | null;
@@ -21,6 +22,7 @@ interface ModelsSettingsPanelProps {
 export function ModelsSettingsPanel({
   whisperModel,
   llmModel,
+  lowPowerMode,
   sttProgress,
   llmProgress,
   sttProgressModel,
@@ -34,6 +36,8 @@ export function ModelsSettingsPanel({
   const { t } = useTranslation();
   const whisperOptions = buildWhisperSelectOptions(modelsStatus?.whisper, t);
   const llmOptions = buildLlmSelectOptions(modelsStatus?.llm, t);
+  const showLowPowerHint =
+    lowPowerMode && (sttProgress !== null || llmProgress !== null);
 
   return (
     <div className="space-y-6">
@@ -71,6 +75,12 @@ export function ModelsSettingsPanel({
             model: llmProgressModel ?? llmModel,
           })}
         />
+      )}
+
+      {showLowPowerHint && (
+        <p className="text-caption text-ash">
+          {t("settings.modelsPanel.lowPowerDownloadHint")}
+        </p>
       )}
 
       {inferenceInfo && (

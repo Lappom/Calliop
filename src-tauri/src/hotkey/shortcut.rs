@@ -256,6 +256,11 @@ mod tests {
     }
 
     #[test]
+    fn rejects_unsupported_keys() {
+        assert!(parse_shortcut("Ctrl+ArrowUp").is_err());
+    }
+
+    #[test]
     fn short_release_after_idle_keeps_recording() {
         assert!(!should_stop_ptt_on_release(
             true,

@@ -81,8 +81,11 @@ mod tests {
     #[test]
     fn list_input_devices_does_not_panic() {
         let devices = list_input_devices().expect("enumerate input devices");
-        if let Some(default_name) = default_device_name(&cpal::default_host()) {
-            assert!(devices.iter().any(|device| device.id == default_name));
+        for device in &devices {
+            assert!(!device.id.is_empty());
+            assert!(!device.label.is_empty());
         }
+        // cpal may report a default device whose name is absent from input_devices()
+        // (common on headless Linux CI); resolve_input_device still handles "default".
     }
 }

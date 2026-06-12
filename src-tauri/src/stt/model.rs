@@ -191,6 +191,14 @@ pub fn ensure_model_blocking(
     rt.block_on(download_model(app, model, &path))
 }
 
+/// Ensures model weights exist on disk without loading the inference engine.
+pub fn ensure_model_file_blocking(
+    app: Option<&AppHandle>,
+    model: WhisperModel,
+) -> Result<PathBuf, ModelError> {
+    ensure_model_blocking(app, model)
+}
+
 pub async fn download_model(
     app: Option<&AppHandle>,
     model: WhisperModel,
@@ -327,6 +335,11 @@ mod tests {
     #[test]
     fn remove_legacy_medium_is_ok_when_file_absent() {
         assert!(remove_legacy_medium_model().is_ok());
+    }
+
+    #[test]
+    fn ensure_model_file_rejects_auto() {
+        assert!(ensure_model_file_blocking(None, WhisperModel::Auto).is_err());
     }
 
     #[test]

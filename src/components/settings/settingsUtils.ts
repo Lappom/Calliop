@@ -57,12 +57,82 @@ export function hotkeyPartLabel(t: TFunction, part: string): string {
   return key ? t(key) : part;
 }
 
-export function captureHotkey(event: KeyboardEvent): string | null {
+export type HotkeyCaptureResult =
+  | { action: "ignore" }
+  | { action: "cancel" }
+  | { action: "invalid" }
+  | { action: "capture"; hotkey: string };
+
+const MODIFIER_KEYS = new Set(["Control", "Alt", "Shift", "Meta"]);
+
+const SUPPORTED_HOTKEY_KEYS = new Set([
+  "Space",
+  "Enter",
+  "Tab",
+  "Backspace",
+  "Escape",
+  "F1",
+  "F2",
+  "F3",
+  "F4",
+  "F5",
+  "F6",
+  "F7",
+  "F8",
+  "F9",
+  "F10",
+  "F11",
+  "F12",
+  "0",
+  "1",
+  "2",
+  "3",
+  "4",
+  "5",
+  "6",
+  "7",
+  "8",
+  "9",
+  ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+]);
+
+function normalizeHotkeyKey(key: string): string {
+  if (key === " ") {
+    return "Space";
+  }
+  if (key.length === 1) {
+    return key.toUpperCase();
+  }
+  return key;
+}
+
+export function isHotkeyKeySupported(key: string): boolean {
+  return SUPPORTED_HOTKEY_KEYS.has(normalizeHotkeyKey(key));
+}
+
+export function isHotkeySupported(hotkey: string): boolean {
+  const parts = hotkeyParts(hotkey);
+  if (parts.length < 2) {
+    return false;
+  }
+  const keyPart = parts[parts.length - 1];
+  const modifiers = parts.slice(0, -1);
+  if (modifiers.length === 0) {
+    return false;
+  }
+  const validModifiers = new Set(["Ctrl", "Alt", "Shift", "Super"]);
+  return (
+    modifiers.every((part) => validModifiers.has(part)) &&
+    isHotkeyKeySupported(keyPart)
+  );
+}
+
+export function captureHotkey(event: KeyboardEvent): HotkeyCaptureResult {
   event.preventDefault();
   event.stopPropagation();
 
   if (event.key === "Escape") {
-    return null;
+    return { action: "cancel" };
   }
 
   const parts: string[] = [];
@@ -72,17 +142,20 @@ export function captureHotkey(event: KeyboardEvent): string | null {
   if (event.metaKey) parts.push("Super");
 
   const key = event.key;
-  if (["Control", "Alt", "Shift", "Meta"].includes(key)) {
-    return null;
+  if (MODIFIER_KEYS.has(key)) {
+    return { action: "ignore" };
   }
 
-  const normalizedKey =
-    key === " " ? "Space" : key.length === 1 ? key.toUpperCase() : key;
+  const normalizedKey = normalizeHotkeyKey(key);
 
   if (parts.length === 0) {
-    return null;
+    return { action: "invalid" };
+  }
+
+  if (!isHotkeyKeySupported(normalizedKey)) {
+    return { action: "invalid" };
   }
 
   parts.push(normalizedKey);
-  return parts.join("+");
+  return { action: "capture", hotkey: parts.join("+") };
 }

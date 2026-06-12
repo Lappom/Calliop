@@ -119,6 +119,8 @@ struct AppState {
     deferred_llm_on_boot: AtomicBool,
     current_hotkey: Mutex<Shortcut>,
     hotkey_suspend_depth: AtomicU32,
+    loaded_whisper: Mutex<Option<WhisperModel>>,
+    loaded_llm: Mutex<Option<llm::LlmModel>>,
     mic_probe: MicProbeState,
 }
 
@@ -129,6 +131,7 @@ fn llm_engine_is_live(state: &AppState) -> bool {
 fn shutdown_llm_engine(state: &AppState) {
     state.llm_ready.store(false, Ordering::SeqCst);
     *state.llm_engine.lock() = None;
+    *state.loaded_llm.lock() = None;
 }
 
 fn refresh_perf_config(state: &AppState, settings: &AppSettings, start_minimized: bool) {
@@ -318,6 +321,45 @@ fn build_models_status(state: &AppState, settings: &AppSettings) -> ModelsStatus
 fn invalidate_whisper_engine(state: &AppState) {
     state.model_ready.store(false, Ordering::SeqCst);
     *state.whisper_engine.lock() = None;
+    *state.loaded_whisper.lock() = None;
+}
+
+fn whisper_engine_matches(state: &AppState, expected: WhisperModel) -> bool {
+    state.model_ready.load(Ordering::SeqCst)
+        && state.whisper_engine.lock().is_some()
+        && *state.loaded_whisper.lock() == Some(expected)
+}
+
+fn llm_engine_matches(state: &AppState, expected: llm::LlmModel) -> bool {
+    llm_engine_is_live(state) && *state.loaded_llm.lock() == Some(expected)
+}
+
+async fn ensure_whisper_model_file(app: &AppHandle, model: WhisperModel) -> Result<(), String> {
+    if !model.is_concrete() {
+        return Ok(());
+    }
+    let app_for_download = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        stt::ensure_model_file_blocking(Some(&app_for_download), model)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+async fn ensure_llm_model_file(app: &AppHandle, model: llm::LlmModel) -> Result<(), String> {
+    if !model.is_concrete() {
+        return Ok(());
+    }
+    let app_for_download = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        llm::ensure_llm_model_file_blocking(Some(&app_for_download), model)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 struct SettingsRollbackContext {
@@ -740,15 +782,20 @@ async fn set_hotkey(
     let shortcut = hotkey::parse_shortcut(&hotkey).map_err(|e| e.to_string())?;
     let previous = state.store.load_settings().map_err(|e| e.to_string())?;
     let previous_hotkey = previous.hotkey.clone();
+    let capture_active = state.hotkey_suspend_depth.load(Ordering::SeqCst) > 0;
 
-    register_hotkey(&app, shortcut)?;
+    if !capture_active {
+        register_hotkey(&app, shortcut)?;
+    }
 
     let mut next = previous.clone();
     next.hotkey = hotkey::format_shortcut(&shortcut);
     if let Err(err) = state.store.save_settings(&next).map_err(|e| e.to_string()) {
-        let rollback_shortcut =
-            hotkey::parse_shortcut(&previous_hotkey).map_err(|e| e.to_string())?;
-        let _ = register_hotkey(&app, rollback_shortcut);
+        if !capture_active {
+            let rollback_shortcut =
+                hotkey::parse_shortcut(&previous_hotkey).map_err(|e| e.to_string())?;
+            let _ = register_hotkey(&app, rollback_shortcut);
+        }
         return Err(err);
     }
 
@@ -890,6 +937,36 @@ async fn set_settings(
             .store(settings.auto_edit, Ordering::SeqCst);
     }
 
+    let need_whisper_file = whisper_changed
+        || whisper_effective_changed
+        || (adaptive_changed && settings.adaptive_perf);
+
+    let need_llm_file = llm_changed
+        || llm_effective_changed
+        || (adaptive_changed && settings.adaptive_perf);
+
+    if need_whisper_file {
+        if let Err(err) = ensure_whisper_model_file(&app, next_effective_whisper).await {
+            if let Err(rollback_err) =
+                rollback_settings(&app, &state, &previous, rollback_ctx).await
+            {
+                eprintln!("settings rollback failed: {rollback_err}");
+            }
+            return Err(err);
+        }
+    }
+
+    if need_llm_file {
+        if let Err(err) = ensure_llm_model_file(&app, next_effective_llm).await {
+            if let Err(rollback_err) =
+                rollback_settings(&app, &state, &previous, rollback_ctx).await
+            {
+                eprintln!("settings rollback failed: {rollback_err}");
+            }
+            return Err(err);
+        }
+    }
+
     let whisper_reload_needed = whisper_changed
         || inference_changed
         || whisper_effective_changed
@@ -957,12 +1034,13 @@ async fn ensure_llm_model_inner(app: &AppHandle, state: &AppState) -> Result<(),
         return Ok(());
     }
 
-    if llm_engine_is_live(state) {
+    let expected = state.perf_config.lock().llm;
+    if llm_engine_matches(state, expected) {
         return Ok(());
     }
 
-    if state.llm_ready.load(Ordering::SeqCst) {
-        state.llm_ready.store(false, Ordering::SeqCst);
+    if state.llm_ready.load(Ordering::SeqCst) || state.llm_engine.lock().is_some() {
+        shutdown_llm_engine(state);
     }
 
     let _init_guard = state.llm_init.lock().await;
@@ -971,7 +1049,7 @@ async fn ensure_llm_model_inner(app: &AppHandle, state: &AppState) -> Result<(),
         return Ok(());
     }
 
-    if llm_engine_is_live(state) {
+    if llm_engine_matches(state, expected) {
         return Ok(());
     }
 
@@ -1017,6 +1095,7 @@ async fn ensure_llm_model_inner(app: &AppHandle, state: &AppState) -> Result<(),
         pipeline.set_llm_ready(Arc::clone(&state.llm_ready));
     }
 
+    *state.loaded_llm.lock() = Some(llm_model);
     state.llm_ready.store(true, Ordering::SeqCst);
     let _ = app.emit("llm-ready", ());
     Ok(())
@@ -1705,16 +1784,25 @@ fn cycle_stt_language_from_tray(app: AppHandle) -> Result<(), String> {
 }
 
 async fn ensure_model_inner(app: &AppHandle, state: &AppState) -> Result<(), String> {
-    if state.model_ready.load(Ordering::SeqCst) {
+    let expected = state.perf_config.lock().whisper;
+    if whisper_engine_matches(state, expected) {
         let _ = app.emit("model-ready", ());
         return Ok(());
     }
 
+    if state.model_ready.load(Ordering::SeqCst) || state.whisper_engine.lock().is_some() {
+        invalidate_whisper_engine(state);
+    }
+
     let _init_guard = state.model_init.lock().await;
 
-    if state.model_ready.load(Ordering::SeqCst) {
+    if whisper_engine_matches(state, expected) {
         let _ = app.emit("model-ready", ());
         return Ok(());
+    }
+
+    if state.model_ready.load(Ordering::SeqCst) || state.whisper_engine.lock().is_some() {
+        invalidate_whisper_engine(state);
     }
 
     let settings = state.store.load_settings().map_err(|e| e.to_string())?;
@@ -1753,6 +1841,7 @@ async fn ensure_model_inner(app: &AppHandle, state: &AppState) -> Result<(), Str
     }
 
     state.model_ready.store(true, Ordering::SeqCst);
+    *state.loaded_whisper.lock() = Some(whisper_model);
     *state.last_activity.lock() = Instant::now();
     let _ = app.emit("model-ready", ());
     let _ = app.emit(
@@ -2379,6 +2468,8 @@ pub fn run() {
             ),
             current_hotkey: Mutex::new(hotkey::default_shortcut()),
             hotkey_suspend_depth: AtomicU32::new(0),
+            loaded_whisper: Mutex::new(None),
+            loaded_llm: Mutex::new(None),
             mic_probe: MicProbeState {
                 capture: Mutex::new(None),
                 level_task: Mutex::new(None),
@@ -2541,5 +2632,36 @@ mod integration_tests {
                 "system",
             ]
         );
+    }
+
+    #[test]
+    fn loaded_whisper_identity_requires_matching_model() {
+        use crate::stt::WhisperModel;
+
+        let loaded = Some(WhisperModel::Small);
+        let expected = WhisperModel::DistilFrDec16;
+        assert_ne!(loaded, Some(expected));
+        assert_eq!(loaded, Some(WhisperModel::Small));
+    }
+
+    #[test]
+    fn low_power_enables_llm_lazy_load() {
+        use crate::store::AppSettings;
+        use crate::system::{resolve_perf_config, SystemCapabilities};
+
+        let settings = AppSettings {
+            low_power_mode: true,
+            auto_edit: true,
+            ..AppSettings::default()
+        };
+        let caps = SystemCapabilities {
+            total_ram_bytes: 16 * 1024 * 1024 * 1024,
+            avail_ram_bytes: 8 * 1024 * 1024 * 1024,
+            cpu_logical_cores: 8,
+            gpu_compiled: false,
+        };
+        let perf = resolve_perf_config(&settings, &caps, false);
+        assert!(perf.llm_lazy_load);
+        assert!(!perf.preload_llm);
     }
 }
