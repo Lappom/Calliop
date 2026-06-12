@@ -2447,30 +2447,27 @@ fn spawn_update_check_if_enabled(app: AppHandle, store: Arc<Store>) {
 }
 
 async fn wait_before_app_update_download(app: &AppHandle, settings: &AppSettings) {
-    let preload_whisper = app
-        .state::<AppState>()
-        .perf_config
-        .lock()
-        .preload_whisper;
-    let preload_llm = settings.auto_edit
-        && app.state::<AppState>().perf_config.lock().preload_llm;
+    let preload_whisper = app.state::<AppState>().perf_config.lock().preload_whisper;
+    let preload_llm = settings.auto_edit && app.state::<AppState>().perf_config.lock().preload_llm;
 
     loop {
-        let state = app.state::<AppState>();
-        let pipeline_idle = state.pipeline.lock().state() == PipelineState::Idle;
+        let ready = {
+            let state = app.state::<AppState>();
+            let pipeline_idle = state.pipeline.lock().state() == PipelineState::Idle;
 
-        let whisper_busy = preload_whisper
-            && !state.model_ready.load(Ordering::SeqCst)
-            && state.whisper_engine.lock().is_none();
-        let llm_busy = preload_llm
-            && !state.llm_ready.load(Ordering::SeqCst)
-            && state.llm_engine.lock().is_none();
+            let whisper_busy = preload_whisper
+                && !state.model_ready.load(Ordering::SeqCst)
+                && state.whisper_engine.lock().is_none();
+            let llm_busy = preload_llm
+                && !state.llm_ready.load(Ordering::SeqCst)
+                && state.llm_engine.lock().is_none();
 
-        if pipeline_idle && !whisper_busy && !llm_busy {
+            pipeline_idle && !whisper_busy && !llm_busy
+        };
+        if ready {
             return;
         }
 
-        drop(state);
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
     }
 }
@@ -2494,9 +2491,7 @@ fn get_pending_update_version(state: State<'_, AppState>) -> Option<String> {
 }
 
 #[tauri::command]
-async fn install_pending_update(
-    state: State<'_, AppState>,
-) -> Result<(), String> {
+async fn install_pending_update(state: State<'_, AppState>) -> Result<(), String> {
     let pending = state.pending_update.lock().take();
     let Some(pending) = pending else {
         return Err("Aucune mise à jour en attente.".into());

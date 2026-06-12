@@ -52,7 +52,9 @@ pub fn clear_pending_update_files() {
 
 pub fn dismissed_update_version() -> Option<String> {
     let path = app_data_dir().join(DISMISSED_UPDATE_VERSION);
-    std::fs::read_to_string(path).ok().map(|value| value.trim().to_string())
+    std::fs::read_to_string(path)
+        .ok()
+        .map(|value| value.trim().to_string())
 }
 
 pub fn mark_update_dismissed(version: &str) {

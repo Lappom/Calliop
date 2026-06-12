@@ -62,9 +62,7 @@ impl TrackedModifiers {
         if !parts.contains(&"Shift") && modifier_pressed(VK_SHIFT) {
             parts.push("Shift");
         }
-        if !parts.contains(&"Super")
-            && (modifier_pressed(VK_LWIN) || modifier_pressed(VK_RWIN))
-        {
+        if !parts.contains(&"Super") && (modifier_pressed(VK_LWIN) || modifier_pressed(VK_RWIN)) {
             parts.push("Super");
         }
         parts
