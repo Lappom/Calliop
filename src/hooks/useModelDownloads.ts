@@ -27,8 +27,14 @@ export function useModelDownloads(): ActiveModelDownload[] {
       percent: number,
     ) => {
       setDownloads((current) => {
-        const others = current.filter((entry) => entry.kind !== kind);
-        return [...others, { kind, modelId, percent }];
+        const index = current.findIndex((entry) => entry.kind === kind);
+        const next = { kind, modelId, percent };
+        if (index === -1) {
+          return [...current, next];
+        }
+        const updated = [...current];
+        updated[index] = next;
+        return updated;
       });
     };
 
