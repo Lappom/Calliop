@@ -261,9 +261,7 @@ impl FrozenLlmCoordinator {
             return;
         }
         let LlmCleanupWait::Completed {
-            text,
-            llm_status,
-            ..
+            text, llm_status, ..
         } = job.wait_for_inject(std::time::Duration::from_millis(0));
         if matches!(llm_status, LlmStatus::Applied) {
             self.cleaned_prefix = Some(text);
