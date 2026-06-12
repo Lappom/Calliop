@@ -231,7 +231,8 @@
         },
         "transcribing": {
           "label": "Transcribing…",
-          "hint": "Whisper transcribes your voice locally, with no network upload."
+          "hint": "Whisper transcribes your voice locally, with no network upload.",
+          "sttProgress": "{{count}} segment(s) transcribed…"
         },
         "injecting": {
           "label": "Injecting text…",

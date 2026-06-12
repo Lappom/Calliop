@@ -21,6 +21,7 @@ interface MainViewProps {
   audioLevel: number;
   latencyMetrics: LatencyMetricsPayload | null;
   busyHint: string | null;
+  sttSegmentsCompleted: number;
 }
 
 export function MainView({
@@ -34,6 +35,7 @@ export function MainView({
   audioLevel,
   latencyMetrics,
   busyHint,
+  sttSegmentsCompleted,
 }: MainViewProps) {
   const { t } = useTranslation();
   const {
@@ -63,6 +65,7 @@ export function MainView({
         partialTranscript={partialTranscript}
         audioLevel={audioLevel}
         busyHint={busyHint}
+        sttSegmentsCompleted={sttSegmentsCompleted}
       />
 
       {modelReady && (

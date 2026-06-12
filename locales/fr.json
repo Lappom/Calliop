@@ -231,7 +231,8 @@
         },
         "transcribing": {
           "label": "Transcription…",
-          "hint": "Whisper transcrit votre voix localement, sans envoi réseau."
+          "hint": "Whisper transcrit votre voix localement, sans envoi réseau.",
+          "sttProgress": "{{count}} segment(s) transcrit(s)…"
         },
         "injecting": {
           "label": "Injection du texte…",

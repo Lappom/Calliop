@@ -311,6 +311,24 @@ pub const PAUSE_PERIOD_THRESHOLD_MS: u32 = 700;
 /// Pause before a segment that follows a sentence end — candidate for pipelined LLM freeze.
 pub const FROZEN_BOUNDARY_PAUSE_MS: u32 = 1500;
 
+/// Sidecar context window (`calliop-llm-worker`).
+pub const LLM_CLEANUP_CONTEXT_TOKENS: u32 = 2048;
+
+/// Conservative input budget for the user transcript (system prompt + template overhead reserved).
+pub const LLM_CLEANUP_INPUT_TOKEN_BUDGET: usize = 1200;
+
+/// Rough token estimate for cleanup budgeting (French-heavy text ≈ 3 chars/token).
+pub fn estimate_cleanup_tokens(text: &str) -> usize {
+    text.chars().count().div_ceil(3)
+}
+
+/// Whether `raw` transcript text fits in one sidecar cleanup request.
+pub fn fits_llm_cleanup_budget(raw: &str) -> bool {
+    const TEMPLATE_OVERHEAD_TOKENS: usize = 150;
+    estimate_cleanup_tokens(raw).saturating_add(TEMPLATE_OVERHEAD_TOKENS)
+        <= LLM_CLEANUP_INPUT_TOKEN_BUDGET
+}
+
 /// Joins streaming STT segments without spurious mid-sentence capitals.
 pub fn join_transcript_segments(segments: &[impl AsRef<str>]) -> String {
     let mut result = String::new();
@@ -2410,6 +2428,17 @@ mod tests {
             ("suite".to_string(), 2000),
         ];
         assert_eq!(find_latest_frozen_boundary(&segments), None);
+    }
+
+    #[test]
+    fn fits_llm_cleanup_budget_accepts_short_text() {
+        assert!(fits_llm_cleanup_budget("Bonjour, ceci est une phrase courte."));
+    }
+
+    #[test]
+    fn fits_llm_cleanup_budget_rejects_very_long_text() {
+        let long = "mot ".repeat(4000);
+        assert!(!fits_llm_cleanup_budget(&long));
     }
 
     #[test]

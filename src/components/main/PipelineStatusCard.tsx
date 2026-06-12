@@ -23,6 +23,7 @@ interface PipelineStatusCardProps {
   partialTranscript: string;
   audioLevel: number;
   busyHint: string | null;
+  sttSegmentsCompleted: number;
 }
 
 export function PipelineStatusCard({
@@ -33,6 +34,7 @@ export function PipelineStatusCard({
   partialTranscript,
   audioLevel,
   busyHint,
+  sttSegmentsCompleted,
 }: PipelineStatusCardProps) {
   const { t } = useTranslation();
   const stateHints = useMemo(() => getStateHints(t), [t]);
@@ -99,6 +101,10 @@ export function PipelineStatusCard({
             <p className="text-body-sm mt-1.5 text-charcoal">
               {busyHint
                 ? t(busyHint)
+                : pipelineState === "transcribing" && sttSegmentsCompleted > 0
+                  ? t("main.pipeline.states.transcribing.sttProgress", {
+                      count: sttSegmentsCompleted,
+                    })
                 : hasError
                   ? displayError
                   : stateHints[pipelineState]}

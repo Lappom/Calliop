@@ -9,8 +9,8 @@ use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize};
 use thiserror::Error;
 
 use calliop_prompt::{
-    find_latest_frozen_boundary, join_transcript_segments_with_pauses, post_process_transcript,
-    ToneProfile,
+    find_latest_frozen_boundary, fits_llm_cleanup_budget, join_transcript_segments_with_pauses,
+    post_process_transcript, ToneProfile,
 };
 
 use crate::app_context::{get_active_window, resolve_tone, ActiveWindow};
@@ -75,6 +75,7 @@ fn prepare_partial_transcript(
 
 /// Maximum time to wait for LLM cleanup before inject or worker kill.
 const LLM_CLEANUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
+const LLM_CLEANUP_TIMEOUT_MAX: std::time::Duration = std::time::Duration::from_secs(120);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -112,6 +113,11 @@ pub struct PartialTranscriptEvent {
     pub text: String,
     #[serde(rename = "segmentIndex")]
     pub segment_index: u32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SttSegmentProgressEvent {
+    pub completed: u32,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -315,6 +321,9 @@ impl FrozenLlmCoordinator {
         else {
             return;
         };
+        if !fits_llm_cleanup_budget(&full_text) {
+            return;
+        }
 
         self.generation = self.generation.saturating_add(1);
         self.frozen_up_to_index = Some(target_boundary);
@@ -330,19 +339,28 @@ impl FrozenLlmCoordinator {
         self.job = Some(job);
     }
 
-    fn take_completed_prefix(&mut self, timeout: std::time::Duration) -> Option<FrozenLlmSnapshot> {
-        let job = self.job.take()?;
-        let frozen_up_to_index = self.frozen_up_to_index?;
-        let LlmCleanupWait::Completed {
-            text, llm_status, ..
-        } = job.wait_for_inject(timeout);
-        if !matches!(llm_status, LlmStatus::Applied) {
-            return None;
+    /// Waits for an in-flight pipelined cleanup job and returns its prefix snapshot when successful.
+    /// Also returns a cached prefix when the background job already completed during recording.
+    fn finish_inflight_job(&mut self, timeout: std::time::Duration) -> Option<FrozenLlmSnapshot> {
+        if let Some(job) = self.job.take() {
+            let frozen_up_to_index = self.frozen_up_to_index?;
+            let LlmCleanupWait::Completed { text, llm_status, .. } = job.wait_for_inject(timeout);
+            if !matches!(llm_status, LlmStatus::Applied) {
+                return None;
+            }
+            self.cleaned_prefix = Some(text.clone());
+            return Some(FrozenLlmSnapshot {
+                frozen_up_to_index,
+                cleaned_prefix: text,
+                prefix_shields: self.prefix_shields.clone(),
+            });
         }
-        self.cleaned_prefix = Some(text.clone());
+
+        let frozen_up_to_index = self.frozen_up_to_index?;
+        let cleaned_prefix = self.cleaned_prefix.clone()?;
         Some(FrozenLlmSnapshot {
             frozen_up_to_index,
-            cleaned_prefix: text,
+            cleaned_prefix,
             prefix_shields: self.prefix_shields.clone(),
         })
     }
@@ -391,6 +409,243 @@ fn merge_cleaned_segments(prefix: &str, tail: &str) -> String {
         format!("{prefix}{tail}")
     } else {
         format!("{prefix} {tail}")
+    }
+}
+
+fn llm_cleanup_timeout(text: &str) -> std::time::Duration {
+    let extra_secs = (text.len() as u64 / 100).min(
+        LLM_CLEANUP_TIMEOUT_MAX
+            .as_secs()
+            .saturating_sub(LLM_CLEANUP_TIMEOUT.as_secs()),
+    );
+    LLM_CLEANUP_TIMEOUT + std::time::Duration::from_secs(extra_secs)
+}
+
+fn split_sentences(text: &str) -> Vec<String> {
+    let mut sentences = Vec::new();
+    let mut current = String::new();
+    for ch in text.chars() {
+        current.push(ch);
+        if matches!(ch, '.' | '!' | '?' | '…') {
+            let trimmed = current.trim().to_string();
+            if !trimmed.is_empty() {
+                sentences.push(trimmed);
+            }
+            current.clear();
+        } else if ch == '\n' {
+            let trimmed = current.trim().to_string();
+            if !trimmed.is_empty() {
+                sentences.push(trimmed);
+            }
+            current.clear();
+        }
+    }
+    let trimmed = current.trim().to_string();
+    if !trimmed.is_empty() {
+        sentences.push(trimmed);
+    }
+    if sentences.is_empty() && !text.trim().is_empty() {
+        sentences.push(text.trim().to_string());
+    }
+    sentences
+}
+
+fn split_by_char_budget(text: &str) -> Vec<String> {
+    let max_chars = calliop_prompt::LLM_CLEANUP_INPUT_TOKEN_BUDGET * 3;
+    let mut parts = Vec::new();
+    let mut start = 0;
+    let chars: Vec<char> = text.chars().collect();
+    while start < chars.len() {
+        let end = (start + max_chars).min(chars.len());
+        let mut split_at = end;
+        if end < chars.len() {
+            if let Some(rel) = chars[start..end]
+                .iter()
+                .rposition(|ch| ch.is_whitespace())
+            {
+                split_at = start + rel;
+            }
+        }
+        if split_at <= start {
+            split_at = end;
+        }
+        parts.push(chars[start..split_at].iter().collect::<String>().trim().to_string());
+        start = split_at;
+        while start < chars.len() && chars[start].is_whitespace() {
+            start += 1;
+        }
+    }
+    parts.retain(|part| !part.is_empty());
+    parts
+}
+
+fn split_oversized_llm_text(
+    text: String,
+    shields: Vec<ShieldedSnippet>,
+) -> Vec<(String, Vec<ShieldedSnippet>)> {
+    let mut chunks = Vec::new();
+    let mut current = String::new();
+    for sentence in split_sentences(&text) {
+        let candidate = if current.is_empty() {
+            sentence.clone()
+        } else {
+            format!("{} {}", current.trim_end(), sentence.trim_start())
+        };
+        if fits_llm_cleanup_budget(&candidate) {
+            current = candidate;
+        } else if !current.is_empty() {
+            chunks.push((current.clone(), shields.clone()));
+            if fits_llm_cleanup_budget(&sentence) {
+                current = sentence;
+            } else {
+                for part in split_by_char_budget(&sentence) {
+                    chunks.push((part, shields.clone()));
+                }
+                current.clear();
+            }
+        } else if fits_llm_cleanup_budget(&sentence) {
+            current = sentence;
+        } else {
+            for part in split_by_char_budget(&sentence) {
+                chunks.push((part, shields.clone()));
+            }
+            current.clear();
+        }
+    }
+    if !current.is_empty() {
+        chunks.push((current, shields));
+    }
+    chunks
+}
+
+fn plan_llm_chunks_from_segments(
+    segments: &[SegmentTranscript],
+    rules: &[CorrectionRule],
+    snippets: &[Snippet],
+) -> Vec<(String, Vec<ShieldedSnippet>)> {
+    if segments.is_empty() {
+        return Vec::new();
+    }
+
+    let mut chunks = Vec::new();
+    let mut start = 0usize;
+    while start < segments.len() {
+        let mut best_end = start;
+        for end in start..segments.len() {
+            let Some((text, _)) = build_llm_ready_text(&segments[start..=end], rules, snippets)
+            else {
+                continue;
+            };
+            if fits_llm_cleanup_budget(&text) {
+                best_end = end;
+            } else {
+                break;
+            }
+        }
+
+        if best_end >= start {
+            if let Some(chunk) = build_llm_ready_text(&segments[start..=best_end], rules, snippets) {
+                chunks.push(chunk);
+            }
+            start = best_end + 1;
+            continue;
+        }
+
+        if let Some((text, shields)) =
+            build_llm_ready_text(&segments[start..=start], rules, snippets)
+        {
+            chunks.extend(split_oversized_llm_text(text, shields));
+        }
+        start += 1;
+    }
+    chunks
+}
+
+struct LlmCleanupAggregate {
+    text: String,
+    llm_ms: u64,
+    llm_status: LlmStatus,
+    llm_skip_reason: Option<String>,
+    invalidated: bool,
+}
+
+fn run_llm_cleanup_for_segments(
+    llm: Arc<Mutex<Option<LlamaEngine>>>,
+    llm_ready: Arc<AtomicBool>,
+    auto_edit: Arc<AtomicBool>,
+    segments: &[SegmentTranscript],
+    rules: &[CorrectionRule],
+    snippets: &[Snippet],
+    tone: ToneProfile,
+    cancel_requested: &Arc<AtomicBool>,
+) -> LlmCleanupAggregate {
+    let chunks = plan_llm_chunks_from_segments(segments, rules, snippets);
+    if chunks.is_empty() {
+        return LlmCleanupAggregate {
+            text: String::new(),
+            llm_ms: 0,
+            llm_status: LlmStatus::Disabled,
+            llm_skip_reason: None,
+            invalidated: false,
+        };
+    }
+
+    let mut merged = String::new();
+    let mut llm_ms = 0_u64;
+    let mut llm_status = LlmStatus::Applied;
+    let mut llm_skip_reason = None;
+    let mut invalidated = false;
+
+    for (chunk_text, _shields) in chunks {
+        if cancel_requested.load(Ordering::SeqCst) {
+            break;
+        }
+        if llm.lock().is_none() {
+            llm_status = LlmStatus::Skipped;
+            llm_skip_reason = Some("not_loaded".into());
+            break;
+        }
+
+        let timeout = llm_cleanup_timeout(&chunk_text);
+        let job = start_llm_cleanup(
+            Arc::clone(&llm),
+            Arc::clone(&llm_ready),
+            Arc::clone(&auto_edit),
+            &chunk_text,
+            tone,
+        );
+        let LlmCleanupWait::Completed {
+            text,
+            llm_ms: chunk_ms,
+            invalidated: chunk_inv,
+            llm_status: chunk_status,
+            llm_skip_reason: chunk_reason,
+        } = job.wait_for_inject(timeout);
+
+        llm_ms = llm_ms.saturating_add(chunk_ms);
+        invalidated |= chunk_inv;
+
+        if matches!(chunk_status, LlmStatus::Applied) {
+            merged = merge_cleaned_segments(&merged, &text);
+        } else {
+            llm_status = chunk_status;
+            llm_skip_reason = chunk_reason;
+            merged = merge_cleaned_segments(&merged, &chunk_text);
+        }
+    }
+
+    if merged.is_empty() {
+        if let Some((fallback, _)) = build_llm_ready_text(segments, rules, snippets) {
+            merged = fallback;
+        }
+    }
+
+    LlmCleanupAggregate {
+        text: merged,
+        llm_ms,
+        llm_status,
+        llm_skip_reason,
+        invalidated,
     }
 }
 
@@ -806,6 +1061,8 @@ impl PipelineOrchestrator {
         let audio_duration_ms =
             (samples.len() as u64).saturating_mul(1_000) / u64::from(TARGET_SAMPLE_RATE);
 
+        self.set_state(app, PipelineState::Transcribing, None);
+
         if let Some(session) = self.streaming.take() {
             session.stop_flag.store(true, Ordering::SeqCst);
             if let Some(worker) = session.vad_worker {
@@ -824,8 +1081,6 @@ impl PipelineOrchestrator {
         }
 
         let streaming_stt_ms = self.streaming_stt_ms.load(Ordering::SeqCst);
-
-        self.set_state(app, PipelineState::Transcribing, None);
 
         let mut transcripts = self.segment_transcripts.lock().clone();
         let failed_segments = self.failed_segments.lock().drain(..).collect::<Vec<_>>();
@@ -899,7 +1154,15 @@ impl PipelineOrchestrator {
             None
         };
 
-        if !raw.is_empty() && auto_edit && self.llm.lock().is_none() {
+        let pipelined = if auto_edit && !raw.is_empty() {
+            self.frozen_llm
+                .lock()
+                .finish_inflight_job(LLM_CLEANUP_TIMEOUT_MAX)
+        } else {
+            None
+        };
+
+        if !raw.is_empty() && auto_edit && self.llm.lock().is_none() && pipelined.is_none() {
             wait_for_llm_engine(&self.llm, LLM_CLEANUP_TIMEOUT, &self.cancel_requested);
         }
 
@@ -926,10 +1189,6 @@ impl PipelineOrchestrator {
                 } else {
                     let snippets_snapshot = snippets.clone();
                     let llm_wait_start = Instant::now();
-                    let pipelined = self
-                        .frozen_llm
-                        .lock()
-                        .take_completed_prefix(LLM_CLEANUP_TIMEOUT);
 
                     let (merged_cleaned, llm_ms, llm_status, llm_skip_reason, llm_invalidated) =
                         if let Some(frozen) = pipelined {
@@ -942,54 +1201,52 @@ impl PipelineOrchestrator {
                                     None,
                                     false,
                                 )
-                            } else if let Some((tail_text, _tail_shields)) =
-                                build_llm_ready_text(&transcripts[tail_start..], &rules, &snippets)
-                            {
-                                let tail_job = start_llm_cleanup(
+                            } else {
+                                let tail_result = run_llm_cleanup_for_segments(
                                     Arc::clone(&self.llm),
                                     Arc::clone(&self.llm_ready),
                                     Arc::clone(&self.auto_edit),
-                                    &tail_text,
+                                    &transcripts[tail_start..],
+                                    &rules,
+                                    &snippets,
                                     active_tone,
+                                    &self.cancel_requested,
                                 );
-                                let LlmCleanupWait::Completed {
-                                    text: tail_cleaned,
-                                    llm_ms: tail_ms,
-                                    invalidated: tail_inv,
-                                    llm_status: tail_stat,
-                                    llm_skip_reason: tail_reason,
-                                } = tail_job.wait_for_inject(LLM_CLEANUP_TIMEOUT);
-                                let merged = if matches!(tail_stat, LlmStatus::Applied) {
-                                    merge_cleaned_segments(&frozen.cleaned_prefix, &tail_cleaned)
+                                let merged = if matches!(tail_result.llm_status, LlmStatus::Applied)
+                                {
+                                    merge_cleaned_segments(
+                                        &frozen.cleaned_prefix,
+                                        &tail_result.text,
+                                    )
                                 } else {
                                     full_text
                                 };
-                                (merged, tail_ms, tail_stat, tail_reason, tail_inv)
-                            } else {
                                 (
-                                    frozen.cleaned_prefix,
-                                    0_u64,
-                                    LlmStatus::Applied,
-                                    None,
-                                    false,
+                                    merged,
+                                    tail_result.llm_ms,
+                                    tail_result.llm_status,
+                                    tail_result.llm_skip_reason,
+                                    tail_result.invalidated,
                                 )
                             }
                         } else {
-                            let job = start_llm_cleanup(
+                            let result = run_llm_cleanup_for_segments(
                                 Arc::clone(&self.llm),
                                 Arc::clone(&self.llm_ready),
                                 Arc::clone(&self.auto_edit),
-                                &full_text,
+                                &transcripts,
+                                &rules,
+                                &snippets,
                                 active_tone,
+                                &self.cancel_requested,
                             );
-                            let LlmCleanupWait::Completed {
-                                text,
-                                llm_ms,
-                                invalidated,
-                                llm_status,
-                                llm_skip_reason,
-                            } = job.wait_for_inject(LLM_CLEANUP_TIMEOUT);
-                            (text, llm_ms, llm_status, llm_skip_reason, invalidated)
+                            (
+                                result.text,
+                                result.llm_ms,
+                                result.llm_status,
+                                result.llm_skip_reason,
+                                result.invalidated,
+                            )
                         };
 
                     let snippets = self.snippets.read().clone();
@@ -1526,6 +1783,13 @@ fn transcribe_segment(
     let display = prepare_partial_transcript(&raw, &stt.snippets.read(), &snippet_ctx);
 
     let _ = app.emit(
+        "stt-segment-progress",
+        SttSegmentProgressEvent {
+            completed: segment_index.saturating_add(1),
+        },
+    );
+
+    let _ = app.emit(
         "partial-transcript",
         PartialTranscriptEvent {
             text: display,
@@ -1751,5 +2015,32 @@ mod tests {
             &SnippetVariableContext::default(),
         );
         assert!(!result.contains("euh"));
+    }
+
+    #[test]
+    fn plan_llm_chunks_splits_long_transcript() {
+        let long_segment = ("mot ".repeat(500)).trim().to_string();
+        let segments = vec![(long_segment.clone(), 0), (long_segment, 700)];
+        let chunks = plan_llm_chunks_from_segments(&segments, &[], &[]);
+        assert!(chunks.len() > 1);
+        for (text, _) in chunks {
+            assert!(fits_llm_cleanup_budget(&text));
+        }
+    }
+
+    #[test]
+    fn split_sentences_keeps_punctuation() {
+        let parts = split_sentences("Bonjour. Au revoir!");
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0], "Bonjour.");
+        assert_eq!(parts[1], "Au revoir!");
+    }
+
+    #[test]
+    fn llm_cleanup_timeout_scales_with_text_length() {
+        let short = llm_cleanup_timeout("hello");
+        let long = llm_cleanup_timeout(&"x".repeat(10_000));
+        assert!(long > short);
+        assert!(long <= LLM_CLEANUP_TIMEOUT_MAX);
     }
 }

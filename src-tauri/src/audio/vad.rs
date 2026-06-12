@@ -9,6 +9,8 @@ pub const VAD_CHUNK_SIZE: usize = 512;
 const SPEECH_THRESHOLD: f32 = 0.5;
 /// ~320 ms of silence at 512-sample frames (32 ms each).
 const SILENCE_HANGOVER_FRAMES: u32 = 10;
+/// Force-split continuous speech after this duration to keep Whisper segments bounded.
+const MAX_SPEECH_SEGMENT_SAMPLES: usize = TARGET_SAMPLE_RATE as usize * 45;
 /// Pre-speech padding (~160 ms).
 const PRE_SPEECH_CHUNKS: usize = 5;
 
@@ -144,6 +146,16 @@ impl VadSegmenter {
             }
             self.speech.extend_from_slice(&chunk);
             self.silence_frames = 0;
+            if self.speech.len() >= MAX_SPEECH_SEGMENT_SAMPLES {
+                completed.push(SpeechSegment {
+                    samples: std::mem::take(&mut self.speech),
+                    leading_silence_ms: self.next_leading_silence_ms,
+                });
+                self.in_speech = false;
+                self.silence_frames = 0;
+                self.silence_since_segment_frames = 0;
+                self.next_leading_silence_ms = 0;
+            }
         } else if self.in_speech {
             self.speech.extend_from_slice(&chunk);
             self.silence_frames += 1;

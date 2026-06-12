@@ -26,6 +26,10 @@ export interface PartialTranscriptPayload {
   segmentIndex: number;
 }
 
+export interface SttSegmentProgressPayload {
+  completed: number;
+}
+
 export type LlmStatus = "applied" | "skipped" | "failed" | "disabled";
 
 export const AUDIO_BAND_COUNT = 14;
@@ -68,6 +72,7 @@ export function usePipelineState() {
   const [latencyMetrics, setLatencyMetrics] =
     useState<LatencyMetricsPayload | null>(null);
   const [busyHint, setBusyHint] = useState<string | null>(null);
+  const [sttSegmentsCompleted, setSttSegmentsCompleted] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -77,6 +82,7 @@ export function usePipelineState() {
         setPipelineState(event.payload.state);
         if (event.payload.state === "idle") {
           setBusyHint(null);
+          setSttSegmentsCompleted(0);
         }
         if (event.payload.state === "error") {
           setErrorMessage(event.payload.message ?? null);
@@ -110,8 +116,12 @@ export function usePipelineState() {
       listen<PartialTranscriptPayload>("partial-transcript", (event) => {
         setPartialTranscript(event.payload.text.trim());
       }),
+      listen<SttSegmentProgressPayload>("stt-segment-progress", (event) => {
+        setSttSegmentsCompleted(event.payload.completed);
+      }),
       listen("partial-transcript-reset", () => {
         setPartialTranscript("");
+        setSttSegmentsCompleted(0);
       }),
       listen<AudioLevelPayload>("audio-level", (event) => {
         const { level, bands } = event.payload;
@@ -180,6 +190,7 @@ export function usePipelineState() {
     audioBands,
     latencyMetrics,
     busyHint,
+    sttSegmentsCompleted,
   };
 }
 
