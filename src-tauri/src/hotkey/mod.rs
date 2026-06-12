@@ -1,10 +1,10 @@
 //! Global hotkey registration and handling (Phase 1+).
 
+mod capture;
 #[cfg(windows)]
 mod capture_win;
 #[cfg(windows)]
 mod dictation_hook_win;
-mod capture;
 mod modifiers;
 mod shortcut;
 
@@ -18,9 +18,7 @@ pub use shortcut::{
 };
 
 #[cfg(windows)]
-pub(crate) use dictation_hook_win::{
-    start_modifier_dictation_hook, stop_modifier_dictation_hook,
-};
+pub(crate) use dictation_hook_win::{start_modifier_dictation_hook, stop_modifier_dictation_hook};
 
 pub fn module_name() -> &'static str {
     "hotkey"

@@ -246,7 +246,10 @@ mod tests {
         }
 
         for i in 0..24 {
-            segments.extend(vad.push(&speech_chunk(10_000 + i * VAD_CHUNK_SIZE)).expect("push"));
+            segments.extend(
+                vad.push(&speech_chunk(10_000 + i * VAD_CHUNK_SIZE))
+                    .expect("push"),
+            );
         }
         segments.extend(vad.flush().expect("flush"));
 

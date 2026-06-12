@@ -241,7 +241,8 @@ impl FrozenLlmCoordinator {
         }
 
         let prefix_segments = &segments[..=boundary];
-        let Some((full_text, shields)) = build_llm_ready_text(prefix_segments, rules, snippets) else {
+        let Some((full_text, shields)) = build_llm_ready_text(prefix_segments, rules, snippets)
+        else {
             return;
         };
 
@@ -264,7 +265,9 @@ impl FrozenLlmCoordinator {
             return None;
         };
         let frozen_up_to_index = self.frozen_up_to_index?;
-        let LlmCleanupWait::Completed { text, llm_status, .. } = job.wait_for_inject(timeout);
+        let LlmCleanupWait::Completed {
+            text, llm_status, ..
+        } = job.wait_for_inject(timeout);
         if !matches!(llm_status, LlmStatus::Applied) {
             return None;
         }
@@ -292,7 +295,9 @@ fn build_llm_ready_text(
     if segments.is_empty() {
         return None;
     }
-    let joined = join_transcript_segments_with_pauses(segments).trim().to_string();
+    let joined = join_transcript_segments_with_pauses(segments)
+        .trim()
+        .to_string();
     if joined.is_empty() {
         return None;
     }
@@ -712,7 +717,9 @@ impl PipelineOrchestrator {
         let stt_ms = streaming_stt_ms + fallback_stt_ms;
         let rules = self.correction_rules.read().clone();
         let raw = {
-            let joined = join_transcript_segments_with_pauses(&transcripts).trim().to_string();
+            let joined = join_transcript_segments_with_pauses(&transcripts)
+                .trim()
+                .to_string();
             apply_corrections(&joined, &rules)
         };
         let stt_wait_ms = stop_instant.elapsed().as_millis() as u64;
@@ -753,7 +760,10 @@ impl PipelineOrchestrator {
                 } else {
                     let snippets_snapshot = snippets.clone();
                     let llm_wait_start = Instant::now();
-                    let pipelined = self.frozen_llm.lock().take_completed_prefix(LLM_CLEANUP_TIMEOUT);
+                    let pipelined = self
+                        .frozen_llm
+                        .lock()
+                        .take_completed_prefix(LLM_CLEANUP_TIMEOUT);
 
                     let (merged_cleaned, llm_ms, llm_status, llm_skip_reason, llm_invalidated) =
                         if let Some(frozen) = pipelined {
@@ -1272,11 +1282,8 @@ fn transcribe_segment(
             });
             return;
         };
-        match engine.transcribe_with_language(
-            &segment.samples,
-            prompt.as_deref(),
-            segment_language,
-        ) {
+        match engine.transcribe_with_language(&segment.samples, prompt.as_deref(), segment_language)
+        {
             Ok(result) => result,
             Err(err) => {
                 eprintln!("segment transcription failed: {err}");

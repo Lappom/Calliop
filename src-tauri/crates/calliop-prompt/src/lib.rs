@@ -428,10 +428,7 @@ fn remove_isolated_word_ci(text: &str, word: &str) -> String {
     while index < text_chars.len() {
         if matches_phrase_ci(&text_chars, index, &word_lower)
             && !is_word_char(at_char(&text_chars, index.wrapping_sub(1)))
-            && !is_word_char(at_char(
-                &text_chars,
-                index.saturating_add(word_chars.len()),
-            ))
+            && !is_word_char(at_char(&text_chars, index.saturating_add(word_chars.len())))
         {
             index += word_chars.len();
             while index < text_chars.len() && text_chars[index].is_whitespace() {
@@ -484,10 +481,7 @@ fn try_format_bullet_list(text: &str) -> Option<String> {
     let mut items = Vec::new();
     for (index, pos) in positions.iter().enumerate() {
         let content_start = pos + marker.len();
-        let content_end = positions
-            .get(index + 1)
-            .copied()
-            .unwrap_or(text.len());
+        let content_end = positions.get(index + 1).copied().unwrap_or(text.len());
         let item = text[content_start..content_end].trim();
         if !item.is_empty() {
             items.push(capitalize_first_char(item));
@@ -531,7 +525,8 @@ fn try_format_numbered_list(text: &str) -> Option<String> {
     let intro = tokens[..intro_end].join(" ");
     let mut items = Vec::new();
     for (marker_index, (token_index, number)) in markers.iter().enumerate() {
-        let content_start = token_index + marker_token_span(tokens[*token_index], tokens.get(token_index + 1));
+        let content_start =
+            token_index + marker_token_span(tokens[*token_index], tokens.get(token_index + 1));
         let content_end = markers
             .get(marker_index + 1)
             .map(|(next_index, _)| *next_index)
@@ -541,7 +536,7 @@ fn try_format_numbered_list(text: &str) -> Option<String> {
         }
         let item = tokens[content_start..content_end].join(" ");
         if !item.is_empty() {
-            items.push(( *number, capitalize_first_char(&item)));
+            items.push((*number, capitalize_first_char(&item)));
         }
     }
 

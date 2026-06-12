@@ -42,7 +42,6 @@ use tauri::{
     AppHandle, Emitter, Manager, RunEvent, State, Theme, WindowEvent,
 };
 use tauri_plugin_autostart::ManagerExt;
-use tauri_plugin_global_shortcut::Shortcut;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_updater::UpdaterExt;
@@ -156,10 +155,7 @@ fn is_dictation_blocked_by_settings(state: &AppState) -> bool {
     state.whisper_settings_change_depth.load(Ordering::SeqCst) > 0
 }
 
-fn is_dictation_start_blocked_by_settings(
-    state: &AppState,
-    pipeline_state: PipelineState,
-) -> bool {
+fn is_dictation_start_blocked_by_settings(state: &AppState, pipeline_state: PipelineState) -> bool {
     pipeline_state == PipelineState::Idle && is_dictation_blocked_by_settings(state)
 }
 
@@ -503,8 +499,8 @@ fn resume_global_hotkey(app: &AppHandle, state: &AppState) -> Result<(), String>
             Ok(_) => {
                 if current - 1 == 0 {
                     let settings = state.store.load_settings().map_err(|e| e.to_string())?;
-                    let binding =
-                        hotkey::parse_hotkey_setting(&settings.hotkey).map_err(|e| e.to_string())?;
+                    let binding = hotkey::parse_hotkey_setting(&settings.hotkey)
+                        .map_err(|e| e.to_string())?;
                     register_hotkey_binding(app, binding)?;
                 }
                 return Ok(());
@@ -1024,11 +1020,11 @@ async fn set_settings(
         || (adaptive_changed && settings.adaptive_perf);
 
     let whisper_settings_busy = need_whisper_file || whisper_reload_needed;
-    let _whisper_settings_guard = whisper_settings_busy.then(|| WhisperSettingsChangeGuard::new(&state));
+    let _whisper_settings_guard =
+        whisper_settings_busy.then(|| WhisperSettingsChangeGuard::new(&state));
 
-    let need_llm_file = llm_changed
-        || llm_effective_changed
-        || (adaptive_changed && settings.adaptive_perf);
+    let need_llm_file =
+        llm_changed || llm_effective_changed || (adaptive_changed && settings.adaptive_perf);
 
     let llm_reload_needed = llm_changed
         || inference_changed
@@ -1036,9 +1032,8 @@ async fn set_settings(
         || low_power_changed
         || (adaptive_changed && settings.adaptive_perf);
     let llm_lazy_load = state.perf_config.lock().llm_lazy_load;
-    let will_load_llm_engine = settings.auto_edit
-        && !llm_lazy_load
-        && (llm_reload_needed || !llm_engine_is_live(&state));
+    let will_load_llm_engine =
+        settings.auto_edit && !llm_lazy_load && (llm_reload_needed || !llm_engine_is_live(&state));
 
     if need_whisper_file {
         if let Err(err) = ensure_whisper_model_file(&app, next_effective_whisper).await {
@@ -2567,9 +2562,7 @@ pub fn run() {
             deferred_llm_on_boot: AtomicBool::new(
                 initial_settings.auto_edit && initial_perf.llm_lazy_load,
             ),
-            current_hotkey: Mutex::new(hotkey::HotkeyBinding::KeyCombo(
-                hotkey::default_shortcut(),
-            )),
+            current_hotkey: Mutex::new(hotkey::HotkeyBinding::KeyCombo(hotkey::default_shortcut())),
             hotkey_suspend_depth: AtomicU32::new(0),
             whisper_settings_change_depth: AtomicU32::new(0),
             loaded_whisper: Mutex::new(None),
@@ -2586,13 +2579,10 @@ pub fn run() {
             let _ = app_context::get_active_window();
 
             let hotkey_setting = initial_settings.hotkey.clone();
-            let binding =
-                hotkey::parse_hotkey_setting(&hotkey_setting).unwrap_or_else(|err| {
-                    eprintln!(
-                        "invalid stored hotkey ({hotkey_setting}): {err}, using default"
-                    );
-                    hotkey::HotkeyBinding::KeyCombo(hotkey::default_shortcut())
-                });
+            let binding = hotkey::parse_hotkey_setting(&hotkey_setting).unwrap_or_else(|err| {
+                eprintln!("invalid stored hotkey ({hotkey_setting}): {err}, using default");
+                hotkey::HotkeyBinding::KeyCombo(hotkey::default_shortcut())
+            });
             register_hotkey_binding(app.handle(), binding)?;
 
             if let Some(overlay) = app.get_webview_window("overlay") {

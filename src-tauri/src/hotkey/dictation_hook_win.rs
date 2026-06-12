@@ -85,7 +85,9 @@ fn current_hook() -> Option<HHOOK> {
 }
 
 fn required_modifiers() -> Option<Modifiers> {
-    HOOK.lock().ok().and_then(|guard| guard.as_ref().map(|s| s.required))
+    HOOK.lock()
+        .ok()
+        .and_then(|guard| guard.as_ref().map(|s| s.required))
 }
 
 fn hook_app() -> Option<AppHandle> {
@@ -94,11 +96,7 @@ fn hook_app() -> Option<AppHandle> {
         .and_then(|guard| guard.as_ref().map(|session| session.app.clone()))
 }
 
-unsafe extern "system" fn keyboard_proc(
-    code: i32,
-    wparam: WPARAM,
-    lparam: LPARAM,
-) -> LRESULT {
+unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     let hook = match current_hook() {
         Some(hook) => hook,
         None => return CallNextHookEx(HHOOK::default(), code, wparam, lparam),
