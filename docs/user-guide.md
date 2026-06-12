@@ -37,7 +37,7 @@ Change the global shortcut; Escape cancels capture.
 
 ### Advanced
 
-- **Automatic updates**: opt-in, checks GitHub on startup.
+- **Automatic updates**: enabled by default; checks GitHub on startup (disable in Advanced).
 - **Launch at startup**: tray icon on Windows boot.
 - **Inference backend**: force CPU if needed.
 

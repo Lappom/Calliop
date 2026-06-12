@@ -188,7 +188,7 @@ mod tests {
         AppSettings {
             auto_edit: true,
             auto_learn: true,
-            auto_update: false,
+            auto_update: true,
             stt_language: "fr".into(),
             whisper_model: whisper.into(),
             llm_model: llm.into(),

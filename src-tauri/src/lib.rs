@@ -2224,8 +2224,27 @@ fn spawn_update_check_if_enabled(
                         "Mise à jour {version} disponible. Téléchargement en cours…"
                     ))
                     .show();
-                if let Err(err) = update.download_and_install(|_, _| {}, || {}).await {
-                    eprintln!("auto-update: download failed: {err}");
+                match update.download_and_install(|_, _| {}, || {}).await {
+                    Ok(()) => {
+                        let _ = app
+                            .notification()
+                            .builder()
+                            .title("Calliop")
+                            .body(format!(
+                                "Mise à jour {version} installée. Redémarrage…"
+                            ))
+                            .show();
+                        app.restart();
+                    }
+                    Err(err) => {
+                        eprintln!("auto-update: download failed: {err}");
+                        let _ = app
+                            .notification()
+                            .builder()
+                            .title("Calliop")
+                            .body(format!("Échec de la mise à jour : {err}"))
+                            .show();
+                    }
                 }
             }
             Ok(None) => {}
@@ -2320,6 +2339,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--minimized"]),

@@ -1,7 +1,7 @@
 {
   "name": "calliop",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.1.2",
   "packageManager": "pnpm@10.30.1",
   "type": "module",
   "scripts": {
@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src",
     "check:locales": "node scripts/check-locale-parity.mjs",
+    "check:updater-pubkey": "node scripts/verify-updater-pubkey.mjs",
     "tauri": "node ./scripts/tauri-cli.mjs",
     "tauri:dev": "node ./scripts/tauri-cli.mjs dev"
   },

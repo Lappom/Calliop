@@ -41,9 +41,9 @@ Models are stored in `%APPDATA%\com.calliop.app\models\` — not bundled in the 
 
 ## Updates
 
-In **Settings → Advanced**, you can enable **Automatic updates** (disabled by default). The app then checks for signed GitHub releases on startup.
+**Automatic updates** are enabled by default. Calliop checks for signed GitHub releases on startup and installs them when idle.
 
-Otherwise, download the latest release manually.
+You can disable this in **Settings → Advanced**, or download the latest release manually from GitHub.
 
 ## Uninstall
 

@@ -48,8 +48,9 @@ cargo run --release --bin benchmark-stt -- ../benchmarks/corpus/fr.json --cpu
 2. Configurer les **secrets de dépôt** (Settings → Secrets and variables → Actions → *Repository secrets*, pas Environment secrets) :
    - `TAURI_SIGNING_PRIVATE_KEY` : contenu intégral de `src-tauri/.tauri/calliop.key`
    - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` : mot de passe utilisé à la génération de la clé (obligatoire si la clé est chiffrée)
-3. Pousser un tag : `git tag v0.1.0 && git push origin v0.1.0`
-4. Le workflow [`.github/workflows/release.yml`](.github/workflows/release.yml) crée un brouillon de release avec les installateurs et `latest.json` pour l’auto-update.
+3. Vérifier l’alignement clé publique : `node scripts/verify-updater-pubkey.mjs` (`tauri.conf.json` doit correspondre à `calliop.key.pub`).
+4. Pousser un tag : `git tag v0.1.2 && git push origin v0.1.2`
+5. Le workflow [`.github/workflows/release.yml`](.github/workflows/release.yml) crée un brouillon de release avec les installateurs et `latest.json` pour l’auto-update.
 
 Clé publique commitée : `src-tauri/.tauri/calliop.key.pub`.
 

@@ -102,6 +102,9 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Verify updater signing pubkey
+        run: node scripts/verify-updater-pubkey.mjs
+
       - name: Set macOS C++ deployment target
         if: matrix.platform == 'macos-latest'
         run: echo "CXXFLAGS=-mmacosx-version-min=10.15" >> "$GITHUB_ENV"

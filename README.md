@@ -227,7 +227,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
 - Windows binaries are **unsigned** (SmartScreen warning)
 - ML models download separately on first use
-- Auto-updates are opt-in (Settings → Advanced)
+- Auto-updates are enabled by default (disable in Settings → Advanced)
 - Official support is **Windows only** in v1
 
 ---

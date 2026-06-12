@@ -34,6 +34,9 @@ jobs:
       - name: Locale parity
         run: node scripts/check-locale-parity.mjs
 
+      - name: Updater pubkey
+        run: node scripts/verify-updater-pubkey.mjs
+
   rust:
     runs-on: ubuntu-latest
     defaults:

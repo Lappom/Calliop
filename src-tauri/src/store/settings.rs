@@ -75,7 +75,7 @@ impl Default for AppSettings {
         Self {
             auto_edit: true,
             auto_learn: true,
-            auto_update: false,
+            auto_update: true,
             stt_language: DEFAULT_STT_LANGUAGE.to_string(),
             whisper_model: WhisperModel::default().as_setting_value().into(),
             llm_model: LlmModel::default().as_setting_value().into(),
@@ -124,7 +124,7 @@ impl Store {
         Ok(AppSettings {
             auto_edit: self.get_bool(KEY_AUTO_EDIT, true)?,
             auto_learn: self.get_bool(KEY_AUTO_LEARN, true)?,
-            auto_update: self.get_bool(KEY_AUTO_UPDATE, false)?,
+            auto_update: self.get_bool(KEY_AUTO_UPDATE, true)?,
             stt_language: self
                 .get_string(KEY_STT_LANGUAGE, DEFAULT_STT_LANGUAGE)?
                 .to_string(),
@@ -276,7 +276,7 @@ mod tests {
         let settings = AppSettings::default();
         assert!(settings.auto_edit);
         assert!(settings.auto_learn);
-        assert!(!settings.auto_update);
+        assert!(settings.auto_update);
         assert_eq!(settings.stt_language, DEFAULT_STT_LANGUAGE);
         assert_eq!(settings.whisper_model, "auto");
         assert_eq!(settings.llm_model, "auto");
