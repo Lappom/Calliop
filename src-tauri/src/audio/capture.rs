@@ -305,8 +305,7 @@ fn audio_thread_main(
                 level_tx,
                 device_id,
             } => {
-                let result =
-                    start_session(&mut session, &buffer, chunk_tx, level_tx, &device_id);
+                let result = start_session(&mut session, &buffer, chunk_tx, level_tx, &device_id);
                 let _ = reply.send(result);
             }
             AudioCommand::Stop(reply_tx) => {

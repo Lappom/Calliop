@@ -40,9 +40,7 @@ pub fn resolve_input_device(
     device_id: &str,
 ) -> Result<cpal::Device, AudioError> {
     if device_id.is_empty() || device_id == DEFAULT_INPUT_DEVICE_ID {
-        return host
-            .default_input_device()
-            .ok_or(AudioError::NoInputDevice);
+        return host.default_input_device().ok_or(AudioError::NoInputDevice);
     }
 
     for device in host

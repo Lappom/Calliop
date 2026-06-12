@@ -1618,9 +1618,7 @@ async fn prepare_onboarding_dictation(
     if pipeline.lock().state() != PipelineState::Idle {
         spawn_stop(app.clone(), Arc::clone(&pipeline));
         if !wait_for_pipeline_idle_timeout(&pipeline, Duration::from_secs(2)).await {
-            return Err(
-                "Dictation is still active. Stop recording before continuing.".to_string(),
-            );
+            return Err("Dictation is still active. Stop recording before continuing.".to_string());
         }
     }
 
@@ -2236,9 +2234,7 @@ fn spawn_update_check_if_enabled(
                             .notification()
                             .builder()
                             .title("Calliop")
-                            .body(format!(
-                                "Mise à jour {version} installée. Redémarrage…"
-                            ))
+                            .body(format!("Mise à jour {version} installée. Redémarrage…"))
                             .show();
                         app.restart();
                     }
