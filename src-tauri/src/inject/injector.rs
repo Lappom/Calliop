@@ -7,9 +7,10 @@ use enigo::{Direction, Enigo, Key, Keyboard, Settings};
 use parking_lot::Mutex;
 use thiserror::Error;
 
-const PASTE_DELAY_MS: u64 = 150;
+const PASTE_DELAY_MS: u64 = 80;
 
 static INJECT_MUTEX: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+static ENIGO: LazyLock<Mutex<Option<Enigo>>> = LazyLock::new(|| Mutex::new(None));
 
 #[derive(Debug, Error)]
 pub enum InjectError {
@@ -108,8 +109,15 @@ impl TextInjector {
     }
 
     fn simulate_ctrl_v(&self) -> Result<(), InjectError> {
-        let mut enigo =
-            Enigo::new(&Settings::default()).map_err(|e| InjectError::Paste(e.to_string()))?;
+        let mut enigo_guard = ENIGO.lock();
+        if enigo_guard.is_none() {
+            *enigo_guard = Some(
+                Enigo::new(&Settings::default()).map_err(|e| InjectError::Paste(e.to_string()))?,
+            );
+        }
+        let enigo = enigo_guard
+            .as_mut()
+            .ok_or_else(|| InjectError::Paste("enigo unavailable".into()))?;
         enigo
             .key(Key::Control, Direction::Press)
             .map_err(|e| InjectError::Paste(e.to_string()))?;

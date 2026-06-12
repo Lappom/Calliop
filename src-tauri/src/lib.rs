@@ -74,6 +74,8 @@ struct HotkeyPressState {
     deferred_start_pending: bool,
     /// Captured on release during deferred load (short toggle tap).
     deferred_toggle_intent: bool,
+    /// Release during Transcribing cancels the in-flight pipeline.
+    busy_cancel_on_release: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -531,10 +533,12 @@ fn register_hotkey_binding(app: &AppHandle, binding: hotkey::HotkeyBinding) -> R
             let gs = app.global_shortcut();
             gs.register(shortcut).map_err(|e| e.to_string())?;
         }
+        #[cfg(windows)]
         hotkey::HotkeyBinding::ModifiersOnly(modifiers) => {
-            #[cfg(windows)]
             hotkey::start_modifier_dictation_hook(app, modifiers)?;
-            #[cfg(not(windows))]
+        }
+        #[cfg(not(windows))]
+        hotkey::HotkeyBinding::ModifiersOnly(_) => {
             return Err("modifier-only hotkeys are only supported on Windows".into());
         }
     }
@@ -2038,6 +2042,7 @@ async fn ensure_model_then_toggle(app: AppHandle) {
     spawn_toggle(app, pipeline);
 }
 
+#[cfg(windows)]
 pub(crate) fn dispatch_dictation_hotkey(app: &AppHandle, shortcut_state: ShortcutState) {
     handle_hotkey(app, shortcut_state);
 }
@@ -2087,7 +2092,16 @@ fn handle_hotkey(app: &AppHandle, shortcut_state: ShortcutState) {
                 PipelineState::Recording => {
                     spawn_stop(app.clone(), state.pipeline.clone());
                 }
-                PipelineState::Transcribing | PipelineState::Injecting => {}
+                PipelineState::Transcribing => {
+                    press.busy_cancel_on_release = true;
+                    drop(press);
+                    pipeline::emit_dictation_busy(app, PipelineState::Transcribing, true);
+                }
+                PipelineState::Injecting => {
+                    press.busy_cancel_on_release = false;
+                    drop(press);
+                    pipeline::emit_dictation_busy(app, PipelineState::Injecting, false);
+                }
             }
         }
         ShortcutState::Released => {
@@ -2097,7 +2111,13 @@ fn handle_hotkey(app: &AppHandle, shortcut_state: ShortcutState) {
             }
             press.shortcut_down = false;
 
+            let cancel_busy = press.busy_cancel_on_release;
+            press.busy_cancel_on_release = false;
+
             let Some(start) = press.press_start.take() else {
+                if cancel_busy && state.pipeline.lock().state() == PipelineState::Transcribing {
+                    pipeline::spawn_cancel(app.clone(), state.pipeline.clone());
+                }
                 return;
             };
             let was_idle = press.was_idle_on_press;
@@ -2105,6 +2125,11 @@ fn handle_hotkey(app: &AppHandle, shortcut_state: ShortcutState) {
 
             if press.deferred_start_pending {
                 press.deferred_toggle_intent = hotkey::is_toggle_tap(was_idle, duration);
+            }
+
+            if cancel_busy && state.pipeline.lock().state() == PipelineState::Transcribing {
+                pipeline::spawn_cancel(app.clone(), state.pipeline.clone());
+                return;
             }
 
             if state.pipeline.lock().state() == PipelineState::Recording
@@ -2631,6 +2656,7 @@ pub fn run() {
                 shortcut_down: false,
                 deferred_start_pending: false,
                 deferred_toggle_intent: false,
+                busy_cancel_on_release: false,
             }),
             deferred_llm_on_boot: AtomicBool::new(
                 initial_settings.auto_edit && initial_perf.llm_lazy_load,
@@ -2879,5 +2905,13 @@ mod integration_tests {
             !(PipelineState::Recording == PipelineState::Idle && depth > 0),
             "recording during settings change should still allow stop"
         );
+    }
+
+    #[test]
+    fn hotkey_busy_cancel_only_during_transcribing() {
+        use crate::pipeline::PipelineState;
+
+        assert!(PipelineState::Transcribing.hotkey_cancelable());
+        assert!(!PipelineState::Injecting.hotkey_cancelable());
     }
 }

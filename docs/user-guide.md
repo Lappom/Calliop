@@ -6,6 +6,16 @@
 - Hold the key for more than 400 ms for **push-to-talk** mode (release to transcribe).
 - An overlay shows the state: listening, processing, injection.
 
+### Toggle vs push-to-talk
+
+| Action | From idle | While recording | While transcribing | While injecting |
+|--------|-----------|-----------------|--------------------|-----------------|
+| Short tap (< 400 ms) | Start recording | Stop (toggle off) | Cancel (release shortcut) | Ignored |
+| Long hold (≥ 400 ms) | Push-to-talk (release to stop) | Release stops PTT | Cancel on release | Ignored |
+| Second tap after release | Stop recording | — | — | — |
+
+While the pipeline is **transcribing**, press the shortcut to see a busy hint; **release** to cancel without injecting text. During **injection**, the shortcut is ignored until completion.
+
 ## Onboarding
 
 On first launch, the assistant walks you through:

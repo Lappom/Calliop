@@ -44,6 +44,13 @@ export interface LatencyMetricsPayload {
   totalMs: number;
   llmStatus?: LlmStatus;
   llmSkipReason?: string | null;
+  recordStartMs?: number;
+  micOpenMs?: number;
+}
+
+export interface RecordStartMetricsPayload {
+  recordStartMs: number;
+  micOpenMs: number;
 }
 
 export function usePipelineState() {
@@ -60,6 +67,7 @@ export function usePipelineState() {
   );
   const [latencyMetrics, setLatencyMetrics] =
     useState<LatencyMetricsPayload | null>(null);
+  const [busyHint, setBusyHint] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -67,6 +75,9 @@ export function usePipelineState() {
     const unlisteners = Promise.all([
       listen<PipelineStatePayload>("pipeline-state", (event) => {
         setPipelineState(event.payload.state);
+        if (event.payload.state === "idle") {
+          setBusyHint(null);
+        }
         if (event.payload.state === "error") {
           setErrorMessage(event.payload.message ?? null);
           setPartialTranscript("");
@@ -117,6 +128,16 @@ export function usePipelineState() {
       listen<LatencyMetricsPayload>("latency-metrics", (event) => {
         setLatencyMetrics(event.payload);
       }),
+      listen<{ state: string; cancelable: boolean }>("dictation-busy", (event) => {
+        setBusyHint(
+          event.payload.cancelable
+            ? "main.pipeline.states.busyProcessing"
+            : "main.pipeline.states.busyInjecting",
+        );
+      }),
+      listen("dictation-cancelled", () => {
+        setBusyHint(null);
+      }),
     ]);
 
     const setup = async () => {
@@ -158,6 +179,7 @@ export function usePipelineState() {
     audioLevel,
     audioBands,
     latencyMetrics,
+    busyHint,
   };
 }
 

@@ -228,6 +228,8 @@
           "label": "Injecting text…",
           "hint": "Text is inserted into the active application."
         },
+        "busyProcessing": "Processing in progress — release the shortcut to cancel during transcription.",
+        "busyInjecting": "Injection in progress — please wait.",
         "error": {
           "label": "Error",
           "hint": "See the message below or start a new dictation.",

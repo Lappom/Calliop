@@ -22,6 +22,7 @@ interface PipelineStatusCardProps {
   modelProgress: number | null;
   partialTranscript: string;
   audioLevel: number;
+  busyHint: string | null;
 }
 
 export function PipelineStatusCard({
@@ -31,6 +32,7 @@ export function PipelineStatusCard({
   modelProgress,
   partialTranscript,
   audioLevel,
+  busyHint,
 }: PipelineStatusCardProps) {
   const { t } = useTranslation();
   const stateHints = useMemo(() => getStateHints(t), [t]);
@@ -95,7 +97,11 @@ export function PipelineStatusCard({
                 : pipelineStateLabel(t, pipelineState)}
             </p>
             <p className="text-body-sm mt-1.5 text-charcoal">
-              {hasError ? displayError : stateHints[pipelineState]}
+              {busyHint
+                ? t(busyHint)
+                : hasError
+                  ? displayError
+                  : stateHints[pipelineState]}
             </p>
           </div>
         </div>

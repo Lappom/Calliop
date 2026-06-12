@@ -54,7 +54,7 @@ fn prepare_display_transcript(
     }
 }
 
-/// Live overlay only: expand snippets without oral punctuation (avoids premature « point » → « . »).
+/// Live overlay: deterministic post-processing + snippet triggers (no oral punctuation expansion).
 fn prepare_partial_transcript(
     raw: &str,
     snippets: &[Snippet],
@@ -64,7 +64,13 @@ fn prepare_partial_transcript(
     if trimmed.is_empty() {
         return String::new();
     }
-    apply_snippets(trimmed, snippets, ctx)
+    let (shielded, shields) = shield_snippet_triggers(trimmed, snippets);
+    let processed = post_process_transcript(&shielded);
+    if shields.is_empty() {
+        processed
+    } else {
+        unshield_snippets(&processed, &shields, ctx)
+    }
 }
 
 /// Maximum time to wait for LLM cleanup before inject or worker kill.
@@ -87,6 +93,11 @@ impl PipelineState {
             Self::Transcribing => "transcribing",
             Self::Injecting => "injecting",
         }
+    }
+
+    /// Hotkey release during this state can cancel the in-flight dictation.
+    pub fn hotkey_cancelable(self) -> bool {
+        matches!(self, Self::Transcribing)
     }
 }
 
@@ -133,6 +144,24 @@ pub struct LatencyMetricsEvent {
     pub llm_status: LlmStatus,
     #[serde(rename = "llmSkipReason", skip_serializing_if = "Option::is_none")]
     pub llm_skip_reason: Option<String>,
+    #[serde(rename = "recordStartMs", skip_serializing_if = "Option::is_none")]
+    pub record_start_ms: Option<u64>,
+    #[serde(rename = "micOpenMs", skip_serializing_if = "Option::is_none")]
+    pub mic_open_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RecordStartMetricsEvent {
+    #[serde(rename = "recordStartMs")]
+    pub record_start_ms: u64,
+    #[serde(rename = "micOpenMs")]
+    pub mic_open_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DictationBusyEvent {
+    pub state: String,
+    pub cancelable: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -167,9 +196,15 @@ pub enum PipelineError {
     Background(String),
 }
 
+struct PendingSegment {
+    segment: SpeechSegment,
+    index: u32,
+}
+
 struct StreamingSession {
     stop_flag: Arc<AtomicBool>,
-    worker: Option<JoinHandle<()>>,
+    vad_worker: Option<JoinHandle<()>>,
+    stt_worker: Option<JoinHandle<()>>,
     level_listener: Option<JoinHandle<()>>,
 }
 
@@ -186,6 +221,7 @@ struct FrozenLlmCoordinator {
     prefix_shields: Vec<ShieldedSnippet>,
     cleaned_prefix: Option<String>,
     job: Option<LlmCleanupJob>,
+    pending_boundary: Option<usize>,
 }
 
 impl FrozenLlmCoordinator {
@@ -196,20 +232,42 @@ impl FrozenLlmCoordinator {
             prefix_shields: Vec::new(),
             cleaned_prefix: None,
             job: None,
+            pending_boundary: None,
         }
     }
 
     fn reset(&mut self) {
         if let Some(job) = self.job.take() {
-            if let Some(pid) = job.worker_pid {
-                force_kill_sidecar(pid);
+            if job.is_running() {
+                if let Some(pid) = job.worker_pid {
+                    force_kill_sidecar(pid);
+                }
             }
-            let _ = job.worker.join();
+            let _ = job.join_worker();
         }
         self.generation = 0;
         self.frozen_up_to_index = None;
         self.prefix_shields.clear();
         self.cleaned_prefix = None;
+        self.pending_boundary = None;
+    }
+
+    fn poll_completed_job(&mut self) {
+        let Some(job) = self.job.take() else {
+            return;
+        };
+        if job.is_running() {
+            self.job = Some(job);
+            return;
+        }
+        let LlmCleanupWait::Completed {
+            text,
+            llm_status,
+            ..
+        } = job.wait_for_inject(std::time::Duration::from_millis(0));
+        if matches!(llm_status, LlmStatus::Applied) {
+            self.cleaned_prefix = Some(text);
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -234,21 +292,34 @@ impl FrozenLlmCoordinator {
             return;
         }
 
-        if let Some(job) = self.job.take() {
-            if let Some(pid) = job.worker_pid {
-                force_kill_sidecar(pid);
+        self.poll_completed_job();
+
+        if let Some(job) = self.job.as_ref() {
+            if job.is_running() {
+                if self.frozen_up_to_index != Some(boundary) {
+                    self.pending_boundary = Some(boundary);
+                }
+                return;
             }
-            let _ = job.worker.join();
         }
 
-        let prefix_segments = &segments[..=boundary];
+        if self.job.is_some() {
+            self.poll_completed_job();
+        }
+
+        let target_boundary = self.pending_boundary.take().unwrap_or(boundary);
+        if self.frozen_up_to_index == Some(target_boundary) && self.job.is_some() {
+            return;
+        }
+
+        let prefix_segments = &segments[..=target_boundary];
         let Some((full_text, shields)) = build_llm_ready_text(prefix_segments, rules, snippets)
         else {
             return;
         };
 
         self.generation = self.generation.saturating_add(1);
-        self.frozen_up_to_index = Some(boundary);
+        self.frozen_up_to_index = Some(target_boundary);
         self.prefix_shields = shields;
         self.cleaned_prefix = None;
         let job = start_llm_cleanup(
@@ -342,6 +413,9 @@ pub struct PipelineOrchestrator {
     snippets: Arc<RwLock<Vec<Snippet>>>,
     correction_rules: Arc<RwLock<Vec<CorrectionRule>>>,
     app_context_rules: Arc<RwLock<Vec<AppContextRule>>>,
+    session_active_window: Arc<RwLock<Option<ActiveWindow>>>,
+    session_tone: Arc<RwLock<ToneProfile>>,
+    cancel_requested: Arc<AtomicBool>,
     auto_learn: Arc<AtomicBool>,
     observer_generation: Arc<AtomicU64>,
     correction_handler: Option<CorrectionHandler>,
@@ -373,6 +447,9 @@ impl PipelineOrchestrator {
             snippets: Arc::new(RwLock::new(Vec::new())),
             correction_rules: Arc::new(RwLock::new(Vec::new())),
             app_context_rules: Arc::new(RwLock::new(Vec::new())),
+            session_active_window: Arc::new(RwLock::new(None)),
+            session_tone: Arc::new(RwLock::new(ToneProfile::Default)),
+            cancel_requested: Arc::new(AtomicBool::new(false)),
             auto_learn: Arc::new(AtomicBool::new(true)),
             observer_generation: Arc::new(AtomicU64::new(0)),
             correction_handler: None,
@@ -419,6 +496,10 @@ impl PipelineOrchestrator {
     }
 
     fn resolve_active_context(&self) -> (ToneProfile, Option<ActiveWindow>) {
+        if let Some(window) = self.session_active_window.read().clone() {
+            let tone = *self.session_tone.read();
+            return (tone, Some(window));
+        }
         let rules = self.app_context_rules.read().clone();
         match get_active_window() {
             Some(window) => {
@@ -427,6 +508,50 @@ impl PipelineOrchestrator {
             }
             None => (ToneProfile::Default, None),
         }
+    }
+
+    pub fn request_cancel(&self) {
+        self.cancel_requested.store(true, Ordering::SeqCst);
+    }
+
+    pub fn cancel_processing(&mut self, app: &AppHandle) -> bool {
+        match self.state {
+            PipelineState::Recording => {
+                self.request_cancel();
+                self.abort_session(app);
+                self.finish_cancelled(app);
+                true
+            }
+            PipelineState::Transcribing => {
+                self.request_cancel();
+                let _ = app.emit(
+                    "dictation-cancelled",
+                    serde_json::json!({ "during": "transcribing" }),
+                );
+                true
+            }
+            PipelineState::Injecting | PipelineState::Idle => false,
+        }
+    }
+
+    fn is_cancelled(&self) -> bool {
+        self.cancel_requested.load(Ordering::SeqCst)
+    }
+
+    fn finish_cancelled(&mut self, app: &AppHandle) {
+        self.frozen_llm.lock().reset();
+        self.cancel_requested.store(false, Ordering::SeqCst);
+        *self.session_active_window.write() = None;
+        hide_overlay(app);
+        self.set_state(app, PipelineState::Idle, None);
+    }
+
+    fn check_cancelled(&mut self, app: &AppHandle) -> bool {
+        if !self.is_cancelled() {
+            return false;
+        }
+        self.finish_cancelled(app);
+        true
     }
 
     pub fn state(&self) -> PipelineState {
@@ -553,11 +678,22 @@ impl PipelineOrchestrator {
             return Err(PipelineError::ModelNotLoaded);
         }
 
+        let record_start = Instant::now();
+        self.cancel_requested.store(false, Ordering::SeqCst);
         self.segment_transcripts.lock().clear();
         self.failed_segments.lock().clear();
         self.frozen_llm.lock().reset();
         self.streaming_stt_ms.store(0, Ordering::SeqCst);
         let _ = app.emit("partial-transcript-reset", ());
+
+        let rules = self.app_context_rules.read().clone();
+        let active_window = get_active_window();
+        let session_tone = active_window
+            .as_ref()
+            .map(|window| resolve_tone(window, &rules))
+            .unwrap_or(ToneProfile::Default);
+        *self.session_active_window.write() = active_window;
+        *self.session_tone.write() = session_tone;
 
         *self.session_stt_language.write() = *self.default_stt_language.read();
         *self.session_detected_language.write() = None;
@@ -565,10 +701,7 @@ impl PipelineOrchestrator {
         self.sync_whisper_language();
         emit_stt_language_changed(app, &self.effective_stt_language(), false);
 
-        // Fail fast before opening the mic if VAD cannot initialize.
-        VadSegmenter::with_chunk_size(self.vad_chunk_size)?;
-
-        let vad_chunk_size = self.vad_chunk_size;
+        let vad = VadSegmenter::with_chunk_size(self.vad_chunk_size)?;
 
         let (chunk_tx, chunk_rx) = std::sync::mpsc::channel::<Vec<f32>>();
         let (level_tx, level_rx) = std::sync::mpsc::channel();
@@ -577,6 +710,7 @@ impl PipelineOrchestrator {
             Some(level_tx),
             Some(self.input_device.as_str()),
         )?;
+        let mic_open_ms = record_start.elapsed().as_millis() as u64;
 
         let stop_flag = Arc::new(AtomicBool::new(false));
         let worker_stop = Arc::clone(&stop_flag);
@@ -597,32 +731,35 @@ impl PipelineOrchestrator {
         let llm_ready = Arc::clone(&self.llm_ready);
         let auto_edit = Arc::clone(&self.auto_edit);
         let correction_rules = Arc::clone(&self.correction_rules);
-        let app_context_rules = Arc::clone(&self.app_context_rules);
-        let worker = thread::spawn(move || {
-            streaming_worker(
-                app_worker,
-                chunk_rx,
-                worker_stop,
-                vad_chunk_size,
-                StreamingSttContext {
-                    whisper,
-                    transcripts,
-                    failed_segments,
-                    stt_time_ms,
-                    dictionary_prompt,
-                    session_stt_language,
-                    session_detected_language,
-                    pending_detection,
-                    snippets,
-                    history_store,
-                    frozen_llm,
-                    llm,
-                    llm_ready,
-                    auto_edit,
-                    correction_rules,
-                    app_context_rules,
-                },
-            );
+        let session_tone_arc = Arc::clone(&self.session_tone);
+        let (segment_tx, segment_rx) = std::sync::mpsc::channel::<PendingSegment>();
+
+        let stt_context = StreamingSttContext {
+            whisper,
+            transcripts,
+            failed_segments,
+            stt_time_ms,
+            dictionary_prompt,
+            session_stt_language,
+            session_detected_language,
+            pending_detection,
+            snippets,
+            history_store,
+            frozen_llm,
+            llm,
+            llm_ready,
+            auto_edit,
+            correction_rules,
+            session_tone: session_tone_arc,
+        };
+
+        let stt_stop = Arc::clone(&stop_flag);
+        let stt_worker = thread::spawn(move || {
+            stt_segment_worker(app_worker, segment_rx, stt_stop, stt_context);
+        });
+
+        let vad_worker = thread::spawn(move || {
+            streaming_worker(chunk_rx, worker_stop, vad, segment_tx);
         });
 
         let app_level = app.clone();
@@ -644,12 +781,23 @@ impl PipelineOrchestrator {
 
         self.streaming = Some(StreamingSession {
             stop_flag,
-            worker: Some(worker),
+            vad_worker: Some(vad_worker),
+            stt_worker: Some(stt_worker),
             level_listener: Some(level_listener),
         });
 
         show_overlay(app);
         self.set_state(app, PipelineState::Recording, None);
+
+        let record_start_ms = record_start.elapsed().as_millis() as u64;
+        let _ = app.emit(
+            "record-start-metrics",
+            RecordStartMetricsEvent {
+                record_start_ms,
+                mic_open_ms,
+            },
+        );
+
         Ok(())
     }
 
@@ -662,12 +810,19 @@ impl PipelineOrchestrator {
 
         if let Some(session) = self.streaming.take() {
             session.stop_flag.store(true, Ordering::SeqCst);
-            if let Some(worker) = session.worker {
+            if let Some(worker) = session.vad_worker {
+                let _ = worker.join();
+            }
+            if let Some(worker) = session.stt_worker {
                 let _ = worker.join();
             }
             if let Some(listener) = session.level_listener {
                 let _ = listener.join();
             }
+        }
+
+        if self.check_cancelled(app) {
+            return Ok(());
         }
 
         let streaming_stt_ms = self.streaming_stt_ms.load(Ordering::SeqCst);
@@ -723,7 +878,17 @@ impl PipelineOrchestrator {
         };
         let stt_wait_ms = stop_instant.elapsed().as_millis() as u64;
 
-        // After STT the user may return to the target app; capture before LLM wait/inject.
+        if self.check_cancelled(app) {
+            return Ok(());
+        }
+
+        if stt_wait_ms > audio_duration_ms.saturating_mul(2).max(500) {
+            eprintln!(
+                "stt_wait_ms ({stt_wait_ms}) exceeds 2x audio duration ({audio_duration_ms}) — check segment backlog"
+            );
+        }
+
+        // Tone and target app captured at recording start (before LLM wait/inject).
         let (active_tone, active_window) = self.resolve_active_context();
 
         let auto_edit = self.auto_edit.load(Ordering::SeqCst);
@@ -737,7 +902,11 @@ impl PipelineOrchestrator {
         };
 
         if !raw.is_empty() && auto_edit && self.llm.lock().is_none() {
-            wait_for_llm_engine(&self.llm, LLM_CLEANUP_TIMEOUT);
+            wait_for_llm_engine(&self.llm, LLM_CLEANUP_TIMEOUT, &self.cancel_requested);
+        }
+
+        if self.check_cancelled(app) {
+            return Ok(());
         }
 
         let mut llm_blocked_ms = 0_u64;
@@ -861,6 +1030,10 @@ impl PipelineOrchestrator {
             crate::spawn_llm_recovery_if_needed(app.clone());
         }
 
+        if self.check_cancelled(app) {
+            return Ok(());
+        }
+
         self.set_state(app, PipelineState::Injecting, None);
         let inject_start = Instant::now();
         if !text_to_inject.is_empty() {
@@ -881,6 +1054,8 @@ impl PipelineOrchestrator {
                 total_ms,
                 llm_status,
                 llm_skip_reason: llm_skip_reason.clone(),
+                record_start_ms: None,
+                mic_open_ms: None,
             },
         );
 
@@ -915,6 +1090,7 @@ impl PipelineOrchestrator {
         }
 
         hide_overlay(app);
+        *self.session_active_window.write() = None;
         self.set_state(app, PipelineState::Idle, Some(text_to_inject));
         Ok(())
     }
@@ -968,7 +1144,10 @@ impl PipelineOrchestrator {
 
         if let Some(session) = self.streaming.take() {
             session.stop_flag.store(true, Ordering::SeqCst);
-            if let Some(worker) = session.worker {
+            if let Some(worker) = session.vad_worker {
+                let _ = worker.join();
+            }
+            if let Some(worker) = session.stt_worker {
                 let _ = worker.join();
             }
             if let Some(listener) = session.level_listener {
@@ -985,9 +1164,16 @@ impl PipelineOrchestrator {
     }
 }
 
-fn wait_for_llm_engine(llm: &Arc<Mutex<Option<LlamaEngine>>>, timeout: std::time::Duration) {
+fn wait_for_llm_engine(
+    llm: &Arc<Mutex<Option<LlamaEngine>>>,
+    timeout: std::time::Duration,
+    cancel_requested: &Arc<AtomicBool>,
+) {
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
+        if cancel_requested.load(Ordering::SeqCst) {
+            return;
+        }
         if llm.lock().is_some() {
             return;
         }
@@ -1059,6 +1245,17 @@ enum LlmCleanupWait {
 }
 
 impl LlmCleanupJob {
+    fn is_running(&self) -> bool {
+        matches!(
+            self.rx.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Empty)
+        )
+    }
+
+    fn join_worker(self) -> thread::Result<()> {
+        self.worker.join()
+    }
+
     fn wait_for_inject(self, timeout: std::time::Duration) -> LlmCleanupWait {
         match self.rx.recv_timeout(timeout) {
             Ok(LlmCleanupOutcome::Success { cleaned, engine }) => {
@@ -1201,29 +1398,26 @@ struct StreamingSttContext {
     llm_ready: Arc<AtomicBool>,
     auto_edit: Arc<AtomicBool>,
     correction_rules: Arc<RwLock<Vec<CorrectionRule>>>,
-    app_context_rules: Arc<RwLock<Vec<AppContextRule>>>,
-}
-
-fn resolve_streaming_tone(rules: &[AppContextRule]) -> ToneProfile {
-    match get_active_window() {
-        Some(window) => resolve_tone(&window, rules),
-        None => ToneProfile::Default,
-    }
+    session_tone: Arc<RwLock<ToneProfile>>,
 }
 
 fn streaming_worker(
-    app: AppHandle,
     chunk_rx: std::sync::mpsc::Receiver<Vec<f32>>,
     stop_flag: Arc<AtomicBool>,
-    vad_chunk_size: usize,
-    stt: StreamingSttContext,
+    mut vad: VadSegmenter,
+    segment_tx: std::sync::mpsc::Sender<PendingSegment>,
 ) {
-    let Ok(mut vad) = VadSegmenter::with_chunk_size(vad_chunk_size) else {
-        eprintln!("streaming_worker: VAD init failed after preflight check");
-        return;
-    };
-
     let mut segment_index = 0_u32;
+
+    let enqueue_segments = |segments: Vec<SpeechSegment>, index: &mut u32| {
+        for segment in segments {
+            let _ = segment_tx.send(PendingSegment {
+                segment,
+                index: *index,
+            });
+            *index += 1;
+        }
+    };
 
     while let Ok(chunk) = chunk_rx.recv() {
         let segments = match vad.push(&chunk) {
@@ -1233,10 +1427,7 @@ fn streaming_worker(
                 continue;
             }
         };
-        for segment in segments {
-            transcribe_segment(&app, &stt, segment, segment_index);
-            segment_index += 1;
-        }
+        enqueue_segments(segments, &mut segment_index);
         if stop_flag.load(Ordering::SeqCst) {
             while let Ok(chunk) = chunk_rx.try_recv() {
                 let segments = match vad.push(&chunk) {
@@ -1246,20 +1437,25 @@ fn streaming_worker(
                         continue;
                     }
                 };
-                for segment in segments {
-                    transcribe_segment(&app, &stt, segment, segment_index);
-                    segment_index += 1;
-                }
+                enqueue_segments(segments, &mut segment_index);
             }
             break;
         }
     }
 
     if let Ok(segments) = vad.flush() {
-        for segment in segments {
-            transcribe_segment(&app, &stt, segment, segment_index);
-            segment_index += 1;
-        }
+        enqueue_segments(segments, &mut segment_index);
+    }
+}
+
+fn stt_segment_worker(
+    app: AppHandle,
+    segment_rx: std::sync::mpsc::Receiver<PendingSegment>,
+    _stop_flag: Arc<AtomicBool>,
+    stt: StreamingSttContext,
+) {
+    while let Ok(pending) = segment_rx.recv() {
+        transcribe_segment(&app, &stt, pending.segment, pending.index);
     }
 }
 
@@ -1315,7 +1511,7 @@ fn transcribe_segment(
         let segments_snapshot = stt.transcripts.lock().clone();
         let rules = stt.correction_rules.read().clone();
         let snippets = stt.snippets.read().clone();
-        let tone = resolve_streaming_tone(&stt.app_context_rules.read());
+        let tone = *stt.session_tone.read();
         stt.frozen_llm.lock().maybe_start_background(
             &segments_snapshot,
             true,
@@ -1403,6 +1599,23 @@ pub fn hide_overlay(app: &AppHandle) {
     if let Some(overlay) = app.get_webview_window("overlay") {
         let _ = overlay.hide();
     }
+}
+
+pub fn spawn_cancel(app: AppHandle, orchestrator: Arc<Mutex<PipelineOrchestrator>>) {
+    std::thread::spawn(move || {
+        let mut guard = orchestrator.lock();
+        let _ = guard.cancel_processing(&app);
+    });
+}
+
+pub fn emit_dictation_busy(app: &AppHandle, state: PipelineState, cancelable: bool) {
+    let _ = app.emit(
+        "dictation-busy",
+        DictationBusyEvent {
+            state: state.as_str().into(),
+            cancelable,
+        },
+    );
 }
 
 pub fn spawn_start(app: AppHandle, orchestrator: Arc<Mutex<PipelineOrchestrator>>) {
@@ -1523,5 +1736,22 @@ mod tests {
             merge_cleaned_segments("Bonjour.", "Au revoir."),
             "Bonjour. Au revoir."
         );
+    }
+
+    #[test]
+    fn transcribing_is_hotkey_cancelable_not_injecting() {
+        assert!(PipelineState::Transcribing.hotkey_cancelable());
+        assert!(!PipelineState::Injecting.hotkey_cancelable());
+        assert!(!PipelineState::Recording.hotkey_cancelable());
+    }
+
+    #[test]
+    fn prepare_partial_transcript_applies_post_process() {
+        let result = prepare_partial_transcript(
+            "bonjour euh monde",
+            &[],
+            &SnippetVariableContext::default(),
+        );
+        assert!(!result.contains("euh"));
     }
 }

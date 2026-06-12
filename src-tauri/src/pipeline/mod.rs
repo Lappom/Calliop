@@ -7,9 +7,10 @@ mod snippets;
 
 pub use corrections::{apply_corrections, CorrectionRule};
 pub use orchestrator::{
-    hide_overlay, show_overlay, spawn_start, spawn_stop, spawn_toggle, AudioLevelEvent,
-    LatencyMetricsEvent, PartialTranscriptEvent, PipelineError, PipelineOrchestrator,
-    PipelineState, PipelineStateEvent, SttLanguageChangedEvent,
+    emit_dictation_busy, hide_overlay, show_overlay, spawn_cancel, spawn_start, spawn_stop,
+    spawn_toggle, AudioLevelEvent, DictationBusyEvent, LatencyMetricsEvent, PartialTranscriptEvent,
+    PipelineError, PipelineOrchestrator, PipelineState, PipelineStateEvent,
+    RecordStartMetricsEvent, SttLanguageChangedEvent,
 };
 pub use snippet_variables::{
     expand_snippet_variables, format_local_date_french, SnippetVariableContext,

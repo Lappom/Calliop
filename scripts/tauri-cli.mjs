@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 import { dirname, join } from "node:path";
 
@@ -11,6 +11,40 @@ import { fileURLToPath } from "node:url";
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 const args = process.argv.slice(2);
+
+const signingKeyPath = join(repoRoot, "src-tauri", ".tauri", "calliop.key");
+const envLocalPath = join(repoRoot, ".env.local");
+
+function loadEnvFile(filePath) {
+  if (!existsSync(filePath)) return;
+
+  for (const line of readFileSync(filePath, "utf-8").split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+
+    const eq = trimmed.indexOf("=");
+    if (eq === -1) continue;
+
+    const key = trimmed.slice(0, eq).trim();
+    const raw = trimmed.slice(eq + 1).trim();
+    const value =
+      (raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))
+        ? raw.slice(1, -1)
+        : raw;
+
+    if (!process.env[key]) {
+      process.env[key] = value;
+    }
+  }
+}
+
+function ensureUpdaterSigningEnv() {
+  loadEnvFile(envLocalPath);
+
+  if (!process.env.TAURI_SIGNING_PRIVATE_KEY && existsSync(signingKeyPath)) {
+    process.env.TAURI_SIGNING_PRIVATE_KEY = readFileSync(signingKeyPath, "utf-8").trim();
+  }
+}
 
 
 
@@ -446,6 +480,7 @@ if (args[0] === "dev") {
 
 
 if (args[0] === "build") {
+  ensureUpdaterSigningEnv();
 
   const buildArgs = args.slice(1);
 

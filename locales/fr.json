@@ -228,6 +228,8 @@
           "label": "Injection du texte…",
           "hint": "Le texte est inséré dans l'application active."
         },
+        "busyProcessing": "Traitement en cours — relâchez le raccourci pour annuler pendant la transcription.",
+        "busyInjecting": "Injection en cours — veuillez patienter.",
         "error": {
           "label": "Erreur",
           "hint": "Consultez le message ci-dessous ou relancez une dictée.",
