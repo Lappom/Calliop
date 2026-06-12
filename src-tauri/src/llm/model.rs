@@ -412,7 +412,9 @@ mod tests {
         assert!(is_corrupt_model_load_error(
             "tensor data is not within the file bounds, model is corrupted or incomplete"
         ));
-        assert!(!is_corrupt_model_load_error("worker ready handshake failed"));
+        assert!(!is_corrupt_model_load_error(
+            "worker ready handshake failed"
+        ));
     }
 
     #[test]

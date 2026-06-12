@@ -299,7 +299,10 @@ enum WordEditOp {
     #[allow(dead_code)]
     Insert(String),
     Delete,
-    Substitute { from: String, to: String },
+    Substitute {
+        from: String,
+        to: String,
+    },
 }
 
 fn levenshtein_distance(a: &str, b: &str) -> usize {

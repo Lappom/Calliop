@@ -1231,7 +1231,7 @@ async fn ensure_llm_model_inner(app: &AppHandle, state: &AppState) -> Result<(),
         if let Err(err) = engine.cleanup("bonjour", ToneProfile::Default) {
             eprintln!("llm warmup failed (non-fatal): {err}");
         }
-        Ok(engine)
+        Ok::<llm::LlamaEngine, llm::LlmError>(engine)
     })
     .await
     .map_err(|e| e.to_string())?
