@@ -8,7 +8,6 @@ import { translateError } from "../../lib/translateError";
 import { Stagger } from "../motion/Stagger";
 import { Button } from "../ui/Button";
 import { Kbd } from "../ui/Kbd";
-import { ProgressBar } from "../ui/ProgressBar";
 import { Select } from "../ui/Select";
 import { TextInput } from "../ui/TextInput";
 import { AudioInputPanel } from "./AudioInputPanel";
@@ -222,15 +221,6 @@ export function SettingsView() {
                 void setAutoEdit(checked);
               }}
             />
-
-            {settings.autoEdit && llmProgress !== null && (
-              <ProgressBar
-                value={llmProgress}
-                label={t("settings.modelsPanel.downloadLlm", {
-                  model: llmProgressModel ?? settings.llmModel,
-                })}
-              />
-            )}
 
             <SettingsToggleRow
               label={t("settings.autoLearn.label")}
