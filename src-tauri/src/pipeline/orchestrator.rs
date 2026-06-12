@@ -198,6 +198,7 @@ pub struct PipelineOrchestrator {
     pending_detection: Arc<Mutex<Option<SttLanguage>>>,
     history_store: Option<Arc<Store>>,
     vad_chunk_size: usize,
+    input_device: String,
 }
 
 impl PipelineOrchestrator {
@@ -227,7 +228,12 @@ impl PipelineOrchestrator {
             pending_detection: Arc::new(Mutex::new(None)),
             history_store: None,
             vad_chunk_size: crate::system::DEFAULT_VAD_CHUNK_SIZE,
+            input_device: crate::audio::DEFAULT_INPUT_DEVICE_ID.into(),
         })
+    }
+
+    pub fn set_input_device(&mut self, device_id: String) {
+        self.input_device = device_id;
     }
 
     pub fn set_vad_chunk_size(&mut self, chunk_size: usize) {
@@ -411,8 +417,11 @@ impl PipelineOrchestrator {
 
         let (chunk_tx, chunk_rx) = std::sync::mpsc::channel::<Vec<f32>>();
         let (level_tx, level_rx) = std::sync::mpsc::channel();
-        self.audio
-            .start_with_streaming(Some(chunk_tx), Some(level_tx))?;
+        self.audio.start_with_streaming(
+            Some(chunk_tx),
+            Some(level_tx),
+            Some(self.input_device.as_str()),
+        )?;
 
         let stop_flag = Arc::new(AtomicBool::new(false));
         let worker_stop = Arc::clone(&stop_flag);

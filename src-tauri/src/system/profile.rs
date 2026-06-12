@@ -197,6 +197,7 @@ mod tests {
             low_power_mode: low_power,
             adaptive_perf: adaptive,
             ui_language: "fr".into(),
+            input_device: crate::audio::DEFAULT_INPUT_DEVICE_ID.into(),
         }
     }
 

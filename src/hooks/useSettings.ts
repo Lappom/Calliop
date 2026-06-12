@@ -23,6 +23,7 @@ export interface AppSettings {
   lowPowerMode: boolean;
   adaptivePerf: boolean;
   uiLanguage: UiLanguageCode;
+  inputDevice: string;
 }
 
 export interface ModelStatusEntry {
@@ -63,6 +64,7 @@ interface SettingsPayload {
   low_power_mode: boolean;
   adaptive_perf: boolean;
   ui_language: string;
+  input_device: string;
 }
 
 interface DownloadProgress {
@@ -108,6 +110,7 @@ function toPayload(settings: AppSettings): SettingsPayload {
     low_power_mode: settings.lowPowerMode,
     adaptive_perf: settings.adaptivePerf,
     ui_language: settings.uiLanguage,
+    input_device: settings.inputDevice,
   };
 }
 
@@ -128,6 +131,7 @@ function fromPayload(payload: SettingsPayload): AppSettings {
     lowPowerMode: payload.low_power_mode,
     adaptivePerf: payload.adaptive_perf,
     uiLanguage: parseUiLanguage(payload.ui_language),
+    inputDevice: payload.input_device?.trim() || "default",
   };
 }
 
@@ -143,6 +147,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   lowPowerMode: false,
   adaptivePerf: true,
   uiLanguage: "fr",
+  inputDevice: "default",
 };
 
 export function useSettings() {
@@ -375,6 +380,13 @@ export function useSettings() {
     [saveSettings],
   );
 
+  const setInputDevice = useCallback(
+    async (inputDevice: string) => {
+      await saveSettings({ ...settingsRef.current, inputDevice });
+    },
+    [saveSettings],
+  );
+
   const setHotkey = useCallback(async (hotkey: string) => {
     setSaving(true);
     setErrorMessage(null);
@@ -435,6 +447,7 @@ export function useSettings() {
     setLowPowerMode,
     setAdaptivePerf,
     setUiLanguage,
+    setInputDevice,
     setHotkey,
     setAutostart,
     resetSettings,

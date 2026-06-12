@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::traits::{DeviceTrait, StreamTrait};
 use thiserror::Error;
 
 pub const TARGET_SAMPLE_RATE: u32 = 16_000;
@@ -28,6 +28,8 @@ pub enum AudioError {
     ThreadUnavailable,
     #[error("audio thread failed: {0}")]
     ThreadFailed(String),
+    #[error("failed to enumerate audio devices: {0}")]
+    DeviceEnumerate(String),
 }
 
 enum AudioCommand {
@@ -35,6 +37,7 @@ enum AudioCommand {
         reply: std::sync::mpsc::Sender<Result<(), AudioError>>,
         chunk_tx: Option<AudioChunkSender>,
         level_tx: Option<AudioLevelSender>,
+        device_id: String,
     },
     Stop(std::sync::mpsc::Sender<Result<Vec<f32>, AudioError>>),
     Shutdown,
@@ -220,17 +223,23 @@ impl AudioCapture {
     }
 
     pub fn start(&mut self) -> Result<(), AudioError> {
-        self.start_with_streaming(None, None)
+        self.start_with_streaming(None, None, None)
     }
 
     pub fn start_with_streaming(
         &mut self,
         chunk_tx: Option<AudioChunkSender>,
         level_tx: Option<AudioLevelSender>,
+        device_id: Option<&str>,
     ) -> Result<(), AudioError> {
         if self.is_recording() {
             return Err(AudioError::AlreadyRecording);
         }
+
+        let device_id = device_id
+            .filter(|id| !id.is_empty())
+            .unwrap_or(crate::audio::devices::DEFAULT_INPUT_DEVICE_ID)
+            .to_string();
 
         let (reply_tx, reply_rx) = std::sync::mpsc::channel();
         self.command_tx
@@ -238,6 +247,7 @@ impl AudioCapture {
                 reply: reply_tx,
                 chunk_tx,
                 level_tx,
+                device_id,
             })
             .map_err(|_| AudioError::ThreadUnavailable)?;
         reply_rx
@@ -285,8 +295,10 @@ fn audio_thread_main(
                 reply,
                 chunk_tx,
                 level_tx,
+                device_id,
             } => {
-                let result = start_session(&mut session, &buffer, chunk_tx, level_tx);
+                let result =
+                    start_session(&mut session, &buffer, chunk_tx, level_tx, &device_id);
                 let _ = reply.send(result);
             }
             AudioCommand::Stop(reply_tx) => {
@@ -303,15 +315,14 @@ fn start_session(
     buffer: &Arc<Mutex<Vec<f32>>>,
     chunk_tx: Option<AudioChunkSender>,
     level_tx: Option<AudioLevelSender>,
+    device_id: &str,
 ) -> Result<(), AudioError> {
     if session.is_some() {
         return Err(AudioError::AlreadyRecording);
     }
 
     let host = cpal::default_host();
-    let device = host
-        .default_input_device()
-        .ok_or(AudioError::NoInputDevice)?;
+    let device = crate::audio::devices::resolve_input_device(&host, device_id)?;
 
     let config = device
         .default_input_config()

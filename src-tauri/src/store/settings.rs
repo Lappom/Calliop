@@ -19,6 +19,8 @@ pub const KEY_AUTO_UPDATE: &str = "auto_update";
 pub const KEY_LOW_POWER_MODE: &str = "low_power_mode";
 pub const KEY_ADAPTIVE_PERF: &str = "adaptive_perf";
 pub const KEY_UI_LANGUAGE: &str = "ui_language";
+pub const KEY_INPUT_DEVICE: &str = "input_device";
+pub const DEFAULT_INPUT_DEVICE: &str = "default";
 
 pub fn detect_default_ui_language() -> String {
     match sys_locale::get_locale() {
@@ -65,6 +67,7 @@ pub struct AppSettings {
     pub low_power_mode: bool,
     pub adaptive_perf: bool,
     pub ui_language: String,
+    pub input_device: String,
 }
 
 impl Default for AppSettings {
@@ -81,6 +84,7 @@ impl Default for AppSettings {
             low_power_mode: false,
             adaptive_perf: true,
             ui_language: detect_default_ui_language(),
+            input_device: DEFAULT_INPUT_DEVICE.into(),
         }
     }
 }
@@ -146,6 +150,9 @@ impl Store {
             adaptive_perf: self.get_bool(KEY_ADAPTIVE_PERF, true)?,
             ui_language: self
                 .get_string(KEY_UI_LANGUAGE, &detect_default_ui_language())?
+                .to_string(),
+            input_device: self
+                .get_string(KEY_INPUT_DEVICE, DEFAULT_INPUT_DEVICE)?
                 .to_string(),
         })
     }
@@ -235,6 +242,11 @@ impl Store {
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             params![KEY_UI_LANGUAGE, settings.ui_language.as_str()],
         )?;
+        tx.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![KEY_INPUT_DEVICE, settings.input_device.as_str()],
+        )?;
         tx.commit()?;
         Ok(())
     }
@@ -308,6 +320,7 @@ mod tests {
                 low_power_mode: true,
                 adaptive_perf: false,
                 ui_language: "en".into(),
+                input_device: "USB Microphone".into(),
             })
             .expect("save");
         let loaded = store.load_settings().expect("load");
@@ -320,6 +333,35 @@ mod tests {
         assert!(loaded.low_power_mode);
         assert!(!loaded.adaptive_perf);
         assert_eq!(loaded.ui_language, "en");
+        assert_eq!(loaded.input_device, "USB Microphone");
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn input_device_defaults_when_missing() {
+        let dir = std::env::temp_dir().join(format!(
+            "calliop-input-device-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::create_dir_all(&dir);
+        let db_file = dir.join("settings.db");
+        let conn = rusqlite::Connection::open(&db_file).unwrap();
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )",
+            [],
+        )
+        .unwrap();
+
+        let store = Store::from_connection(conn);
+        let loaded = store.load_settings().expect("load");
+        assert_eq!(loaded.input_device, DEFAULT_INPUT_DEVICE);
 
         let _ = std::fs::remove_dir_all(dir);
     }

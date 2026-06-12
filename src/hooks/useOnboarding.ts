@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useMicProbe } from "./useMicProbe";
 import { useOnboardingPractice } from "./useOnboardingPractice";
 
 export function useOnboarding() {
@@ -10,9 +11,13 @@ export function useOnboarding() {
   const [modelReady, setModelReady] = useState(false);
   const [modelLoading, setModelLoading] = useState(false);
   const [modelError, setModelError] = useState<string | null>(null);
-  const [audioLevel, setAudioLevel] = useState(0);
-  const [micProbing, setMicProbing] = useState(false);
-  const [micProbeStopping, setMicProbeStopping] = useState(false);
+  const {
+    audioLevel,
+    micProbing,
+    micProbeStopping,
+    startMicProbe,
+    stopMicProbe,
+  } = useMicProbe();
   const [pipelineState, setPipelineState] = useState("idle");
   const [pipelineError, setPipelineError] = useState<string | null>(null);
   const [hotkey, setHotkey] = useState("Alt+Space");
@@ -82,9 +87,6 @@ export function useOnboarding() {
         setModelReady(false);
         setModelError(event.payload);
       }),
-      listen<{ level: number }>("audio-level", (event) => {
-        setAudioLevel(event.payload.level);
-      }),
       listen<{ state: string; message?: string | null }>(
         "pipeline-state",
         (event) => {
@@ -112,32 +114,14 @@ export function useOnboarding() {
     };
   }, [ensureModelForOnboarding]);
 
-  const startMicProbe = useCallback(async () => {
-    setMicProbing(true);
-    setAudioLevel(0);
-    try {
-      await invoke("start_mic_probe");
-    } catch {
-      setMicProbing(false);
-    }
-  }, []);
-
-  const stopMicProbe = useCallback(async () => {
-    setMicProbeStopping(true);
-    try {
-      await invoke("stop_mic_probe");
-      setMicProbing(false);
-    } finally {
-      setMicProbeStopping(false);
-    }
-  }, []);
-
   const completeOnboarding = useCallback(async () => {
     await invoke("prepare_onboarding_dictation").catch(() => {});
-    setMicProbing(false);
+    if (micProbing) {
+      await stopMicProbe();
+    }
     await invoke("set_onboarding_done", { done: true });
     setDone(true);
-  }, []);
+  }, [micProbing, stopMicProbe]);
 
   return {
     loading,

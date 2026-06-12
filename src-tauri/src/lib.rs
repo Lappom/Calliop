@@ -218,6 +218,7 @@ struct SettingsPayload {
     low_power_mode: bool,
     adaptive_perf: bool,
     ui_language: String,
+    input_device: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -248,6 +249,7 @@ fn settings_to_payload(settings: &AppSettings) -> SettingsPayload {
         low_power_mode: settings.low_power_mode,
         adaptive_perf: settings.adaptive_perf,
         ui_language: settings.ui_language.clone(),
+        input_device: settings.input_device.clone(),
     }
 }
 
@@ -810,6 +812,7 @@ async fn set_settings(
     let inference_changed = previous.inference_backend() != inference_backend;
     let low_power_changed = previous.low_power_mode != settings.low_power_mode;
     let adaptive_changed = previous.adaptive_perf != settings.adaptive_perf;
+    let input_device_changed = previous.input_device != settings.input_device;
 
     let prev_effective_whisper =
         system::resolve_whisper_model(previous.whisper_model(), &state.capabilities);
@@ -835,6 +838,7 @@ async fn set_settings(
         low_power_mode: settings.low_power_mode,
         adaptive_perf: settings.adaptive_perf,
         ui_language: parse_ui_language(&settings.ui_language),
+        input_device: settings.input_device.clone(),
     };
 
     let mut rollback_ctx = SettingsRollbackContext {
@@ -845,6 +849,12 @@ async fn set_settings(
 
     state.pipeline.lock().set_auto_learn(settings.auto_learn);
     state.pipeline.lock().set_default_stt_language(stt_language);
+    if input_device_changed {
+        state
+            .pipeline
+            .lock()
+            .set_input_device(next_settings.input_device.clone());
+    }
 
     if let Err(err) = state
         .store
@@ -1511,6 +1521,11 @@ fn is_autostart_enabled(app: AppHandle) -> Result<bool, String> {
 }
 
 #[tauri::command]
+fn list_input_devices() -> Result<Vec<audio::InputDeviceInfo>, String> {
+    audio::list_input_devices().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn start_mic_probe(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     if state.mic_probe.capture.lock().is_some() {
         return Err(user_error_string(UserError::MicProbeAlreadyActive));
@@ -1520,9 +1535,15 @@ async fn start_mic_probe(app: AppHandle, state: State<'_, AppState>) -> Result<(
     }
     suspend_global_hotkey(&app, &state)?;
 
+    let input_device = state
+        .store
+        .load_settings()
+        .map_err(|e| e.to_string())?
+        .input_device;
+
     let mut capture = audio::AudioCapture::new().map_err(|e| e.to_string())?;
     let (level_tx, level_rx) = std::sync::mpsc::channel::<f32>();
-    if let Err(err) = capture.start_with_streaming(None, Some(level_tx)) {
+    if let Err(err) = capture.start_with_streaming(None, Some(level_tx), Some(&input_device)) {
         let _ = resume_global_hotkey(&app, &state);
         return Err(err.to_string());
     }
@@ -2248,6 +2269,9 @@ pub fn run() {
     pipeline
         .lock()
         .set_default_stt_language(initial_settings.stt_language_mode());
+    pipeline
+        .lock()
+        .set_input_device(initial_settings.input_device.clone());
 
     {
         let handler = Arc::new(move |app: &AppHandle, original: &str, corrected: &str| {
@@ -2430,6 +2454,7 @@ pub fn run() {
             set_hotkey_capture_active,
             is_onboarding_done,
             set_onboarding_done,
+            list_input_devices,
             start_mic_probe,
             stop_mic_probe,
             prepare_onboarding_dictation,

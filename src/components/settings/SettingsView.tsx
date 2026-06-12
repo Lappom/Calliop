@@ -10,6 +10,7 @@ import { Kbd } from "../ui/Kbd";
 import { ProgressBar } from "../ui/ProgressBar";
 import { Select } from "../ui/Select";
 import { TextInput } from "../ui/TextInput";
+import { AudioInputPanel } from "./AudioInputPanel";
 import { ModelsSettingsPanel } from "./ModelsSettingsPanel";
 import { SettingsSection } from "./SettingsSection";
 import { SettingsToggleRow } from "./SettingsToggleRow";
@@ -45,6 +46,7 @@ export function SettingsView() {
     setAutoLearn,
     setAutoUpdate,
     setSttLanguage,
+    setInputDevice,
     setUiLanguage,
     setWhisperModel,
     setLlmModel,
@@ -177,6 +179,14 @@ export function SettingsView() {
               ]}
               onChange={(value) => {
                 void setSttLanguage(value);
+              }}
+            />
+
+            <AudioInputPanel
+              value={settings.inputDevice}
+              disabled={!loaded || saving}
+              onChange={(deviceId) => {
+                void setInputDevice(deviceId);
               }}
             />
 

@@ -99,7 +99,7 @@
     "sections": {
       "general": {
         "label": "General",
-        "description": "Language, AI auto-edits, and correction learning."
+        "description": "Language, microphone, AI auto-edits, and correction learning."
       },
       "models": {
         "label": "Models",
@@ -124,6 +124,15 @@
       "fr": "French",
       "en": "English",
       "auto": "Automatic detection"
+    },
+    "inputDevice": {
+      "label": "Microphone",
+      "default": "System default microphone",
+      "defaultBadge": "Default",
+      "test": "Test microphone",
+      "stopTest": "Stop test",
+      "empty": "No microphone detected",
+      "hint": "Changes apply on the next dictation."
     },
     "autoEdit": {
       "label": "AI auto-edits",

@@ -99,7 +99,7 @@
     "sections": {
       "general": {
         "label": "Général",
-        "description": "Langue, auto-édition IA et apprentissage des corrections."
+        "description": "Langue, microphone, auto-édition IA et apprentissage des corrections."
       },
       "models": {
         "label": "Modèles",
@@ -124,6 +124,15 @@
       "fr": "Français",
       "en": "Anglais",
       "auto": "Détection automatique"
+    },
+    "inputDevice": {
+      "label": "Microphone",
+      "default": "Microphone par défaut du système",
+      "defaultBadge": "Défaut",
+      "test": "Tester le micro",
+      "stopTest": "Arrêter le test",
+      "empty": "Aucun microphone détecté",
+      "hint": "Le changement s'applique à la prochaine dictée."
     },
     "autoEdit": {
       "label": "Auto-edits IA",
