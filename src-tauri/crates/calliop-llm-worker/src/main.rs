@@ -313,8 +313,26 @@ fn parse_oneshot_text(args: &[String]) -> Result<String, String> {
 }
 
 fn serve(model_path: PathBuf, n_gpu_layers: u32) -> Result<(), String> {
-    let engine = InferenceEngine::load(&model_path, n_gpu_layers)?;
-    let (mut ctx, mut batch) = engine.new_session_context()?;
+    let engine = match InferenceEngine::load(&model_path, n_gpu_layers) {
+        Ok(engine) => engine,
+        Err(err) => {
+            write_response(&WorkerResponse {
+                text: None,
+                error: Some(err.clone()),
+            });
+            return Err(err);
+        }
+    };
+    let (mut ctx, mut batch) = match engine.new_session_context() {
+        Ok(parts) => parts,
+        Err(err) => {
+            write_response(&WorkerResponse {
+                text: None,
+                error: Some(err.clone()),
+            });
+            return Err(err);
+        }
+    };
     let mut tone_cache = ToneKvCache::default();
     write_response(&WorkerResponse {
         text: Some(String::new()),

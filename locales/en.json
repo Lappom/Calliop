@@ -189,6 +189,14 @@
         "qwen06": "Qwen3 0.6B (~484 MB)",
         "qwen17": "Qwen3 1.7B (~1.1 GB)",
         "qwen4": "Qwen3 4B (~2.5 GB)"
+      },
+      "manage": {
+        "diskSize": "{{size}} on disk",
+        "delete": "Remove",
+        "reinstall": "Reinstall",
+        "deleting": "Removing…",
+        "reinstalling": "Reinstalling…",
+        "deleteActiveHint": "Switch to another model before removing the active one."
       }
     },
     "shortcutsPanel": {
@@ -614,6 +622,7 @@
     "UNKNOWN_WHISPER_MODEL": "Unknown Whisper model.",
     "UNKNOWN_LLM_MODEL": "Unknown LLM model.",
     "LLM_ENGINE_LOAD_FAILED": "The model preference was saved, but loading it failed (insufficient memory or LLM engine error). Try again or choose a lighter model.",
+    "LLM_MODEL_CORRUPT": "The model file is incomplete or corrupted. It was removed — select the model again to re-download it.",
     "INVALID_INFERENCE_BACKEND": "Invalid inference backend.",
     "WORD_EMPTY": "Word cannot be empty.",
     "WORD_TOO_LONG": "Word cannot be empty and cannot consist of digits only.",
@@ -663,6 +672,9 @@
     }
   },
   "toasts": {
+    "error": {
+      "title": "Error"
+    },
     "llmSkipped": {
       "title": "AI auto-edit skipped",
       "reasons": {

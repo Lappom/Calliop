@@ -522,17 +522,48 @@ export function useSettings() {
 
   const deleteModel = useCallback(
     async (kind: "whisper" | "llm", modelId: string) => {
-      await invoke("delete_model", { kind, modelId });
-      await refreshModelsStatus();
+      setSaving(true);
+      setErrorMessage(null);
+      try {
+        await invoke("delete_model", { kind, modelId });
+        await refreshModelsStatus();
+      } catch (err) {
+        setErrorMessage(translateError(err, t));
+        throw err;
+      } finally {
+        setSaving(false);
+      }
     },
-    [refreshModelsStatus],
+    [refreshModelsStatus, t],
   );
+
+  const reinstallModel = useCallback(
+    async (kind: "whisper" | "llm", modelId: string) => {
+      setSaving(true);
+      setErrorMessage(null);
+      try {
+        await invoke("reinstall_model", { kind, modelId });
+        await refreshModelsStatus();
+      } catch (err) {
+        setErrorMessage(translateError(err, t));
+        throw err;
+      } finally {
+        setSaving(false);
+      }
+    },
+    [refreshModelsStatus, t],
+  );
+
+  const clearError = useCallback(() => {
+    setErrorMessage(null);
+  }, []);
 
   return {
     settings,
     loaded,
     saving,
     errorMessage,
+    clearError,
     llmReady,
     llmProgress,
     llmProgressModel,
@@ -557,6 +588,7 @@ export function useSettings() {
     setAutostart,
     resetSettings,
     deleteModel,
+    reinstallModel,
     refreshModelsStatus,
     saveSettings,
   };

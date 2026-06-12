@@ -7,8 +7,9 @@ mod prompt;
 
 pub use engine::{ensure_engine_ready, LlamaEngine};
 pub use model::{
-    ensure_llm_model_blocking, ensure_llm_model_file_blocking, is_valid_model_file, model_exists,
-    model_path, LlmModel, LlmModelDownloadProgress, LlmModelError, DEFAULT_MODEL_FILE,
+    ensure_llm_model_blocking, ensure_llm_model_file_blocking, invalidate_corrupt_model_file,
+    is_corrupt_model_load_error, is_valid_model_file, model_exists, model_path, LlmModel,
+    LlmModelDownloadProgress, LlmModelError, DEFAULT_MODEL_FILE,
 };
 pub use prompt::{
     build_cleanup_user_message, validate_cleanup_output, QWEN3_CHAT_TEMPLATE, SYSTEM_PROMPT,

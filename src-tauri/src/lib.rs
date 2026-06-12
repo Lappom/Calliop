@@ -856,6 +856,63 @@ async fn delete_model(
 }
 
 #[tauri::command]
+async fn reinstall_model(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    kind: String,
+    model_id: String,
+) -> Result<(), String> {
+    let settings = state.store.load_settings().map_err(|e| e.to_string())?;
+    let effective_whisper =
+        system::resolve_whisper_model(settings.whisper_model(), &state.capabilities);
+    let effective_llm = system::resolve_llm_model(settings.llm_model(), &state.capabilities);
+
+    match kind.as_str() {
+        "whisper" => {
+            let model = WhisperModel::parse(&model_id)
+                .ok_or_else(|| user_error_string(UserError::UnknownWhisperModel))?;
+            if !model.is_concrete() {
+                return Err(user_error_string(UserError::CannotDeleteAutoWhisperModel));
+            }
+            let reload_engine = model == effective_whisper;
+            if reload_engine {
+                invalidate_whisper_engine(&state);
+            }
+            let path = model.path();
+            if path.exists() {
+                std::fs::remove_file(&path).map_err(|e| e.to_string())?;
+            }
+            ensure_whisper_model_file(&app, model).await?;
+            if reload_engine {
+                ensure_model_inner(&app, &state).await?;
+            }
+        }
+        "llm" => {
+            let model = llm::LlmModel::parse(&model_id)
+                .ok_or_else(|| user_error_string(UserError::UnknownLlmModel))?;
+            if !model.is_concrete() {
+                return Err(user_error_string(UserError::CannotDeleteAutoLlmModel));
+            }
+            let reload_engine = model == effective_llm && settings.auto_edit;
+            if model == effective_llm {
+                shutdown_llm_engine(&state);
+                let _ = app.emit("llm-unready", ());
+            }
+            let path = model.path();
+            if path.exists() {
+                std::fs::remove_file(&path).map_err(|e| e.to_string())?;
+            }
+            ensure_llm_model_file(&app, model).await?;
+            if reload_engine {
+                ensure_llm_model_inner(&app, &state).await?;
+            }
+        }
+        _ => return Err(user_error_string(UserError::InvalidModelKind)),
+    }
+    Ok(())
+}
+
+#[tauri::command]
 async fn set_hotkey(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -1097,6 +1154,9 @@ async fn set_settings(
                 if let Err(err) = ensure_llm_model_inner(&app, &state).await {
                     // Preference is already persisted; keep it and surface the load error.
                     eprintln!("llm reload after settings change failed: {err}");
+                    if err == user_error_string(UserError::LlmModelCorrupt) {
+                        return Err(err);
+                    }
                     return Err(user_error_string(UserError::LlmEngineLoadFailed));
                 }
             } else {
@@ -1166,7 +1226,7 @@ async fn ensure_llm_model_inner(app: &AppHandle, state: &AppState) -> Result<(),
         return Ok(());
     }
 
-    let engine = tauri::async_runtime::spawn_blocking(move || {
+    let engine = match tauri::async_runtime::spawn_blocking(move || {
         let mut engine = llm::LlamaEngine::start_with_config(&model_path, n_gpu_layers)?;
         if let Err(err) = engine.cleanup("bonjour", ToneProfile::Default) {
             eprintln!("llm warmup failed (non-fatal): {err}");
@@ -1175,7 +1235,16 @@ async fn ensure_llm_model_inner(app: &AppHandle, state: &AppState) -> Result<(),
     })
     .await
     .map_err(|e| e.to_string())?
-    .map_err(|e: llm::LlmError| e.to_string())?;
+    {
+        Ok(engine) => engine,
+        Err(err) => {
+            let msg = err.to_string();
+            if llm::invalidate_corrupt_model_file(llm_model, &msg) {
+                return Err(user_error_string(UserError::LlmModelCorrupt));
+            }
+            return Err(msg);
+        }
+    };
 
     if !state.pipeline.lock().auto_edit_enabled() {
         return Ok(());
@@ -2762,6 +2831,7 @@ pub fn run() {
             set_settings,
             get_models_status,
             delete_model,
+            reinstall_model,
             get_inference_info,
             set_hotkey,
             set_hotkey_capture_active,

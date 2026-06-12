@@ -6,6 +6,7 @@ import type { UiLanguageCode } from "../../i18n/locale";
 import { useAppVersion } from "../../hooks/useAppVersion";
 import { useSettings } from "../../hooks/useSettings";
 import { translateError } from "../../lib/translateError";
+import { ErrorToast } from "../layout/ErrorToast";
 import { Stagger } from "../motion/Stagger";
 import { Button } from "../ui/Button";
 import { Kbd } from "../ui/Kbd";
@@ -42,6 +43,7 @@ export function SettingsView() {
     loaded,
     saving,
     errorMessage,
+    clearError,
     llmProgress,
     llmProgressModel,
     sttProgress,
@@ -63,6 +65,9 @@ export function SettingsView() {
     setHotkey,
     setAutostart,
     resetSettings,
+    formatBytes,
+    deleteModel,
+    reinstallModel,
   } = useSettings();
 
   const settingsSections = useMemo(() => getSettingsSections(t), [t]);
@@ -243,9 +248,12 @@ export function SettingsView() {
   ]);
 
   const displayHotkey = pendingHotkey ?? settings.hotkey;
+  const toastError = errorMessage ? translateError(errorMessage, t) : null;
 
   return (
-    <Stagger className="flex w-full flex-col gap-12 pb-8" itemMotion="fade">
+    <>
+      <ErrorToast message={toastError} onDismiss={clearError} />
+      <Stagger className="flex w-full flex-col gap-12 pb-8" itemMotion="fade">
       <header>
         <h1 className="text-heading-md mb-2 text-ink">{t("settings.title")}</h1>
         <p className="text-body-sm text-charcoal">{t("settings.subtitle")}</p>
@@ -341,7 +349,10 @@ export function SettingsView() {
               llmProgressModel={llmProgressModel}
               inferenceInfo={inferenceInfo}
               modelsStatus={modelsStatus}
+              formatBytes={formatBytes}
               disabled={!loaded || saving}
+              onDeleteModel={deleteModel}
+              onReinstallModel={reinstallModel}
               onWhisperChange={(value) => {
                 if (
                   value === "auto" ||
@@ -513,12 +524,6 @@ export function SettingsView() {
             )}
           </SettingsSection>
 
-          {errorMessage && (
-            <p className="text-body-sm text-accent-red">
-              {translateError(errorMessage, t)}
-            </p>
-          )}
-
           <footer className="flex flex-wrap items-center gap-4 border-t border-divider-soft pt-6">
             <Button
               variant="ghost"
@@ -545,6 +550,7 @@ export function SettingsView() {
               {saving ? t("common.saving") : t("common.autoSave")}
             </Button>
           </footer>
-    </Stagger>
+      </Stagger>
+    </>
   );
 }

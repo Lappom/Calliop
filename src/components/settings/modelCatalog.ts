@@ -82,3 +82,10 @@ export function buildLlmSelectOptions(
     return { ...option, status, statusLabel: getModelStatusLabel(status, t) };
   });
 }
+
+export function findModelEntry(
+  entries: ModelStatusEntry[] | undefined,
+  id: string,
+): ModelStatusEntry | undefined {
+  return entries?.find((item) => item.id === id);
+}

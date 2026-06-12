@@ -8,6 +8,11 @@ use crate::stt::models_dir;
 
 pub const DEFAULT_MODEL_FILE: &str = "qwen3-1.7b-instruct-q4_k_m.gguf";
 
+// Published Hugging Face release sizes (bytes).
+const QWEN3_0_6B_BYTES: u64 = 396_705_472;
+const QWEN3_1_7B_BYTES: u64 = 1_107_404_512;
+const QWEN3_4B_BYTES: u64 = 2_497_281_120;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum LlmModel {
@@ -69,7 +74,16 @@ impl LlmModel {
             Self::Auto => 0,
             Self::Qwen3_0_6B => 370_000_000,
             Self::Qwen3_1_7B => 1_000_000_000,
-            Self::Qwen3_4B => 2_400_000_000,
+            Self::Qwen3_4B => 2_497_000_000,
+        }
+    }
+
+    pub fn expected_bytes(self) -> Option<u64> {
+        match self {
+            Self::Auto => None,
+            Self::Qwen3_0_6B => Some(QWEN3_0_6B_BYTES),
+            Self::Qwen3_1_7B => Some(QWEN3_1_7B_BYTES),
+            Self::Qwen3_4B => Some(QWEN3_4B_BYTES),
         }
     }
 
@@ -164,9 +178,35 @@ pub fn is_valid_model_file(model: LlmModel, path: &Path) -> bool {
     if !model.is_concrete() {
         return false;
     }
-    std::fs::metadata(path)
-        .map(|meta| meta.len() >= model.min_bytes())
-        .unwrap_or(false)
+    let Ok(meta) = std::fs::metadata(path) else {
+        return false;
+    };
+    let size = meta.len();
+    if size < model.min_bytes() {
+        return false;
+    }
+    model
+        .expected_bytes()
+        .is_none_or(|expected| size == expected)
+}
+
+pub fn is_corrupt_model_load_error(err: &str) -> bool {
+    let lower = err.to_ascii_lowercase();
+    lower.contains("corrupted")
+        || lower.contains("incomplete")
+        || lower.contains("not within the file bounds")
+}
+
+/// Removes a model file when llama.cpp reports corruption so the next ensure retries download.
+pub fn invalidate_corrupt_model_file(model: LlmModel, err: &str) -> bool {
+    if !model.is_concrete() || !is_corrupt_model_load_error(err) {
+        return false;
+    }
+    let path = model.path();
+    if path.exists() {
+        let _ = std::fs::remove_file(path);
+    }
+    true
 }
 
 pub fn ensure_llm_model_blocking(
@@ -309,6 +349,21 @@ async fn try_download(
     if size < min_bytes {
         return Err(LlmModelError::ModelTooSmall { size, min_bytes });
     }
+    if let Some(expected) = total {
+        if size != expected {
+            return Err(LlmModelError::Download {
+                url: url.into(),
+                message: format!("size mismatch: got {size} bytes, expected {expected}"),
+            });
+        }
+    } else if let Some(expected) = model.expected_bytes() {
+        if size != expected {
+            return Err(LlmModelError::Download {
+                url: url.into(),
+                message: format!("size mismatch: got {size} bytes, expected {expected}"),
+            });
+        }
+    }
 
     Ok(())
 }
@@ -336,10 +391,28 @@ mod tests {
     }
 
     #[test]
-    fn qwen3_0_6b_min_bytes_fits_huggingface_release() {
-        // Published unsloth Qwen3-0.6B-Q4_K_M.gguf size (bytes).
-        const HUGGINGFACE_QWEN3_0_6B_BYTES: u64 = 396_705_472;
-        assert!(HUGGINGFACE_QWEN3_0_6B_BYTES >= LlmModel::Qwen3_0_6B.min_bytes());
+    fn qwen3_min_bytes_fit_huggingface_releases() {
+        assert!(QWEN3_0_6B_BYTES >= LlmModel::Qwen3_0_6B.min_bytes());
+        assert!(QWEN3_1_7B_BYTES >= LlmModel::Qwen3_1_7B.min_bytes());
+        assert!(QWEN3_4B_BYTES >= LlmModel::Qwen3_4B.min_bytes());
+    }
+
+    #[test]
+    fn rejects_truncated_qwen3_4b_file() {
+        let dir = std::env::temp_dir().join("calliop-llm-4b-truncated-test");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("qwen3-4b-instruct-q4_k_m.gguf");
+        std::fs::write(&path, vec![0u8; 2_432_419_585]).unwrap();
+        assert!(!is_valid_model_file(LlmModel::Qwen3_4B, &path));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn detects_corrupt_model_load_errors() {
+        assert!(is_corrupt_model_load_error(
+            "tensor data is not within the file bounds, model is corrupted or incomplete"
+        ));
+        assert!(!is_corrupt_model_load_error("worker ready handshake failed"));
     }
 
     #[test]
