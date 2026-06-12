@@ -277,6 +277,12 @@ export function useSettings() {
           scheduleModelsStatusRefresh();
         }
       }),
+      listen("llm-model-download-failed", () => {
+        llmProgressRef.current = null;
+        setLlmProgress(null);
+        setLlmProgressModel(null);
+        void refreshModelsStatus();
+      }),
       listen<DownloadProgress>("model-download-progress", (event) => {
         setSttProgress(event.payload.percent);
         setSttProgressModel(event.payload.model_id);
@@ -285,6 +291,11 @@ export function useSettings() {
         } else {
           scheduleModelsStatusRefresh();
         }
+      }),
+      listen("model-download-failed", () => {
+        setSttProgress(null);
+        setSttProgressModel(null);
+        void refreshModelsStatus();
       }),
       listen("model-ready", () => {
         setSttProgress(null);
@@ -368,6 +379,9 @@ export function useSettings() {
         setSettings(previousSettings);
         setLlmReady(previousLlmReady);
         setLlmProgress(previousLlmProgress);
+        setLlmProgressModel(null);
+        setSttProgress(null);
+        setSttProgressModel(null);
         setErrorMessage(translateError(err, t));
         void refreshModelsStatus();
         throw err;

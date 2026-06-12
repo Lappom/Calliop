@@ -97,6 +97,8 @@
   "settings": {
     "title": "Settings",
     "subtitle": "Settings are saved locally on this device.",
+    "appVersion": "v{{version}}",
+    "appVersionAria": "Application version {{version}}",
     "sections": {
       "general": {
         "label": "General",

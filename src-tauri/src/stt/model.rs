@@ -134,6 +134,22 @@ pub struct ModelDownloadProgress {
     pub source: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct ModelDownloadFailed {
+    pub model_id: String,
+}
+
+fn emit_model_download_failed(app: Option<&AppHandle>, model: WhisperModel) {
+    if let Some(handle) = app {
+        let _ = handle.emit(
+            "model-download-failed",
+            ModelDownloadFailed {
+                model_id: model.as_setting_value().into(),
+            },
+        );
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum ModelError {
     #[error("failed to create models directory: {0}")]
@@ -225,9 +241,11 @@ pub async fn download_model(
     }
 
     if let Some((url, message)) = last_error {
+        emit_model_download_failed(app, model);
         return Err(ModelError::Download { url, message });
     }
 
+    emit_model_download_failed(app, model);
     Err(ModelError::AllSourcesFailed)
 }
 

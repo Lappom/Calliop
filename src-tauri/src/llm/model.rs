@@ -58,7 +58,7 @@ impl LlmModel {
     pub fn label(self) -> &'static str {
         match self {
             Self::Auto => "Automatique (recommandé)",
-            Self::Qwen3_0_6B => "Qwen3 0.6B Instruct Q4_K_M (~484 Mo)",
+            Self::Qwen3_0_6B => "Qwen3 0.6B Instruct Q4_K_M (~378 Mo)",
             Self::Qwen3_1_7B => "Qwen3 1.7B Instruct Q4_K_M (~1,1 Go)",
             Self::Qwen3_4B => "Qwen3 4B Instruct Q4_K_M (~2,5 Go, GPU recommandé)",
         }
@@ -67,7 +67,7 @@ impl LlmModel {
     pub fn min_bytes(self) -> u64 {
         match self {
             Self::Auto => 0,
-            Self::Qwen3_0_6B => 450_000_000,
+            Self::Qwen3_0_6B => 370_000_000,
             Self::Qwen3_1_7B => 1_000_000_000,
             Self::Qwen3_4B => 2_400_000_000,
         }
@@ -128,6 +128,22 @@ pub struct LlmModelDownloadProgress {
     pub total: Option<u64>,
     pub percent: f32,
     pub source: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LlmModelDownloadFailed {
+    pub model_id: String,
+}
+
+fn emit_llm_download_failed(app: Option<&AppHandle>, model: LlmModel) {
+    if let Some(handle) = app {
+        let _ = handle.emit(
+            "llm-model-download-failed",
+            LlmModelDownloadFailed {
+                model_id: model.as_setting_value().into(),
+            },
+        );
+    }
 }
 
 #[derive(Debug, Error)]
@@ -221,9 +237,11 @@ pub async fn download_model(
     }
 
     if let Some((url, message)) = last_error {
+        emit_llm_download_failed(app, model);
         return Err(LlmModelError::Download { url, message });
     }
 
+    emit_llm_download_failed(app, model);
     Err(LlmModelError::AllSourcesFailed)
 }
 
@@ -315,6 +333,13 @@ mod tests {
         std::fs::write(&path, vec![0u8; 1024]).unwrap();
         assert!(!is_valid_model_file(LlmModel::Qwen3_1_7B, &path));
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn qwen3_0_6b_min_bytes_fits_huggingface_release() {
+        // Published unsloth Qwen3-0.6B-Q4_K_M.gguf size (bytes).
+        const HUGGINGFACE_QWEN3_0_6B_BYTES: u64 = 396_705_472;
+        assert!(HUGGINGFACE_QWEN3_0_6B_BYTES >= LlmModel::Qwen3_0_6B.min_bytes());
     }
 
     #[test]

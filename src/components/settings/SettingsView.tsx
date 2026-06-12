@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { UiLanguageCode } from "../../i18n/locale";
+import { useAppVersion } from "../../hooks/useAppVersion";
 import { useSettings } from "../../hooks/useSettings";
 import { translateError } from "../../lib/translateError";
 import { Stagger } from "../motion/Stagger";
@@ -26,6 +27,7 @@ import {
 
 export function SettingsView() {
   const { t } = useTranslation();
+  const appVersion = useAppVersion();
   const [recordingHotkey, setRecordingHotkey] = useState(false);
   const [pendingHotkey, setPendingHotkey] = useState<string | null>(null);
   const [hotkeyCaptureError, setHotkeyCaptureError] = useState<string | null>(
@@ -439,7 +441,7 @@ export function SettingsView() {
             </p>
           )}
 
-          <footer className="flex flex-wrap items-center justify-between gap-4 border-t border-divider-soft pt-6">
+          <footer className="flex flex-wrap items-center gap-4 border-t border-divider-soft pt-6">
             <Button
               variant="ghost"
               disabled={!loaded || saving}
@@ -449,6 +451,18 @@ export function SettingsView() {
             >
               {t("common.reset")}
             </Button>
+            <div className="flex flex-1 justify-center">
+              {appVersion && (
+                <p
+                  className="text-caption text-ash tabular-nums"
+                  aria-label={t("settings.appVersionAria", {
+                    version: appVersion,
+                  })}
+                >
+                  {t("settings.appVersion", { version: appVersion })}
+                </p>
+              )}
+            </div>
             <Button variant="primary" disabled>
               {saving ? t("common.saving") : t("common.autoSave")}
             </Button>

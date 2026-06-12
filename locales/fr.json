@@ -97,6 +97,8 @@
   "settings": {
     "title": "Paramètres",
     "subtitle": "Les réglages sont enregistrés localement sur cet appareil.",
+    "appVersion": "v{{version}}",
+    "appVersionAria": "Version de l'application {{version}}",
     "sections": {
       "general": {
         "label": "Général",

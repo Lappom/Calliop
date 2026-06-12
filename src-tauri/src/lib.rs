@@ -77,6 +77,11 @@ struct HotkeyPressState {
     deferred_toggle_intent: bool,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct DictationBlockedPayload {
+    reason: String,
+}
+
 struct TrayHandles {
     open_item: MenuItem<tauri::Wry>,
     toggle_item: MenuItem<tauri::Wry>,
@@ -119,9 +124,53 @@ struct AppState {
     deferred_llm_on_boot: AtomicBool,
     current_hotkey: Mutex<Shortcut>,
     hotkey_suspend_depth: AtomicU32,
+    whisper_settings_change_depth: AtomicU32,
     loaded_whisper: Mutex<Option<WhisperModel>>,
     loaded_llm: Mutex<Option<llm::LlmModel>>,
     mic_probe: MicProbeState,
+}
+
+/// Held while `set_settings` downloads or reloads the active Whisper model.
+struct WhisperSettingsChangeGuard<'a> {
+    depth: &'a AtomicU32,
+}
+
+impl<'a> WhisperSettingsChangeGuard<'a> {
+    fn new(state: &'a AppState) -> Self {
+        Self::acquire(&state.whisper_settings_change_depth)
+    }
+
+    fn acquire(depth: &'a AtomicU32) -> Self {
+        depth.fetch_add(1, Ordering::SeqCst);
+        Self { depth }
+    }
+}
+
+impl Drop for WhisperSettingsChangeGuard<'_> {
+    fn drop(&mut self) {
+        self.depth.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+fn is_dictation_blocked_by_settings(state: &AppState) -> bool {
+    state.whisper_settings_change_depth.load(Ordering::SeqCst) > 0
+}
+
+fn is_dictation_start_blocked_by_settings(
+    state: &AppState,
+    pipeline_state: PipelineState,
+) -> bool {
+    pipeline_state == PipelineState::Idle && is_dictation_blocked_by_settings(state)
+}
+
+fn notify_dictation_blocked_by_settings(app: &AppHandle, state: &AppState) {
+    clear_deferred_hotkey_start(state);
+    let _ = app.emit(
+        "dictation-blocked",
+        DictationBlockedPayload {
+            reason: "WHISPER_SETTINGS_CHANGE".into(),
+        },
+    );
 }
 
 fn llm_engine_is_live(state: &AppState) -> bool {
@@ -379,6 +428,7 @@ async fn rollback_settings(
         .store
         .save_settings(previous)
         .map_err(|e| e.to_string())?;
+    refresh_perf_config(state, previous, should_start_minimized());
     if ctx.hotkey_changed {
         let prev_shortcut = hotkey::parse_shortcut(&previous.hotkey).map_err(|e| e.to_string())?;
         register_hotkey(&app_for_notify, prev_shortcut)?;
@@ -693,6 +743,11 @@ async fn toggle_dictation(app: AppHandle) -> Result<(), String> {
     if is_mic_probe_active(&state) {
         return Err(user_error_string(UserError::MicProbeActiveBeforeDictation));
     }
+    let pipeline_state = state.pipeline.lock().state();
+    if is_dictation_start_blocked_by_settings(&state, pipeline_state) {
+        notify_dictation_blocked_by_settings(&app, &state);
+        return Ok(());
+    }
     ensure_model_then_toggle(app).await;
     Ok(())
 }
@@ -941,9 +996,27 @@ async fn set_settings(
         || whisper_effective_changed
         || (adaptive_changed && settings.adaptive_perf);
 
+    let whisper_reload_needed = whisper_changed
+        || inference_changed
+        || whisper_effective_changed
+        || (adaptive_changed && settings.adaptive_perf);
+
+    let whisper_settings_busy = need_whisper_file || whisper_reload_needed;
+    let _whisper_settings_guard = whisper_settings_busy.then(|| WhisperSettingsChangeGuard::new(&state));
+
     let need_llm_file = llm_changed
         || llm_effective_changed
         || (adaptive_changed && settings.adaptive_perf);
+
+    let llm_reload_needed = llm_changed
+        || inference_changed
+        || llm_effective_changed
+        || low_power_changed
+        || (adaptive_changed && settings.adaptive_perf);
+    let llm_lazy_load = state.perf_config.lock().llm_lazy_load;
+    let will_load_llm_engine = settings.auto_edit
+        && !llm_lazy_load
+        && (llm_reload_needed || !llm_engine_is_live(&state));
 
     if need_whisper_file {
         if let Err(err) = ensure_whisper_model_file(&app, next_effective_whisper).await {
@@ -956,7 +1029,7 @@ async fn set_settings(
         }
     }
 
-    if need_llm_file {
+    if need_llm_file && !will_load_llm_engine {
         if let Err(err) = ensure_llm_model_file(&app, next_effective_llm).await {
             if let Err(rollback_err) =
                 rollback_settings(&app, &state, &previous, rollback_ctx).await
@@ -966,11 +1039,6 @@ async fn set_settings(
             return Err(err);
         }
     }
-
-    let whisper_reload_needed = whisper_changed
-        || inference_changed
-        || whisper_effective_changed
-        || (adaptive_changed && settings.adaptive_perf);
 
     if whisper_reload_needed {
         invalidate_whisper_engine(&state);
@@ -987,11 +1055,6 @@ async fn set_settings(
 
     if settings.auto_edit {
         state.pipeline.lock().set_auto_edit(true);
-        let llm_reload_needed = llm_changed
-            || inference_changed
-            || llm_effective_changed
-            || low_power_changed
-            || (adaptive_changed && settings.adaptive_perf);
         if llm_reload_needed || !llm_engine_is_live(&state) {
             shutdown_llm_engine(&state);
             let _ = app.emit("llm-unready", ());
@@ -1923,6 +1986,11 @@ async fn ensure_model_then_toggle(app: AppHandle) {
     if is_mic_probe_active(&state) {
         return;
     }
+    let pipeline_state = state.pipeline.lock().state();
+    if is_dictation_start_blocked_by_settings(&state, pipeline_state) {
+        notify_dictation_blocked_by_settings(&app, &state);
+        return;
+    }
     if !state.model_ready.load(Ordering::SeqCst) {
         let _ = app.emit(
             "pipeline-state",
@@ -1963,6 +2031,13 @@ fn handle_hotkey(app: &AppHandle, shortcut_state: ShortcutState) {
 
             match current {
                 PipelineState::Idle => {
+                    if is_dictation_blocked_by_settings(&state) {
+                        press.shortcut_down = false;
+                        press.press_start = None;
+                        drop(press);
+                        notify_dictation_blocked_by_settings(app, &state);
+                        return;
+                    }
                     if state.model_ready.load(Ordering::SeqCst) {
                         press.deferred_start_pending = false;
                         press.deferred_toggle_intent = false;
@@ -2468,6 +2543,7 @@ pub fn run() {
             ),
             current_hotkey: Mutex::new(hotkey::default_shortcut()),
             hotkey_suspend_depth: AtomicU32::new(0),
+            whisper_settings_change_depth: AtomicU32::new(0),
             loaded_whisper: Mutex::new(None),
             loaded_llm: Mutex::new(None),
             mic_probe: MicProbeState {
@@ -2663,5 +2739,44 @@ mod integration_tests {
         let perf = resolve_perf_config(&settings, &caps, false);
         assert!(perf.llm_lazy_load);
         assert!(!perf.preload_llm);
+    }
+
+    #[test]
+    fn whisper_settings_guard_raii() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+
+        use super::WhisperSettingsChangeGuard;
+
+        let depth = AtomicU32::new(0);
+        {
+            let _guard = WhisperSettingsChangeGuard::acquire(&depth);
+            assert_eq!(depth.load(Ordering::SeqCst), 1);
+        }
+        assert_eq!(depth.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn dictation_start_blocked_only_when_idle_and_settings_busy() {
+        use crate::pipeline::PipelineState;
+
+        let depth = 0_u32;
+        assert!(
+            !(PipelineState::Idle == PipelineState::Idle && depth > 0),
+            "idle with no settings change should not block"
+        );
+        assert!(
+            !(PipelineState::Recording == PipelineState::Idle && depth > 0),
+            "recording should not block even without settings change"
+        );
+
+        let depth = 1_u32;
+        assert!(
+            PipelineState::Idle == PipelineState::Idle && depth > 0,
+            "idle during settings change should block start"
+        );
+        assert!(
+            !(PipelineState::Recording == PipelineState::Idle && depth > 0),
+            "recording during settings change should still allow stop"
+        );
     }
 }

@@ -53,10 +53,16 @@ export function useModelDownloads(): ActiveModelDownload[] {
       listen("model-ready", () => {
         clearDownload("whisper");
       }),
+      listen("model-download-failed", () => {
+        clearDownload("whisper");
+      }),
       listen<DownloadProgressPayload>("llm-model-download-progress", (event) => {
         upsertDownload("llm", event.payload.model_id, event.payload.percent);
       }),
       listen("llm-ready", () => {
+        clearDownload("llm");
+      }),
+      listen("llm-model-download-failed", () => {
         clearDownload("llm");
       }),
     ]);
