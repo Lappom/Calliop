@@ -29,7 +29,7 @@ export function HistoryView() {
   const {
     entries,
     loaded,
-    busy,
+    actionEntryId,
     page,
     totalCount,
     pageSize,
@@ -41,7 +41,7 @@ export function HistoryView() {
     reinjectEntry,
   } = useHistory();
 
-  const { spinning: refreshSpinning, runRefresh } = useRefreshSpin(busy);
+  const { spinning: refreshSpinning, runRefresh } = useRefreshSpin();
 
   const sortLabels = useMemo(
     (): Record<HistorySort, string> => ({
@@ -93,7 +93,7 @@ export function HistoryView() {
           <div className="flex items-center gap-1">
             <ExpandableSearchField
               open={searchOpen}
-              disabled={!loaded || busy}
+              disabled={!loaded}
               label={t("history.searchLabel")}
               placeholder={t("history.searchPlaceholder")}
               value={searchQuery}
@@ -110,7 +110,6 @@ export function HistoryView() {
               <>
                 <SnippetListToolbarButton
                   label={sortLabels[sort]}
-                  disabled={busy}
                   onClick={() => setSort((current) => nextHistorySort(current))}
                   onMenuSelect={setSort}
                   menuTitle={t("common.sort")}
@@ -124,7 +123,7 @@ export function HistoryView() {
                 </SnippetListToolbarButton>
                 <SnippetListToolbarButton
                   label={t("history.refresh")}
-                  disabled={busy || refreshSpinning}
+                  disabled={refreshSpinning}
                   onClick={() => {
                     void runRefresh(() =>
                       loadEntries({ query: searchQuery, page }),
@@ -169,7 +168,7 @@ export function HistoryView() {
         <>
           <HistoryList
             groups={visibleGroups}
-            busy={busy}
+            actionEntryId={actionEntryId}
             entryFeedback={entryFeedback}
             onCopy={(id) => {
               void copyEntry(id);
@@ -182,7 +181,6 @@ export function HistoryView() {
             page={page}
             pageSize={pageSize}
             total={totalCount}
-            disabled={busy}
             onPageChange={goToPage}
           />
         </>

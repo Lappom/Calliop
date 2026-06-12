@@ -4,7 +4,7 @@ import type { HistoryGroup } from "./historyUtils";
 
 interface HistoryListProps {
   groups: HistoryGroup[];
-  busy: boolean;
+  actionEntryId: number | null;
   entryFeedback: Record<number, "copied" | "injected">;
   onCopy: (id: number) => void;
   onReinject: (id: number) => void;
@@ -12,7 +12,7 @@ interface HistoryListProps {
 
 export function HistoryList({
   groups,
-  busy,
+  actionEntryId,
   entryFeedback,
   onCopy,
   onReinject,
@@ -32,7 +32,7 @@ export function HistoryList({
               <AnimatedListItem key={entry.id} index={index}>
                 <HistoryEntryRow
                   entry={entry}
-                  busy={busy}
+                  actionBusy={actionEntryId === entry.id}
                   feedback={entryFeedback[entry.id]}
                   onCopy={onCopy}
                   onReinject={onReinject}

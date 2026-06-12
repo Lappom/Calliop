@@ -13,7 +13,7 @@ import {
 
 interface HistoryEntryRowProps {
   entry: DictationEntry;
-  busy: boolean;
+  actionBusy: boolean;
   feedback?: "copied" | "injected";
   onCopy: (id: number) => void;
   onReinject: (id: number) => void;
@@ -21,7 +21,7 @@ interface HistoryEntryRowProps {
 
 export function HistoryEntryRow({
   entry,
-  busy,
+  actionBusy,
   feedback,
   onCopy,
   onReinject,
@@ -84,12 +84,12 @@ export function HistoryEntryRow({
             copied={feedback === "copied"}
             label={t("history.entry.copy")}
             copiedLabel={t("common.copied")}
-            disabled={busy}
+            disabled={actionBusy}
             onClick={() => onCopy(entry.id)}
           />
           <ActionButton
             label={t("history.entry.reinject")}
-            disabled={busy}
+            disabled={actionBusy}
             onClick={() => onReinject(entry.id)}
           >
             <RotateCcw size={15} strokeWidth={1.75} />

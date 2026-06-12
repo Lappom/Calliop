@@ -26,7 +26,7 @@ interface LoadEntriesOptions {
 export function useHistory() {
   const [entries, setEntries] = useState<DictationEntry[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [actionEntryId, setActionEntryId] = useState<number | null>(null);
   const [page, setPage] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -102,7 +102,7 @@ export function useHistory() {
       setEntryFeedback((prev) => (prev[id] === "copied" ? {} : prev));
     }, 1500);
 
-    setBusy(true);
+    setActionEntryId(id);
     try {
       await invoke("copy_dictation", { id });
       setErrorMessage(null);
@@ -111,12 +111,12 @@ export function useHistory() {
       setEntryFeedback((prev) => (prev[id] === "copied" ? {} : prev));
       setErrorMessage(String(err));
     } finally {
-      setBusy(false);
+      setActionEntryId(null);
     }
   }, []);
 
   const reinjectEntry = useCallback(async (id: number) => {
-    setBusy(true);
+    setActionEntryId(id);
     try {
       await invoke("reinject_dictation", { id });
       setEntryFeedback({ [id]: "injected" });
@@ -124,7 +124,7 @@ export function useHistory() {
     } catch (err) {
       setErrorMessage(String(err));
     } finally {
-      setBusy(false);
+      setActionEntryId(null);
     }
   }, []);
 
@@ -138,7 +138,7 @@ export function useHistory() {
   return {
     entries,
     loaded,
-    busy,
+    actionEntryId,
     page,
     totalCount,
     pageSize: HISTORY_PAGE_SIZE,
