@@ -101,6 +101,9 @@ export function useHistory() {
     try {
       await invoke("copy_dictation", { id });
       setEntryFeedback({ [id]: "copied" });
+      window.setTimeout(() => {
+        setEntryFeedback((prev) => (prev[id] === "copied" ? {} : prev));
+      }, 1500);
       setErrorMessage(null);
     } catch (err) {
       setErrorMessage(String(err));

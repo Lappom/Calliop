@@ -1,7 +1,7 @@
-import { Check, Copy } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useUiLocale } from "../../i18n/useUiLocale";
 import { Button } from "../ui/Button";
+import { CopyButton } from "../ui/CopyButton";
 import { Modal } from "../ui/Modal";
 import { TextInput } from "../ui/TextInput";
 import { getSnippetVariables } from "./snippetVariables";
@@ -115,28 +115,17 @@ export function SnippetVariablesModal({
                   </div>
                   <p className="text-caption m-0 mt-1 text-charcoal">{variable.hint}</p>
                 </div>
-                <button
-                  type="button"
-                  aria-label={t("snippets.variablesModal.copyToken", {
+                <CopyButton
+                  copied={copiedToken === variable.token}
+                  label={t("snippets.variablesModal.copyToken", {
                     token: variable.token,
                   })}
+                  copiedLabel={t("common.copied")}
                   disabled={busy}
                   onClick={() => {
                     void copyToken(variable.token);
                   }}
-                  className={[
-                    "inline-flex size-8 shrink-0 items-center justify-center rounded-md",
-                    "border border-transparent text-charcoal transition-colors",
-                    "hover:border-hairline-strong hover:bg-surface-elevated hover:text-ink",
-                    "disabled:cursor-not-allowed disabled:opacity-40",
-                  ].join(" ")}
-                >
-                  {copiedToken === variable.token ? (
-                    <Check size={15} strokeWidth={1.75} className="text-accent-green" />
-                  ) : (
-                    <Copy size={15} strokeWidth={1.75} />
-                  )}
-                </button>
+                />
               </div>
 
               {isNom ? (

@@ -1,9 +1,10 @@
-import { Check, Copy, RotateCcw } from "lucide-react";
+import { Check, RotateCcw } from "lucide-react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useUiLocale } from "../../i18n/useUiLocale";
 import type { DictationEntry } from "../../hooks/useHistory";
 import { BadgePill } from "../ui/BadgePill";
+import { CopyButton } from "../ui/CopyButton";
 import {
   formatAppLabel,
   formatEntryClock,
@@ -69,12 +70,6 @@ export function HistoryEntryRow({
             {entry.totalMs > 0 && (
               <span className="text-caption text-ash">{entry.totalMs} ms</span>
             )}
-            {feedback === "copied" && (
-              <span className="inline-flex items-center gap-1 text-caption text-accent-green">
-                <Check size={12} aria-hidden />
-                {t("common.copied")}
-              </span>
-            )}
             {feedback === "injected" && (
               <span className="inline-flex items-center gap-1 text-caption text-accent-green">
                 <Check size={12} aria-hidden />
@@ -85,13 +80,13 @@ export function HistoryEntryRow({
         </div>
 
         <div className="flex shrink-0 items-center gap-1 sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
-          <ActionButton
+          <CopyButton
+            copied={feedback === "copied"}
             label={t("history.entry.copy")}
+            copiedLabel={t("common.copied")}
             disabled={busy}
             onClick={() => onCopy(entry.id)}
-          >
-            <Copy size={15} strokeWidth={1.75} />
-          </ActionButton>
+          />
           <ActionButton
             label={t("history.entry.reinject")}
             disabled={busy}

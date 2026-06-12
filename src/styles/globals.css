@@ -251,6 +251,39 @@ body {
   animation: onboarding-coach-shake 160ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+:root {
+  --icon-swap-dur: var(--motion-fast);
+  --icon-swap-ease: var(--ease-enter);
+  --icon-swap-blur: 2px;
+  --icon-swap-start-scale: 0.85;
+}
+
+.copy-icon-swap {
+  display: inline-grid;
+  transform-origin: center;
+}
+
+.copy-icon-swap > span {
+  grid-area: 1 / 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transform: scale(var(--icon-swap-start-scale));
+  filter: blur(var(--icon-swap-blur));
+  transition:
+    opacity var(--icon-swap-dur) var(--icon-swap-ease),
+    transform var(--icon-swap-dur) var(--icon-swap-ease),
+    filter var(--icon-swap-dur) var(--icon-swap-ease);
+}
+
+.copy-icon-swap[data-copied="true"] [data-icon="check"],
+.copy-icon-swap[data-copied="false"] [data-icon="copy"] {
+  opacity: 1;
+  transform: scale(1);
+  filter: blur(0);
+}
+
 @media (max-width: 1023px) {
   .text-heading-md {
     font-size: 20px;
