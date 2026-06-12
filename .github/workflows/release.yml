@@ -106,13 +106,24 @@ jobs:
         if: matrix.platform == 'macos-latest'
         run: echo "CXXFLAGS=-mmacosx-version-min=10.15" >> "$GITHUB_ENV"
 
+      - name: Load release notes
+        id: release_notes
+        shell: bash
+        run: |
+          {
+            echo "body<<EOF"
+            cat "releases/${{ github.ref_name }}.md"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: Calliop ${{ github.ref_name }}
-          releaseBodyPath: releases/${{ github.ref_name }}.md
+          releaseBody: ${{ steps.release_notes.outputs.body }}
           releaseDraft: true
           args: ${{ matrix.build_args }}
