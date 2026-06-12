@@ -173,3 +173,16 @@ export const onboardingStepVariants: Variants = {
     transition: stepSlideExitTransition,
   }),
 };
+
+/** Onboarding practice success feedback */
+export const successPopVariants: Variants = {
+  initial: { opacity: 0, scale: 0.95 },
+  animate: {
+    opacity: 1,
+    scale: 1,
+    transition: {
+      duration: MOTION_DURATION.base,
+      ease: MOTION_EASE.enter,
+    },
+  },
+};

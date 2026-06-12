@@ -1540,8 +1540,7 @@ async fn start_mic_probe(app: AppHandle, state: State<'_, AppState>) -> Result<(
     Ok(())
 }
 
-#[tauri::command]
-async fn stop_mic_probe(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+fn stop_mic_probe_inner(app: &AppHandle, state: &AppState) -> Result<(), String> {
     let mut capture_slot = state.mic_probe.capture.lock();
     let was_active = capture_slot.is_some();
     if let Some(mut capture) = capture_slot.take() {
@@ -1553,8 +1552,58 @@ async fn stop_mic_probe(app: AppHandle, state: State<'_, AppState>) -> Result<()
     drop(capture_slot);
 
     if was_active {
+        resume_global_hotkey(app, state)?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn stop_mic_probe(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    stop_mic_probe_inner(&app, &state)
+}
+
+async fn wait_for_pipeline_idle_timeout(
+    pipeline: &Arc<Mutex<PipelineOrchestrator>>,
+    timeout: Duration,
+) -> bool {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if pipeline.lock().state() == PipelineState::Idle {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    pipeline.lock().state() == PipelineState::Idle
+}
+
+#[tauri::command]
+async fn prepare_onboarding_dictation(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    stop_mic_probe_inner(&app, &state)?;
+
+    while state.hotkey_suspend_depth.load(Ordering::SeqCst) > 0 {
         resume_global_hotkey(&app, &state)?;
     }
+
+    let pipeline = state.pipeline.clone();
+    if pipeline.lock().state() != PipelineState::Idle {
+        spawn_stop(app.clone(), Arc::clone(&pipeline));
+        if !wait_for_pipeline_idle_timeout(&pipeline, Duration::from_secs(2)).await {
+            return Err(
+                "Dictation is still active. Stop recording before continuing.".to_string(),
+            );
+        }
+    }
+
+    if state.hotkey_suspend_depth.load(Ordering::SeqCst) > 0 {
+        eprintln!(
+            "prepare_onboarding_dictation: hotkey_suspend_depth still {} after cleanup",
+            state.hotkey_suspend_depth.load(Ordering::SeqCst)
+        );
+    }
+
     Ok(())
 }
 
@@ -2383,6 +2432,7 @@ pub fn run() {
             set_onboarding_done,
             start_mic_probe,
             stop_mic_probe,
+            prepare_onboarding_dictation,
             get_stt_language,
             cycle_dictation_language,
             is_autostart_enabled,

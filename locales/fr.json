@@ -251,7 +251,7 @@
     "steps": {
       "welcome": "Bienvenue",
       "microphone": "Micro",
-      "test": "Test",
+      "practice": "Pratique",
       "done": "Terminé"
     },
     "welcome": {
@@ -268,16 +268,25 @@
       "testStart": "Tester le micro",
       "testStop": "Arrêter le test"
     },
-    "test": {
-      "title": "Testez une dictée",
-      "instructions": "Cliquez sur « Démarrer la dictée », puis dites « Bonjour, ceci est un test ».",
-      "waiting": "En attente de votre voix…",
-      "start": "Démarrer la dictée",
-      "stop": "Arrêter la dictée",
-      "stateLabel": "État :"
+    "practice": {
+      "title": "Essayez une dictée",
+      "instructions": "Appuyez sur votre raccourci pour démarrer, parlez, puis appuyez à nouveau pour arrêter.",
+      "placeholder": "Votre dictée apparaîtra ici…",
+      "hintFocus": "Gardez le curseur dans le champ ci-dessous.",
+      "hintHotkey": "Utilisez le raccourci global — pas de bouton dans l'app.",
+      "preparing": "Préparation du raccourci…",
+      "validated": "Dictée reçue — vous pouvez continuer."
+    },
+    "coach": {
+      "waiting": "En attente du raccourci",
+      "recording": "Enregistrement en cours",
+      "processing": "Transcription en cours",
+      "success": "Dictée réussie",
+      "error": "Un problème est survenu — réessayez"
     },
     "done": {
-      "title": "Vous êtes prêt"
+      "title": "Vous êtes prêt",
+      "subtitle": "Calliop fonctionne dans toute application où vous pouvez taper du texte."
     },
     "navigation": {
       "previous": "Précédent",

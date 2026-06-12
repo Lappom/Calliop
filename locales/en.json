@@ -251,7 +251,7 @@
     "steps": {
       "welcome": "Welcome",
       "microphone": "Microphone",
-      "test": "Test",
+      "practice": "Practice",
       "done": "Done"
     },
     "welcome": {
@@ -268,16 +268,25 @@
       "testStart": "Test microphone",
       "testStop": "Stop test"
     },
-    "test": {
+    "practice": {
       "title": "Try a dictation",
-      "instructions": "Click \"Start dictation\", then say \"Hello, this is a test\".",
-      "waiting": "Waiting for your voice…",
-      "start": "Start dictation",
-      "stop": "Stop dictation",
-      "stateLabel": "State:"
+      "instructions": "Press your shortcut to start, speak, then press again to stop.",
+      "placeholder": "Your dictation will appear here…",
+      "hintFocus": "Keep the cursor in the field below.",
+      "hintHotkey": "Use the global shortcut — there is no in-app start button.",
+      "preparing": "Preparing shortcut…",
+      "validated": "Dictation received — you can continue."
+    },
+    "coach": {
+      "waiting": "Waiting for shortcut",
+      "recording": "Recording",
+      "processing": "Transcribing",
+      "success": "Dictation successful",
+      "error": "Something went wrong — try again"
     },
     "done": {
-      "title": "You're all set"
+      "title": "You're all set",
+      "subtitle": "Calliop works in any application where you can type."
     },
     "navigation": {
       "previous": "Previous",

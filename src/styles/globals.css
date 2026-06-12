@@ -232,6 +232,25 @@ body {
   pointer-events: none;
 }
 
+@keyframes onboarding-coach-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  20%,
+  60% {
+    transform: translateX(-4px);
+  }
+  40%,
+  80% {
+    transform: translateX(4px);
+  }
+}
+
+.animate-onboarding-coach-shake {
+  animation: onboarding-coach-shake 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
 @media (max-width: 1023px) {
   .text-heading-md {
     font-size: 20px;

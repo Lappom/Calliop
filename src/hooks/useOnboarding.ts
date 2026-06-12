@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useOnboardingPractice } from "./useOnboardingPractice";
 
 export function useOnboarding() {
   const [loading, setLoading] = useState(true);
@@ -12,9 +13,15 @@ export function useOnboarding() {
   const [audioLevel, setAudioLevel] = useState(0);
   const [micProbing, setMicProbing] = useState(false);
   const [micProbeStopping, setMicProbeStopping] = useState(false);
-  const [dictationText, setDictationText] = useState("");
   const [pipelineState, setPipelineState] = useState("idle");
+  const [pipelineError, setPipelineError] = useState<string | null>(null);
   const [hotkey, setHotkey] = useState("Alt+Space");
+
+  const practice = useOnboardingPractice({ pipelineState, pipelineError });
+  const onPipelineIdleRef = useRef(practice.onPipelineIdle);
+  const onPartialTranscriptRef = useRef(practice.onPartialTranscript);
+  onPipelineIdleRef.current = practice.onPipelineIdle;
+  onPartialTranscriptRef.current = practice.onPartialTranscript;
 
   const ensureModelForOnboarding = useCallback(async () => {
     setModelLoading(true);
@@ -81,20 +88,26 @@ export function useOnboarding() {
       listen<{ state: string; message?: string | null }>(
         "pipeline-state",
         (event) => {
-          setPipelineState(event.payload.state);
-          if (event.payload.state === "idle" && event.payload.message) {
-            setDictationText(event.payload.message);
+          const { state, message } = event.payload;
+          setPipelineState(state);
+          if (state === "error") {
+            setPipelineError(message ?? "error");
+          } else if (state !== "error") {
+            setPipelineError(null);
+          }
+          if (state === "idle") {
+            onPipelineIdleRef.current(message);
           }
         },
       ),
       listen<{ text: string }>("partial-transcript", (event) => {
-        setDictationText(event.payload.text);
+        onPartialTranscriptRef.current(event.payload.text);
       }),
     ]);
 
     return () => {
       cancelled = true;
-      void invoke("stop_mic_probe").catch(() => {});
+      void invoke("prepare_onboarding_dictation").catch(() => {});
       void unlisteners.then((drops) => drops.forEach((drop) => drop()));
     };
   }, [ensureModelForOnboarding]);
@@ -119,16 +132,8 @@ export function useOnboarding() {
     }
   }, []);
 
-  const runDictationTest = useCallback(async () => {
-    if (micProbing || micProbeStopping) {
-      await stopMicProbe();
-    }
-    setDictationText("");
-    await invoke("toggle_dictation");
-  }, [micProbing, micProbeStopping, stopMicProbe]);
-
   const completeOnboarding = useCallback(async () => {
-    await invoke("stop_mic_probe").catch(() => {});
+    await invoke("prepare_onboarding_dictation").catch(() => {});
     setMicProbing(false);
     await invoke("set_onboarding_done", { done: true });
     setDone(true);
@@ -144,13 +149,13 @@ export function useOnboarding() {
     audioLevel,
     micProbing,
     micProbeStopping,
-    dictationText,
     pipelineState,
+    pipelineError,
     hotkey,
     retryEnsureModel: ensureModelForOnboarding,
     startMicProbe,
     stopMicProbe,
-    runDictationTest,
     completeOnboarding,
+    ...practice,
   };
 }

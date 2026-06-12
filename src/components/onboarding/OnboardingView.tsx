@@ -1,51 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useOnboarding } from "../../hooks/useOnboarding";
-import type { PipelineState } from "../../hooks/usePipelineState";
 import { translateError } from "../../lib/translateError";
 import { OnboardingStepTransition } from "../motion/OnboardingStepTransition";
-import { BadgePill } from "../ui/BadgePill";
+import { MainHotkeyGuide } from "../main/MainHotkeyGuide";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
-import { CodeWindow } from "../ui/CodeWindow";
 import { SectionGlow } from "../layout/SectionGlow";
 import { StatusDot } from "../ui/StatusDot";
 import { ProgressBar } from "../ui/ProgressBar";
-import { Kbd } from "../ui/Kbd";
-import {
-  formatHotkeyDisplay,
-  hotkeyParts,
-  pipelineStateLabel,
-} from "../main/mainUtils";
-import { hotkeyPartLabel } from "../settings/settingsUtils";
-
-const HOTKEY_PARTS_MARKER = "%PARTS%";
-
-function OnboardingHotkeyUsage({ hotkey }: { hotkey: string }) {
-  const { t } = useTranslation();
-  const parts = hotkeyParts(hotkey);
-  const template = t("keys.onboardingUsage", {
-    hotkeyParts: HOTKEY_PARTS_MARKER,
-    hotkeyLabel: formatHotkeyDisplay(hotkey, t),
-  });
-  const segments = template.split(HOTKEY_PARTS_MARKER);
-
-  return (
-    <>
-      {segments[0]}
-      {parts.map((part, index) => (
-        <span key={`${part}-${index}`}>
-          {index > 0 && ` ${t("common.plusSeparator")} `}
-          <Kbd>{hotkeyPartLabel(t, part)}</Kbd>
-        </span>
-      ))}
-      {segments[1]}
-    </>
-  );
-}
-
-const STEP_IDS = [1, 2, 3, 4] as const;
-const STEP_KEYS = ["welcome", "microphone", "test", "done"] as const;
+import { OnboardingPracticeStep } from "./OnboardingPracticeStep";
+import { OnboardingStepIndicator } from "./OnboardingStepIndicator";
 
 interface OnboardingViewProps {
   onComplete: () => void;
@@ -63,31 +28,30 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
     modelError,
     audioLevel,
     micProbing,
-    micProbeStopping,
-    dictationText,
+    practicePhase,
+    practiceText,
+    practiceReady,
+    partialTranscript,
     pipelineState,
+    preparing,
+    prepareError,
+    pipelineError,
     hotkey,
     retryEnsureModel,
     startMicProbe,
     stopMicProbe,
-    runDictationTest,
+    enterPracticeStep,
+    exitPracticeStep,
+    syncPracticeFromField,
     completeOnboarding,
   } = useOnboarding();
 
-  const steps = useMemo(
-    () =>
-      STEP_IDS.map((id, index) => ({
-        id,
-        label: t(`onboarding.steps.${STEP_KEYS[index]}`),
-      })),
-    [t],
-  );
-
+  const totalSteps = 4;
   const isFirst = step === 1;
-  const isLast = step === steps.length;
+  const isLast = step === totalSteps;
 
   const goToStep = (next: number) => {
-    const clamped = Math.min(steps.length, Math.max(1, next));
+    const clamped = Math.min(totalSteps, Math.max(1, next));
     setDirection(clamped > stepRef.current ? 1 : -1);
     stepRef.current = clamped;
     setStep(clamped);
@@ -98,7 +62,9 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
   }, [step]);
 
   useEffect(() => {
-    if (step === 2 || !micProbing) return;
+    if (step === 2 || !micProbing) {
+      return;
+    }
     void stopMicProbe();
   }, [step, micProbing, stopMicProbe]);
 
@@ -106,7 +72,17 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
     if (step === 2 && micProbing) {
       await stopMicProbe();
     }
+    if (step === 3) {
+      await exitPracticeStep();
+    }
     goToStep(step + 1);
+  };
+
+  const goToPreviousStep = async () => {
+    if (step === 3) {
+      await exitPracticeStep();
+    }
+    goToStep(step - 1);
   };
 
   const handleFinish = async () => {
@@ -114,20 +90,13 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
     onComplete();
   };
 
-  const pipelineStateText = pipelineStateLabel(
-    t,
-    pipelineState as PipelineState,
-  );
+  const continueDisabled =
+    (step === 1 && (modelLoading || (!modelReady && !modelError))) ||
+    (step === 3 && !practiceReady);
 
   return (
     <div className="calliop-scroll mx-auto flex min-h-0 flex-1 w-full max-w-[880px] flex-col gap-8 overflow-y-auto bg-canvas p-4 sm:p-8">
-      <div className="flex flex-wrap gap-2">
-        {steps.map((s) => (
-          <BadgePill key={s.id} active={s.id === step}>
-            {s.id}. {s.label}
-          </BadgePill>
-        ))}
-      </div>
+      <OnboardingStepIndicator currentStep={step} />
 
       <SectionGlow glow={isLast ? "green" : "blue"}>
         <Card variant="bordered" className="p-4 sm:p-6 lg:p-8">
@@ -210,31 +179,19 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
             )}
 
             {step === 3 && (
-              <>
-                <h2 className="text-heading-md mb-4 text-ink">
-                  {t("onboarding.test.title")}
-                </h2>
-                <p className="text-body-sm mb-4 text-charcoal">
-                  {t("onboarding.test.instructions")}
-                </p>
-                <CodeWindow showTrafficLights={false}>
-                  {dictationText || t("onboarding.test.waiting")}
-                </CodeWindow>
-                <div className="mt-4 flex items-center gap-3">
-                  <Button
-                    variant="primary"
-                    disabled={micProbing || micProbeStopping}
-                    onClick={() => void runDictationTest()}
-                  >
-                    {pipelineState === "recording"
-                      ? t("onboarding.test.stop")
-                      : t("onboarding.test.start")}
-                  </Button>
-                  <span className="text-caption text-ash">
-                    {t("onboarding.test.stateLabel")} {pipelineStateText}
-                  </span>
-                </div>
-              </>
+              <OnboardingPracticeStep
+                hotkey={hotkey}
+                phase={practicePhase}
+                practiceText={practiceText}
+                pipelineState={pipelineState}
+                partialTranscript={partialTranscript}
+                preparing={preparing}
+                prepareError={prepareError}
+                pipelineError={pipelineError}
+                onEnter={enterPracticeStep}
+                onExit={exitPracticeStep}
+                onValueChange={syncPracticeFromField}
+              />
             )}
 
             {step === 4 && (
@@ -245,9 +202,10 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
                     {t("onboarding.done.title")}
                   </h2>
                 </div>
-                <p className="text-body-md text-body">
-                  <OnboardingHotkeyUsage hotkey={hotkey} />
+                <p className="text-body-md mb-6 text-body">
+                  {t("onboarding.done.subtitle")}
                 </p>
+                <MainHotkeyGuide />
               </>
             )}
           </OnboardingStepTransition>
@@ -258,14 +216,14 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
         <Button
           variant="ghost"
           disabled={isFirst}
-          onClick={() => goToStep(step - 1)}
+          onClick={() => void goToPreviousStep()}
         >
           {t("onboarding.navigation.previous")}
         </Button>
         {!isLast ? (
           <Button
             variant="primary"
-            disabled={step === 1 && (modelLoading || (!modelReady && !modelError))}
+            disabled={continueDisabled}
             onClick={() => void goToNextStep()}
           >
             {t("onboarding.navigation.continue")}
