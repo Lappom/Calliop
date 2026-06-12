@@ -77,9 +77,10 @@ fn run_vad(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     );
     for (index, segment) in segments.iter().enumerate() {
         println!(
-            "  segment {index}: {:.2}s ({} samples)",
-            segment.len() as f32 / TARGET_SAMPLE_RATE as f32,
-            segment.len()
+            "  segment {index}: {:.2}s ({} samples, leading silence {} ms)",
+            segment.samples.len() as f32 / TARGET_SAMPLE_RATE as f32,
+            segment.samples.len(),
+            segment.leading_silence_ms
         );
     }
 

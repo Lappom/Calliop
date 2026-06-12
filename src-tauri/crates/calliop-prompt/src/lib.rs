@@ -61,6 +61,10 @@ Supprime les fillers oraux (euh, bah, heu, ok, alors, bon, du coup, voilà, enfi
 et les amorces de phrase (« ok alors là », « bon ben », etc.). \
 Quand l'utilisateur hésite puis reprend (faux départ suivi de « … » ou d'une reformulation), \
 ne garde que la formulation la plus complète et cohérente — supprime les fragments abandonnés. \
+Quand l'utilisateur se corrige (« en fait », « non plutôt », « pardon », « je veux dire », \
+« non attends », reformulation), ne garde que la version finale — \
+ex. « on se voit à 14h en fait 15h » → « On se voit à 15h. » ; \
+« rendez-vous à 2 heures non plutôt 3 heures » → « Rendez-vous à 3 heures. ». \
 Corrige la ponctuation et les majuscules. \
 Les commandes de ponctuation et de mise en forme dictées à voix haute ne doivent jamais \
 rester sous forme de mots dans le texte final : convertis-les en signes. \
@@ -83,7 +87,11 @@ Pour les adresses et chemins, colle les symboles aux tokens voisins \
 Place la ponctuation au bon endroit même si la transcription STT a omis ou décalé les espaces. \
 Reformule légèrement si nécessaire pour améliorer la fluidité, sans changer le sens. \
 Conserve les jetons ⟦CALLIOP0⟧, ⟦CALLIOP1⟧, etc. inchangés s'ils apparaissent dans la transcription. \
-Ne commente pas, ne pose pas de questions, ne reformate pas en liste. \
+Si l'utilisateur dicte une énumération (numéros, « premièrement/deuxièmement », « tiret » répété), \
+formate en liste : un item par ligne, numéros ou tirets selon le cas — \
+ex. « aller au magasin pour 1 pommes 2 bananes 3 oranges » → \
+« Aller au magasin pour :\n1. Pommes\n2. Bananes\n3. Oranges ». \
+Ne commente pas, ne pose pas de questions. \
 Réponds uniquement avec le texte nettoyé final, sans guillemets ni préambule.";
 
 /// Fallback Jinja template for Qwen3 GGUF files without embedded chat metadata.
@@ -209,6 +217,15 @@ pub fn whisper_oral_vocabulary_word_count() -> usize {
     WHISPER_ORAL_VOCABULARY_HINT.split_whitespace().count()
 }
 
+/// Pause below this threshold inserts a comma between segments (when Whisper omitted punctuation).
+pub const PAUSE_COMMA_THRESHOLD_MS: u32 = 700;
+
+/// Pause at or above this threshold inserts a period between segments.
+pub const PAUSE_PERIOD_THRESHOLD_MS: u32 = 700;
+
+/// Pause before a segment that follows a sentence end — candidate for pipelined LLM freeze.
+pub const FROZEN_BOUNDARY_PAUSE_MS: u32 = 1500;
+
 /// Joins streaming STT segments without spurious mid-sentence capitals.
 pub fn join_transcript_segments(segments: &[impl AsRef<str>]) -> String {
     let mut result = String::new();
@@ -233,9 +250,119 @@ pub fn join_transcript_segments(segments: &[impl AsRef<str>]) -> String {
     result
 }
 
+/// Joins streaming segments using VAD pause duration when Whisper omitted punctuation.
+pub fn join_transcript_segments_with_pauses(segments: &[(impl AsRef<str>, u32)]) -> String {
+    let mut result = String::new();
+    for (index, (segment, leading_silence_ms)) in segments.iter().enumerate() {
+        let segment = segment.as_ref().trim();
+        if segment.is_empty() {
+            continue;
+        }
+        if result.is_empty() {
+            result = segment.to_string();
+            continue;
+        }
+
+        if !segment_has_trailing_punctuation(&result) {
+            if *leading_silence_ms >= PAUSE_PERIOD_THRESHOLD_MS {
+                append_sentence_break(&mut result);
+            } else if *leading_silence_ms > 0 {
+                append_comma_break(&mut result);
+            } else if !result.ends_with(' ') {
+                result.push(' ');
+            }
+        } else if !result.ends_with(' ') {
+            result.push(' ');
+        }
+
+        if should_lowercase_segment_join(&result, segment) {
+            result.push_str(&lowercase_first_char(segment));
+        } else if ends_with_sentence_punctuation(&result)
+            && segment
+                .chars()
+                .next()
+                .is_some_and(|ch| ch.is_lowercase() && ch.is_alphabetic())
+        {
+            result.push_str(&capitalize_first_char(segment));
+        } else {
+            result.push_str(segment);
+        }
+
+        let _ = index;
+    }
+    result
+}
+
+/// Index of the last segment included in the latest frozen prefix, if any.
+pub fn find_latest_frozen_boundary(segments: &[(impl AsRef<str>, u32)]) -> Option<usize> {
+    if segments.len() < 2 {
+        return None;
+    }
+    let mut latest = None;
+    for index in 1..segments.len() {
+        if segments[index].1 < FROZEN_BOUNDARY_PAUSE_MS {
+            continue;
+        }
+        let prefix: Vec<(String, u32)> = segments[..=index - 1]
+            .iter()
+            .map(|(text, pause)| (text.as_ref().to_string(), *pause))
+            .collect();
+        let joined = join_transcript_segments_with_pauses(&prefix);
+        if ends_with_sentence_punctuation(&joined) {
+            latest = Some(index - 1);
+        }
+    }
+    latest
+}
+
+fn segment_has_trailing_punctuation(text: &str) -> bool {
+    let trimmed = text.trim_end();
+    trimmed.ends_with(['.', '!', '?', '…', ',', ';', ':'])
+}
+
+fn ends_with_sentence_punctuation(text: &str) -> bool {
+    let trimmed = text.trim_end();
+    trimmed.ends_with(['.', '!', '?', '…'])
+}
+
+fn append_comma_break(result: &mut String) {
+    while result.ends_with(' ') {
+        result.pop();
+    }
+    if !result.ends_with(',') {
+        result.push(',');
+    }
+    result.push(' ');
+}
+
+fn append_sentence_break(result: &mut String) {
+    while result.ends_with(' ') {
+        result.pop();
+    }
+    if !ends_with_sentence_punctuation(result) {
+        result.push('.');
+    }
+    result.push(' ');
+}
+
+fn capitalize_first_char(text: &str) -> String {
+    let trimmed = text.trim();
+    let mut chars = trimmed.chars();
+    match chars.next() {
+        None => String::new(),
+        Some(first) => {
+            let mut out = first.to_uppercase().to_string();
+            out.extend(chars);
+            out
+        }
+    }
+}
+
 /// Full transcript cleanup after STT: fix mishearings, oral punctuation, then polish.
 pub fn post_process_transcript(text: &str) -> String {
-    let text = interpret_oral_punctuation(&normalize_stt_oral_mishearings(text));
+    let text = normalize_stt_oral_mishearings(text);
+    let text = format_spoken_lists(&text);
+    let text = interpret_oral_punctuation(&text);
     polish_transcript(&text)
 }
 
@@ -243,6 +370,7 @@ pub fn post_process_transcript(text: &str) -> String {
 fn polish_transcript(text: &str) -> String {
     let text = fix_malformed_punctuation(text);
     let text = strip_leading_oral_fillers(&text);
+    let text = strip_inline_fillers(&text);
     polish_llm_output(&text)
 }
 
@@ -276,6 +404,262 @@ const ORAL_FILLERS: &[&str] = &[
     "hmm",
     "ok",
 ];
+
+/// Hesitation tokens removable anywhere in the utterance (word-boundary isolated).
+const INLINE_HESITATION_FILLERS: &[&str] = &[
+    "euh", "heu", "euhm", "hum", "hem", "hmm", "bah", "ben", "beh", "um", "uh", "uhm",
+];
+
+fn strip_inline_fillers(text: &str) -> String {
+    let mut result = text.to_string();
+    for filler in INLINE_HESITATION_FILLERS {
+        result = remove_isolated_word_ci(&result, filler);
+    }
+    cleanup_orphan_commas(&result)
+}
+
+fn remove_isolated_word_ci(text: &str, word: &str) -> String {
+    let word_chars: Vec<char> = word.chars().collect();
+    let word_lower: Vec<char> = word.to_lowercase().chars().collect();
+    let text_chars: Vec<char> = text.chars().collect();
+    let mut out = String::new();
+    let mut index = 0;
+
+    while index < text_chars.len() {
+        if matches_phrase_ci(&text_chars, index, &word_lower)
+            && !is_word_char(at_char(&text_chars, index.wrapping_sub(1)))
+            && !is_word_char(at_char(
+                &text_chars,
+                index.saturating_add(word_chars.len()),
+            ))
+        {
+            index += word_chars.len();
+            while index < text_chars.len() && text_chars[index].is_whitespace() {
+                index += 1;
+            }
+        } else {
+            out.push(text_chars[index]);
+            index += 1;
+        }
+    }
+
+    out
+}
+
+fn cleanup_orphan_commas(text: &str) -> String {
+    let mut result = text.to_string();
+    for broken in [", ,", ",,", " ,", ",  ,"] {
+        while result.contains(broken) {
+            result = result.replace(broken, ", ");
+        }
+    }
+    result = result.replace(" ,", ",");
+    result.trim().to_string()
+}
+
+/// Converts spoken enumerations into formatted lists before oral punctuation runs.
+pub fn format_spoken_lists(text: &str) -> String {
+    if let Some(formatted) = try_format_bullet_list(text) {
+        return formatted;
+    }
+    try_format_numbered_list(text).unwrap_or_else(|| text.to_string())
+}
+
+fn try_format_bullet_list(text: &str) -> Option<String> {
+    let lower = text.to_lowercase();
+    let marker = " tiret ";
+    let mut positions = Vec::new();
+    let mut search_from = 0;
+    while let Some(rel) = lower[search_from..].find(marker) {
+        let start = search_from + rel;
+        positions.push(start);
+        search_from = start + marker.len();
+    }
+    if positions.len() < 2 {
+        return None;
+    }
+
+    let first = positions[0];
+    let intro = text[..first].trim_end();
+    let mut items = Vec::new();
+    for (index, pos) in positions.iter().enumerate() {
+        let content_start = pos + marker.len();
+        let content_end = positions
+            .get(index + 1)
+            .copied()
+            .unwrap_or(text.len());
+        let item = text[content_start..content_end].trim();
+        if !item.is_empty() {
+            items.push(capitalize_first_char(item));
+        }
+    }
+    if items.len() < 2 {
+        return None;
+    }
+
+    Some(format_list_output(intro, &items, ListStyle::Bullet))
+}
+
+fn try_format_numbered_list(text: &str) -> Option<String> {
+    let tokens: Vec<&str> = text.split_whitespace().collect();
+    if tokens.len() < 4 {
+        return None;
+    }
+
+    let mut markers = Vec::new();
+    let mut index = 0;
+    while index < tokens.len() {
+        if let Some(number) = parse_list_marker(tokens[index], tokens.get(index + 1)) {
+            markers.push((index, number));
+            index += marker_token_span(tokens[index], tokens.get(index + 1));
+            continue;
+        }
+        index += 1;
+    }
+
+    if markers.len() < 2 {
+        return None;
+    }
+
+    for window in markers.windows(2) {
+        if window[1].1 != window[0].1 + 1 {
+            return None;
+        }
+    }
+
+    let intro_end = markers[0].0;
+    let intro = tokens[..intro_end].join(" ");
+    let mut items = Vec::new();
+    for (marker_index, (token_index, number)) in markers.iter().enumerate() {
+        let content_start = token_index + marker_token_span(tokens[*token_index], tokens.get(token_index + 1));
+        let content_end = markers
+            .get(marker_index + 1)
+            .map(|(next_index, _)| *next_index)
+            .unwrap_or(tokens.len());
+        if content_start >= content_end {
+            continue;
+        }
+        let item = tokens[content_start..content_end].join(" ");
+        if !item.is_empty() {
+            items.push(( *number, capitalize_first_char(&item)));
+        }
+    }
+
+    if items.len() < 2 {
+        return None;
+    }
+
+    Some(format_list_output(
+        &intro,
+        &items
+            .iter()
+            .map(|(number, item)| format!("{number}. {item}"))
+            .collect::<Vec<_>>(),
+        ListStyle::Numbered,
+    ))
+}
+
+enum ListStyle {
+    Bullet,
+    Numbered,
+}
+
+fn format_list_output(intro: &str, items: &[String], style: ListStyle) -> String {
+    let intro = intro.trim();
+    let mut lines = Vec::new();
+    if !intro.is_empty() {
+        let intro_line = if intro.ends_with(':') {
+            capitalize_first_char(intro)
+        } else {
+            format!("{} :", capitalize_first_char(intro))
+        };
+        lines.push(intro_line);
+    }
+
+    for item in items {
+        match style {
+            ListStyle::Bullet => lines.push(format!("- {item}")),
+            ListStyle::Numbered => lines.push(item.clone()),
+        }
+    }
+
+    lines.join("\n")
+}
+
+fn marker_token_span(current: &str, next: Option<&&str>) -> usize {
+    let current_lower = current.to_ascii_lowercase();
+    if current_lower == "numéro" || current_lower == "numero" {
+        return if next.is_some() { 2 } else { 1 };
+    }
+    if matches!(
+        current_lower.as_str(),
+        "premièrement"
+            | "premierement"
+            | "deuxièmement"
+            | "deuxiemement"
+            | "troisièmement"
+            | "troisiemement"
+            | "quatrièmement"
+            | "quatriemement"
+            | "cinquièmement"
+            | "cinquiemement"
+    ) {
+        return 1;
+    }
+    if current.ends_with('.') || current.parse::<u32>().is_ok() {
+        return 1;
+    }
+    if current_lower == "point" {
+        return if next.is_some() { 2 } else { 1 };
+    }
+    1
+}
+
+fn parse_list_marker(token: &str, next: Option<&&str>) -> Option<u32> {
+    let token_lower = token.to_ascii_lowercase();
+    if let Ok(number) = token.trim_end_matches('.').parse::<u32>() {
+        return Some(number);
+    }
+    if token_lower == "numéro" || token_lower == "numero" {
+        return next.and_then(|word| parse_spoken_cardinal(word));
+    }
+    if token_lower == "point" {
+        return next.and_then(|word| parse_spoken_cardinal(word));
+    }
+    parse_ordinal_marker(&token_lower)
+}
+
+fn parse_ordinal_marker(token: &str) -> Option<u32> {
+    match token {
+        "premièrement" | "premierement" | "premier" | "premiere" => Some(1),
+        "deuxièmement" | "deuxiemement" | "deuxième" | "deuxieme" => Some(2),
+        "troisièmement" | "troisiemement" | "troisième" | "troisieme" => Some(3),
+        "quatrièmement" | "quatriemement" | "quatrième" | "quatrieme" => Some(4),
+        "cinquièmement" | "cinquiemement" | "cinquième" | "cinquieme" => Some(5),
+        "sixièmement" | "sixiemement" | "sixième" | "sixieme" => Some(6),
+        "septièmement" | "septiemement" | "septième" | "septieme" => Some(7),
+        "huitièmement" | "huitiemement" | "huitième" | "huitieme" => Some(8),
+        "neuvièmement" | "neuviemement" | "neuvième" | "neuvieme" => Some(9),
+        "dixièmement" | "dixiemement" | "dixième" | "dixieme" => Some(10),
+        _ => None,
+    }
+}
+
+fn parse_spoken_cardinal(word: &str) -> Option<u32> {
+    match word.to_ascii_lowercase().as_str() {
+        "un" | "une" | "1" => Some(1),
+        "deux" | "2" => Some(2),
+        "trois" | "3" => Some(3),
+        "quatre" | "4" => Some(4),
+        "cinq" | "5" => Some(5),
+        "six" | "6" => Some(6),
+        "sept" | "7" => Some(7),
+        "huit" | "8" => Some(8),
+        "neuf" | "9" => Some(9),
+        "dix" | "10" => Some(10),
+        _ => word.parse().ok(),
+    }
+}
 
 fn strip_leading_oral_fillers(text: &str) -> String {
     let mut result = text.trim().to_string();
@@ -392,7 +776,12 @@ fn find_paren_period_close(chars: &[char], open: usize) -> Option<usize> {
 }
 
 fn collapse_extra_whitespace(text: &str) -> String {
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
+    text.lines()
+        .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string()
 }
 
 fn fix_sentence_capitalization(text: &str) -> String {
@@ -1109,6 +1498,15 @@ fn collapse_spaced_dots_in_identifiers(text: &str) -> String {
 }
 
 fn normalize_punctuation_spacing(text: &str) -> String {
+    text.lines()
+        .map(normalize_punctuation_spacing_line)
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string()
+}
+
+fn normalize_punctuation_spacing_line(text: &str) -> String {
     let mut out = String::new();
     let chars: Vec<char> = text.chars().collect();
     let mut index = 0;
@@ -1470,5 +1868,77 @@ mod tests {
     fn still_collapses_email_domain_dots() {
         let out = post_process_transcript("contact arobase gmail point com");
         assert_eq!(out, "contact@gmail.com");
+    }
+
+    #[test]
+    fn join_with_short_pause_inserts_comma() {
+        let joined = join_transcript_segments_with_pauses(&[
+            ("je vais au magasin".to_string(), 0),
+            ("ensuite je rentre".to_string(), 400),
+        ]);
+        assert_eq!(joined, "je vais au magasin, ensuite je rentre");
+    }
+
+    #[test]
+    fn join_with_long_pause_inserts_period_and_capitalizes() {
+        let joined = join_transcript_segments_with_pauses(&[
+            ("bonjour".to_string(), 0),
+            ("comment allez-vous".to_string(), 900),
+        ]);
+        assert_eq!(joined, "bonjour. Comment allez-vous");
+    }
+
+    #[test]
+    fn join_respects_existing_whisper_punctuation() {
+        let joined = join_transcript_segments_with_pauses(&[
+            ("Bonjour.".to_string(), 0),
+            ("Comment allez-vous".to_string(), 900),
+        ]);
+        assert_eq!(joined, "Bonjour. Comment allez-vous");
+    }
+
+    #[test]
+    fn strips_inline_hesitation_fillers() {
+        let out = post_process_transcript("je vais euh au magasin");
+        assert_eq!(out, "Je vais au magasin");
+    }
+
+    #[test]
+    fn preserves_benjamin_from_inline_filler_pass() {
+        let out = post_process_transcript("contactez benjamin demain");
+        assert_eq!(out, "Contactez benjamin demain");
+    }
+
+    #[test]
+    fn formats_numbered_spoken_list() {
+        let out = format_spoken_lists("aller au magasin pour 1 pommes 2 bananes 3 oranges");
+        assert!(out.contains("1. Pommes"));
+        assert!(out.contains("2. Bananes"));
+        assert!(out.contains("3. Oranges"));
+        assert!(out.contains('\n'));
+    }
+
+    #[test]
+    fn formats_bullet_spoken_list() {
+        let out = format_spoken_lists("courses tiret pommes tiret bananes tiret oranges");
+        assert!(out.contains("Courses :"));
+        assert!(out.contains("- Pommes"));
+        assert!(out.contains("- Bananes"));
+        assert!(out.contains("- Oranges"));
+    }
+
+    #[test]
+    fn post_process_preserves_list_newlines() {
+        let out = post_process_transcript("aller au magasin pour 1 pommes 2 bananes");
+        assert!(out.contains('\n'));
+    }
+
+    #[test]
+    fn find_latest_frozen_boundary_requires_sentence_end() {
+        let segments = vec![
+            ("phrase incomplète".to_string(), 0),
+            ("suite".to_string(), 2000),
+        ];
+        assert_eq!(find_latest_frozen_boundary(&segments), None);
     }
 }

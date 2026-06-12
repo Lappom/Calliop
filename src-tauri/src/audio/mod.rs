@@ -9,7 +9,7 @@ pub use capture::{
     AudioLevelSender, AUDIO_BAND_COUNT, TARGET_SAMPLE_RATE,
 };
 pub use devices::{list_input_devices, InputDeviceInfo, DEFAULT_INPUT_DEVICE_ID};
-pub use vad::{VadError, VadSegmenter, VAD_CHUNK_SIZE};
+pub use vad::{SpeechSegment, VadError, VadSegmenter, VAD_CHUNK_SIZE};
 
 pub fn module_name() -> &'static str {
     "audio"

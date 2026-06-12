@@ -8,10 +8,13 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize};
 use thiserror::Error;
 
-use calliop_prompt::{join_transcript_segments, post_process_transcript, ToneProfile};
+use calliop_prompt::{
+    find_latest_frozen_boundary, join_transcript_segments, join_transcript_segments_with_pauses,
+    post_process_transcript, ToneProfile,
+};
 
 use crate::app_context::{get_active_window, resolve_tone, ActiveWindow};
-use crate::audio::{AudioCapture, VadSegmenter, TARGET_SAMPLE_RATE};
+use crate::audio::{AudioCapture, SpeechSegment, VadSegmenter, TARGET_SAMPLE_RATE};
 use crate::inject::{InjectError, TextInjector};
 use crate::llm::LlamaEngine;
 use crate::observe::CorrectionHandler;
@@ -22,6 +25,7 @@ use super::corrections::{apply_corrections, CorrectionRule};
 use super::snippet_variables::SnippetVariableContext;
 use super::snippets::{
     apply_snippets, finalize_llm_with_snippets, shield_snippet_triggers, unshield_snippets,
+    ShieldedSnippet,
 };
 
 fn build_snippet_variable_context(store: Option<&Store>) -> SnippetVariableContext {
@@ -174,6 +178,149 @@ struct FailedSegment {
     language: SttLanguage,
 }
 
+type SegmentTranscript = (String, u32);
+
+struct FrozenLlmCoordinator {
+    generation: u64,
+    frozen_up_to_index: Option<usize>,
+    prefix_shields: Vec<ShieldedSnippet>,
+    cleaned_prefix: Option<String>,
+    job: Option<LlmCleanupJob>,
+}
+
+impl FrozenLlmCoordinator {
+    fn new() -> Self {
+        Self {
+            generation: 0,
+            frozen_up_to_index: None,
+            prefix_shields: Vec::new(),
+            cleaned_prefix: None,
+            job: None,
+        }
+    }
+
+    fn reset(&mut self) {
+        if let Some(job) = self.job.take() {
+            if let Some(pid) = job.worker_pid {
+                force_kill_sidecar(pid);
+            }
+            let _ = job.worker.join();
+        }
+        self.generation = 0;
+        self.frozen_up_to_index = None;
+        self.prefix_shields.clear();
+        self.cleaned_prefix = None;
+    }
+
+    fn maybe_start_background(
+        &mut self,
+        segments: &[SegmentTranscript],
+        auto_edit: bool,
+        llm: &Arc<Mutex<Option<LlamaEngine>>>,
+        llm_ready: &Arc<AtomicBool>,
+        auto_edit_flag: &Arc<AtomicBool>,
+        rules: &[CorrectionRule],
+        snippets: &[Snippet],
+        tone: ToneProfile,
+    ) {
+        if !auto_edit || llm.lock().is_none() {
+            return;
+        }
+        let Some(boundary) = find_latest_frozen_boundary(segments) else {
+            return;
+        };
+        if self.frozen_up_to_index == Some(boundary) && self.job.is_some() {
+            return;
+        }
+
+        if let Some(job) = self.job.take() {
+            if let Some(pid) = job.worker_pid {
+                force_kill_sidecar(pid);
+            }
+            let _ = job.worker.join();
+        }
+
+        let prefix_segments = &segments[..=boundary];
+        let Some((full_text, shields)) = build_llm_ready_text(prefix_segments, rules, snippets) else {
+            return;
+        };
+
+        self.generation = self.generation.saturating_add(1);
+        self.frozen_up_to_index = Some(boundary);
+        self.prefix_shields = shields;
+        self.cleaned_prefix = None;
+        let job = start_llm_cleanup(
+            Arc::clone(llm),
+            Arc::clone(llm_ready),
+            Arc::clone(auto_edit_flag),
+            &full_text,
+            tone,
+        );
+        self.job = Some(job);
+    }
+
+    fn take_completed_prefix(&mut self, timeout: std::time::Duration) -> Option<FrozenLlmSnapshot> {
+        let Some(job) = self.job.take() else {
+            return None;
+        };
+        let frozen_up_to_index = self.frozen_up_to_index?;
+        let LlmCleanupWait::Completed { text, llm_status, .. } = job.wait_for_inject(timeout);
+        if !matches!(llm_status, LlmStatus::Applied) {
+            return None;
+        }
+        self.cleaned_prefix = Some(text.clone());
+        Some(FrozenLlmSnapshot {
+            frozen_up_to_index,
+            cleaned_prefix: text,
+            prefix_shields: self.prefix_shields.clone(),
+        })
+    }
+}
+
+struct FrozenLlmSnapshot {
+    frozen_up_to_index: usize,
+    cleaned_prefix: String,
+    #[allow(dead_code)]
+    prefix_shields: Vec<ShieldedSnippet>,
+}
+
+fn build_llm_ready_text(
+    segments: &[SegmentTranscript],
+    rules: &[CorrectionRule],
+    snippets: &[Snippet],
+) -> Option<(String, Vec<ShieldedSnippet>)> {
+    if segments.is_empty() {
+        return None;
+    }
+    let joined = join_transcript_segments_with_pauses(segments).trim().to_string();
+    if joined.is_empty() {
+        return None;
+    }
+    let corrected = apply_corrections(&joined, rules);
+    let (shielded, shields) = shield_snippet_triggers(&corrected, snippets);
+    let full_text = post_process_transcript(shielded.trim());
+    if full_text.is_empty() {
+        return None;
+    }
+    Some((full_text, shields))
+}
+
+fn merge_cleaned_segments(prefix: &str, tail: &str) -> String {
+    let prefix = prefix.trim_end();
+    let tail = tail.trim_start();
+    if prefix.is_empty() {
+        return tail.to_string();
+    }
+    if tail.is_empty() {
+        return prefix.to_string();
+    }
+    if prefix.ends_with('\n') {
+        format!("{prefix}{tail}")
+    } else {
+        format!("{prefix} {tail}")
+    }
+}
+
 pub struct PipelineOrchestrator {
     state: PipelineState,
     audio: AudioCapture,
@@ -183,8 +330,9 @@ pub struct PipelineOrchestrator {
     llm_ready: Arc<AtomicBool>,
     auto_edit: Arc<AtomicBool>,
     streaming: Option<StreamingSession>,
-    segment_transcripts: Arc<Mutex<Vec<String>>>,
+    segment_transcripts: Arc<Mutex<Vec<SegmentTranscript>>>,
     failed_segments: Arc<Mutex<Vec<FailedSegment>>>,
+    frozen_llm: Arc<Mutex<FrozenLlmCoordinator>>,
     streaming_stt_ms: Arc<AtomicU64>,
     dictionary_prompt: Arc<RwLock<Option<Arc<str>>>>,
     snippets: Arc<RwLock<Vec<Snippet>>>,
@@ -215,6 +363,7 @@ impl PipelineOrchestrator {
             streaming: None,
             segment_transcripts: Arc::new(Mutex::new(Vec::new())),
             failed_segments: Arc::new(Mutex::new(Vec::new())),
+            frozen_llm: Arc::new(Mutex::new(FrozenLlmCoordinator::new())),
             streaming_stt_ms: Arc::new(AtomicU64::new(0)),
             dictionary_prompt: Arc::new(RwLock::new(None)),
             snippets: Arc::new(RwLock::new(Vec::new())),
@@ -402,6 +551,7 @@ impl PipelineOrchestrator {
 
         self.segment_transcripts.lock().clear();
         self.failed_segments.lock().clear();
+        self.frozen_llm.lock().reset();
         self.streaming_stt_ms.store(0, Ordering::SeqCst);
         let _ = app.emit("partial-transcript-reset", ());
 
@@ -438,6 +588,12 @@ impl PipelineOrchestrator {
         let pending_detection = Arc::clone(&self.pending_detection);
         let snippets = Arc::clone(&self.snippets);
         let history_store = self.history_store.clone();
+        let frozen_llm = Arc::clone(&self.frozen_llm);
+        let llm = Arc::clone(&self.llm);
+        let llm_ready = Arc::clone(&self.llm_ready);
+        let auto_edit = Arc::clone(&self.auto_edit);
+        let correction_rules = Arc::clone(&self.correction_rules);
+        let app_context_rules = Arc::clone(&self.app_context_rules);
         let worker = thread::spawn(move || {
             streaming_worker(
                 app_worker,
@@ -455,6 +611,12 @@ impl PipelineOrchestrator {
                     pending_detection,
                     snippets,
                     history_store,
+                    frozen_llm,
+                    llm,
+                    llm_ready,
+                    auto_edit,
+                    correction_rules,
+                    app_context_rules,
                 },
             );
         });
@@ -524,7 +686,7 @@ impl PipelineOrchestrator {
                 match engine.transcribe_with_language(&samples, prompt.as_deref(), language) {
                     Ok(result) if !result.text.is_empty() => {
                         fallback_stt_ms += retry_start.elapsed().as_millis() as u64;
-                        transcripts.push(result.text);
+                        transcripts.push((result.text, 0));
                     }
                     Ok(_) => {}
                     Err(err) => eprintln!("failed segment retry transcription failed: {err}"),
@@ -542,15 +704,15 @@ impl PipelineOrchestrator {
                 )?;
                 fallback_stt_ms += fallback_start.elapsed().as_millis() as u64;
                 if !result.text.is_empty() {
-                    transcripts.push(result.text);
+                    transcripts.push((result.text, 0));
                 }
             }
         }
 
         let stt_ms = streaming_stt_ms + fallback_stt_ms;
+        let rules = self.correction_rules.read().clone();
         let raw = {
-            let joined = join_transcript_segments(&transcripts).trim().to_string();
-            let rules = self.correction_rules.read().clone();
+            let joined = join_transcript_segments_with_pauses(&transcripts).trim().to_string();
             apply_corrections(&joined, &rules)
         };
         let stt_wait_ms = stop_instant.elapsed().as_millis() as u64;
@@ -563,9 +725,7 @@ impl PipelineOrchestrator {
         let snippet_ctx = build_snippet_variable_context(self.history_store.as_deref());
         let snippet_fallback = prepare_display_transcript(&raw, &snippets, &snippet_ctx);
         let llm_input = if !raw.is_empty() && auto_edit {
-            let (shielded_raw, snippet_shields) = shield_snippet_triggers(&raw, &snippets);
-            let full_text = post_process_transcript(shielded_raw.trim());
-            Some((full_text, snippet_shields))
+            build_llm_ready_text(&transcripts, &rules, &snippets)
         } else {
             None
         };
@@ -592,34 +752,84 @@ impl PipelineOrchestrator {
                     )
                 } else {
                     let snippets_snapshot = snippets.clone();
-                    let job = start_llm_cleanup(
-                        Arc::clone(&self.llm),
-                        Arc::clone(&self.llm_ready),
-                        Arc::clone(&self.auto_edit),
-                        &full_text,
-                        active_tone,
-                    );
                     let llm_wait_start = Instant::now();
-                    let LlmCleanupWait::Completed {
-                        text,
-                        llm_ms,
-                        invalidated,
-                        llm_status,
-                        llm_skip_reason,
-                    } = job.wait_for_inject(LLM_CLEANUP_TIMEOUT);
+                    let pipelined = self.frozen_llm.lock().take_completed_prefix(LLM_CLEANUP_TIMEOUT);
+
+                    let (merged_cleaned, llm_ms, llm_status, llm_skip_reason, llm_invalidated) =
+                        if let Some(frozen) = pipelined {
+                            let tail_start = frozen.frozen_up_to_index.saturating_add(1);
+                            if tail_start >= transcripts.len() {
+                                (
+                                    frozen.cleaned_prefix,
+                                    0_u64,
+                                    LlmStatus::Applied,
+                                    None,
+                                    false,
+                                )
+                            } else if let Some((tail_text, _tail_shields)) =
+                                build_llm_ready_text(&transcripts[tail_start..], &rules, &snippets)
+                            {
+                                let tail_job = start_llm_cleanup(
+                                    Arc::clone(&self.llm),
+                                    Arc::clone(&self.llm_ready),
+                                    Arc::clone(&self.auto_edit),
+                                    &tail_text,
+                                    active_tone,
+                                );
+                                let LlmCleanupWait::Completed {
+                                    text: tail_cleaned,
+                                    llm_ms: tail_ms,
+                                    invalidated: tail_inv,
+                                    llm_status: tail_stat,
+                                    llm_skip_reason: tail_reason,
+                                } = tail_job.wait_for_inject(LLM_CLEANUP_TIMEOUT);
+                                let merged = if matches!(tail_stat, LlmStatus::Applied) {
+                                    merge_cleaned_segments(&frozen.cleaned_prefix, &tail_cleaned)
+                                } else {
+                                    full_text
+                                };
+                                (merged, tail_ms, tail_stat, tail_reason, tail_inv)
+                            } else {
+                                (
+                                    frozen.cleaned_prefix,
+                                    0_u64,
+                                    LlmStatus::Applied,
+                                    None,
+                                    false,
+                                )
+                            }
+                        } else {
+                            let job = start_llm_cleanup(
+                                Arc::clone(&self.llm),
+                                Arc::clone(&self.llm_ready),
+                                Arc::clone(&self.auto_edit),
+                                &full_text,
+                                active_tone,
+                            );
+                            let LlmCleanupWait::Completed {
+                                text,
+                                llm_ms,
+                                invalidated,
+                                llm_status,
+                                llm_skip_reason,
+                            } = job.wait_for_inject(LLM_CLEANUP_TIMEOUT);
+                            (text, llm_ms, llm_status, llm_skip_reason, invalidated)
+                        };
+
                     let snippets = self.snippets.read().clone();
                     let text = if self.auto_edit.load(Ordering::SeqCst) {
                         if snippets == snippets_snapshot {
                             finalize_llm_with_snippets(
-                                &text,
+                                &merged_cleaned,
                                 &snippet_shields,
                                 &snippet_fallback,
                                 &snippets,
                                 &snippet_ctx,
                             )
                         } else {
-                            let from_cleaned = apply_snippets(&text, &snippets, &snippet_ctx);
-                            if from_cleaned != text {
+                            let from_cleaned =
+                                apply_snippets(&merged_cleaned, &snippets, &snippet_ctx);
+                            if from_cleaned != merged_cleaned {
                                 from_cleaned
                             } else {
                                 snippet_fallback.clone()
@@ -629,7 +839,7 @@ impl PipelineOrchestrator {
                         snippet_fallback.clone()
                     };
                     llm_blocked_ms = llm_wait_start.elapsed().as_millis() as u64;
-                    (text, llm_ms, invalidated, llm_status, llm_skip_reason)
+                    (text, llm_ms, llm_invalidated, llm_status, llm_skip_reason)
                 }
             } else if raw.is_empty() {
                 (String::new(), 0, false, LlmStatus::Disabled, None)
@@ -759,6 +969,7 @@ impl PipelineOrchestrator {
 
         self.segment_transcripts.lock().clear();
         self.failed_segments.lock().clear();
+        self.frozen_llm.lock().reset();
         self.streaming_stt_ms.store(0, Ordering::SeqCst);
         let _ = app.emit("partial-transcript-reset", ());
         hide_overlay(app);
@@ -967,7 +1178,7 @@ fn force_kill_sidecar(pid: u32) {
 
 struct StreamingSttContext {
     whisper: Arc<Mutex<Option<WhisperEngine>>>,
-    transcripts: Arc<Mutex<Vec<String>>>,
+    transcripts: Arc<Mutex<Vec<SegmentTranscript>>>,
     failed_segments: Arc<Mutex<Vec<FailedSegment>>>,
     stt_time_ms: Arc<AtomicU64>,
     dictionary_prompt: Arc<RwLock<Option<Arc<str>>>>,
@@ -976,6 +1187,19 @@ struct StreamingSttContext {
     pending_detection: Arc<Mutex<Option<SttLanguage>>>,
     snippets: Arc<RwLock<Vec<Snippet>>>,
     history_store: Option<Arc<Store>>,
+    frozen_llm: Arc<Mutex<FrozenLlmCoordinator>>,
+    llm: Arc<Mutex<Option<LlamaEngine>>>,
+    llm_ready: Arc<AtomicBool>,
+    auto_edit: Arc<AtomicBool>,
+    correction_rules: Arc<RwLock<Vec<CorrectionRule>>>,
+    app_context_rules: Arc<RwLock<Vec<AppContextRule>>>,
+}
+
+fn resolve_streaming_tone(rules: &[AppContextRule]) -> ToneProfile {
+    match get_active_window() {
+        Some(window) => resolve_tone(&window, rules),
+        None => ToneProfile::Default,
+    }
 }
 
 fn streaming_worker(
@@ -1033,7 +1257,7 @@ fn streaming_worker(
 fn transcribe_segment(
     app: &AppHandle,
     stt: &StreamingSttContext,
-    segment: Vec<f32>,
+    segment: SpeechSegment,
     segment_index: u32,
 ) {
     let stt_start = Instant::now();
@@ -1043,17 +1267,21 @@ fn transcribe_segment(
         let mut engine_guard = stt.whisper.lock();
         let Some(engine) = engine_guard.as_mut() else {
             stt.failed_segments.lock().push(FailedSegment {
-                samples: segment,
+                samples: segment.samples,
                 language: segment_language,
             });
             return;
         };
-        match engine.transcribe_with_language(&segment, prompt.as_deref(), segment_language) {
+        match engine.transcribe_with_language(
+            &segment.samples,
+            prompt.as_deref(),
+            segment_language,
+        ) {
             Ok(result) => result,
             Err(err) => {
                 eprintln!("segment transcription failed: {err}");
                 stt.failed_segments.lock().push(FailedSegment {
-                    samples: segment,
+                    samples: segment.samples,
                     language: segment_language,
                 });
                 return;
@@ -1073,9 +1301,28 @@ fn transcribe_segment(
 
     let raw = {
         let mut transcripts = stt.transcripts.lock();
-        transcripts.push(text.text.clone());
-        join_transcript_segments(transcripts.as_slice())
+        transcripts.push((text.text.clone(), segment.leading_silence_ms));
+        let text_only: Vec<String> = transcripts.iter().map(|(value, _)| value.clone()).collect();
+        join_transcript_segments(&text_only)
     };
+
+    if stt.auto_edit.load(Ordering::SeqCst) {
+        let segments_snapshot = stt.transcripts.lock().clone();
+        let rules = stt.correction_rules.read().clone();
+        let snippets = stt.snippets.read().clone();
+        let tone = resolve_streaming_tone(&stt.app_context_rules.read());
+        stt.frozen_llm.lock().maybe_start_background(
+            &segments_snapshot,
+            true,
+            &stt.llm,
+            &stt.llm_ready,
+            &stt.auto_edit,
+            &rules,
+            &snippets,
+            tone,
+        );
+    }
+
     let snippet_ctx = build_snippet_variable_context(stt.history_store.as_deref());
     let display = prepare_partial_transcript(&raw, &stt.snippets.read(), &snippet_ctx);
 
@@ -1252,5 +1499,24 @@ mod tests {
             &SnippetVariableContext::default(),
         );
         assert_eq!(result, "Voici contact at gmail point com");
+    }
+
+    #[test]
+    fn find_latest_frozen_boundary_detects_sentence_end_with_long_pause() {
+        use calliop_prompt::find_latest_frozen_boundary;
+
+        let segments: Vec<(String, u32)> = vec![
+            ("Première phrase.".into(), 0),
+            ("Deuxième phrase".into(), 1600),
+        ];
+        assert_eq!(find_latest_frozen_boundary(&segments), Some(0));
+    }
+
+    #[test]
+    fn merge_cleaned_segments_joins_with_space() {
+        assert_eq!(
+            merge_cleaned_segments("Bonjour.", "Au revoir."),
+            "Bonjour. Au revoir."
+        );
     }
 }
