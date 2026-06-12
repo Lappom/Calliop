@@ -35,6 +35,12 @@ pub fn should_start_after_deferred_load(still_holding: bool, deferred_toggle_int
     still_holding || deferred_toggle_intent
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HotkeyBinding {
+    KeyCombo(Shortcut),
+    ModifiersOnly(Modifiers),
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ShortcutParseError {
     #[error("empty shortcut")]
@@ -45,6 +51,76 @@ pub enum ShortcutParseError {
     UnknownKey(String),
     #[error("shortcut requires at least one modifier")]
     MissingModifier,
+    #[error("modifier-only shortcut requires at least two modifiers")]
+    NotEnoughModifiers,
+}
+
+fn parse_modifier_part(part: &str) -> Result<Modifiers, ShortcutParseError> {
+    match part.to_ascii_lowercase().as_str() {
+        "alt" | "option" => Ok(Modifiers::ALT),
+        "ctrl" | "control" => Ok(Modifiers::CONTROL),
+        "shift" => Ok(Modifiers::SHIFT),
+        "super" | "win" | "meta" | "cmd" | "command" | "windows" => Ok(Modifiers::SUPER),
+        other => Err(ShortcutParseError::UnknownModifier(other.into())),
+    }
+}
+
+pub fn is_valid_hotkey_setting(value: &str) -> bool {
+    parse_hotkey_setting(value).is_ok()
+}
+
+pub fn parse_hotkey_setting(value: &str) -> Result<HotkeyBinding, ShortcutParseError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(ShortcutParseError::Empty);
+    }
+
+    let parts: Vec<&str> = trimmed
+        .split('+')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect();
+    if parts.is_empty() {
+        return Err(ShortcutParseError::Empty);
+    }
+
+    if parse_key_code(parts[parts.len() - 1]).is_ok() {
+        return Ok(HotkeyBinding::KeyCombo(parse_shortcut(trimmed)?));
+    }
+
+    if parts.len() < 2 {
+        return Err(ShortcutParseError::NotEnoughModifiers);
+    }
+
+    let mut modifiers = Modifiers::empty();
+    for part in parts {
+        modifiers |= parse_modifier_part(part)?;
+    }
+    Ok(HotkeyBinding::ModifiersOnly(modifiers))
+}
+
+pub fn format_hotkey_setting(binding: HotkeyBinding) -> String {
+    match binding {
+        HotkeyBinding::KeyCombo(shortcut) => format_shortcut(&shortcut),
+        HotkeyBinding::ModifiersOnly(modifiers) => format_modifiers_only(modifiers),
+    }
+}
+
+fn format_modifiers_only(mods: Modifiers) -> String {
+    let mut parts = Vec::new();
+    if mods.contains(Modifiers::CONTROL) {
+        parts.push("Ctrl");
+    }
+    if mods.contains(Modifiers::ALT) {
+        parts.push("Alt");
+    }
+    if mods.contains(Modifiers::SHIFT) {
+        parts.push("Shift");
+    }
+    if mods.contains(Modifiers::SUPER) {
+        parts.push("Super");
+    }
+    parts.join("+")
 }
 
 pub fn parse_shortcut(value: &str) -> Result<Shortcut, ShortcutParseError> {
@@ -71,14 +147,7 @@ pub fn parse_shortcut(value: &str) -> Result<Shortcut, ShortcutParseError> {
 
     let mut modifiers = Modifiers::empty();
     for part in modifier_parts {
-        let modifier = match part.to_ascii_lowercase().as_str() {
-            "alt" | "option" => Modifiers::ALT,
-            "ctrl" | "control" => Modifiers::CONTROL,
-            "shift" => Modifiers::SHIFT,
-            "super" | "win" | "meta" | "cmd" | "command" => Modifiers::SUPER,
-            other => return Err(ShortcutParseError::UnknownModifier(other.into())),
-        };
-        modifiers |= modifier;
+        modifiers |= parse_modifier_part(part)?;
     }
 
     let code = parse_key_code(key_part)?;
@@ -265,6 +334,23 @@ mod tests {
     fn parses_super_space() {
         let shortcut = parse_shortcut("Super+Space").unwrap();
         assert_eq!(format_shortcut(&shortcut), "Super+Space");
+    }
+
+    #[test]
+    fn parses_modifier_only_ctrl_alt() {
+        let binding = parse_hotkey_setting("Ctrl+Alt").unwrap();
+        assert_eq!(format_hotkey_setting(binding), "Ctrl+Alt");
+    }
+
+    #[test]
+    fn parses_modifier_only_ctrl_super() {
+        let binding = parse_hotkey_setting("Ctrl+Super").unwrap();
+        assert_eq!(format_hotkey_setting(binding), "Ctrl+Super");
+    }
+
+    #[test]
+    fn rejects_single_modifier_only() {
+        assert!(parse_hotkey_setting("Ctrl").is_err());
     }
 
     #[test]

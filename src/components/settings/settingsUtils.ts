@@ -163,16 +163,69 @@ export function isHotkeySupported(hotkey: string): boolean {
   if (parts.length < 2) {
     return false;
   }
+  const validModifiers = new Set(["Ctrl", "Alt", "Shift", "Super"]);
+  if (parts.every((part) => validModifiers.has(part))) {
+    return parts.length >= 2;
+  }
   const keyPart = parts[parts.length - 1];
   const modifiers = parts.slice(0, -1);
   if (modifiers.length === 0) {
     return false;
   }
-  const validModifiers = new Set(["Ctrl", "Alt", "Shift", "Super"]);
   return (
     modifiers.every((part) => validModifiers.has(part)) &&
     isHotkeyKeySupported(keyPart)
   );
+}
+
+const MODIFIER_ORDER = ["Ctrl", "Alt", "Shift", "Super"] as const;
+
+function modifierFromCode(code: string): string | null {
+  switch (code) {
+    case "ControlLeft":
+    case "ControlRight":
+      return "Ctrl";
+    case "AltLeft":
+    case "AltRight":
+      return "Alt";
+    case "ShiftLeft":
+    case "ShiftRight":
+      return "Shift";
+    case "MetaLeft":
+    case "MetaRight":
+    case "OSLeft":
+    case "OSRight":
+      return "Super";
+    default:
+      return null;
+  }
+}
+
+export function captureHotkeyOnKeyUp(event: KeyboardEvent): HotkeyCaptureResult {
+  event.preventDefault();
+  event.stopPropagation();
+
+  if (!isModifierEvent(event)) {
+    return { action: "ignore" };
+  }
+
+  const parts = new Set<string>();
+  if (event.ctrlKey) parts.add("Ctrl");
+  if (event.altKey) parts.add("Alt");
+  if (event.shiftKey) parts.add("Shift");
+  if (event.metaKey) parts.add("Super");
+
+  const released = modifierFromCode(event.code);
+  if (released) {
+    parts.add(released);
+  }
+
+  const hotkey = MODIFIER_ORDER.filter((part) => parts.has(part)).join("+");
+  if (hotkeyParts(hotkey).length < 2) {
+    return { action: "ignore" };
+  }
+
+  return { action: "capture", hotkey };
 }
 
 export function captureHotkey(event: KeyboardEvent): HotkeyCaptureResult {

@@ -17,6 +17,7 @@ import { SettingsSection } from "./SettingsSection";
 import { SettingsToggleRow } from "./SettingsToggleRow";
 import {
   captureHotkey,
+  captureHotkeyOnKeyUp,
   formatHotkeyLabel,
   getSettingsSections,
   hotkeyPartLabel,
@@ -123,6 +124,35 @@ export function SettingsView() {
     [saveCapturedHotkey, t],
   );
 
+  const applyCapturedHotkeyFromKeyUp = useCallback(
+    async (event: KeyboardEvent) => {
+      const result = captureHotkeyOnKeyUp(event);
+      if (result.action === "ignore") {
+        return;
+      }
+      if (result.action === "invalid") {
+        setHotkeyCaptureError(t("keys.hotkeyUnsupported"));
+        return;
+      }
+      if (result.action !== "capture") {
+        return;
+      }
+      if (!isHotkeySupported(result.hotkey)) {
+        setHotkeyCaptureError(t("keys.hotkeyUnsupported"));
+        return;
+      }
+      await saveCapturedHotkey(result.hotkey);
+    },
+    [saveCapturedHotkey, t],
+  );
+
+  const handleHotkeyCaptureKeyUp = useCallback(
+    (event: KeyboardEvent) => {
+      void applyCapturedHotkeyFromKeyUp(event);
+    },
+    [applyCapturedHotkeyFromKeyUp],
+  );
+
   const handleHotkeyCapture = useCallback(
     (event: KeyboardEvent) => {
       void applyCapturedHotkeyFromEvent(event);
@@ -182,6 +212,7 @@ export function SettingsView() {
 
         // WebView2 fallback — required for simple combos when the native hook misses events.
         window.addEventListener("keydown", handleHotkeyCapture, true);
+        window.addEventListener("keyup", handleHotkeyCaptureKeyUp, true);
         listening = true;
       } catch (err) {
         if (!cancelled) {
@@ -198,12 +229,14 @@ export function SettingsView() {
       unlistenInvalid?.();
       if (listening) {
         window.removeEventListener("keydown", handleHotkeyCapture, true);
+        window.removeEventListener("keyup", handleHotkeyCaptureKeyUp, true);
       }
       void restoreGlobalHotkey();
     };
   }, [
     recordingHotkey,
     handleHotkeyCapture,
+    handleHotkeyCaptureKeyUp,
     restoreGlobalHotkey,
     saveCapturedHotkey,
     t,

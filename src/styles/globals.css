@@ -255,7 +255,7 @@ body {
   --icon-swap-dur: var(--motion-fast);
   --icon-swap-ease: var(--ease-enter);
   --icon-swap-blur: 2px;
-  --icon-swap-start-scale: 0.85;
+  --icon-swap-start-scale: 0.92;
 }
 
 .copy-icon-swap {

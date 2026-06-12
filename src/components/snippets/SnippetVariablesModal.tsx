@@ -73,12 +73,14 @@ export function SnippetVariablesModal({
   }, [open, onPreview, userName, snippetVariables]);
 
   const copyToken = async (token: string) => {
+    setCopiedToken(token);
+    const resetTimer = window.setTimeout(() => setCopiedToken(null), 1500);
+
     try {
       await navigator.clipboard.writeText(token);
-      setCopiedToken(token);
-      window.setTimeout(() => setCopiedToken(null), 1500);
     } catch {
-      // clipboard unavailable
+      window.clearTimeout(resetTimer);
+      setCopiedToken(null);
     }
   };
 

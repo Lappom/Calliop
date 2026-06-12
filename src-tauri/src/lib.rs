@@ -122,7 +122,7 @@ struct AppState {
     llm_init: Arc<tokio::sync::Mutex<()>>,
     hotkey_press: Mutex<HotkeyPressState>,
     deferred_llm_on_boot: AtomicBool,
-    current_hotkey: Mutex<Shortcut>,
+    current_hotkey: Mutex<hotkey::HotkeyBinding>,
     hotkey_suspend_depth: AtomicU32,
     whisper_settings_change_depth: AtomicU32,
     loaded_whisper: Mutex<Option<WhisperModel>>,
@@ -430,8 +430,9 @@ async fn rollback_settings(
         .map_err(|e| e.to_string())?;
     refresh_perf_config(state, previous, should_start_minimized());
     if ctx.hotkey_changed {
-        let prev_shortcut = hotkey::parse_shortcut(&previous.hotkey).map_err(|e| e.to_string())?;
-        register_hotkey(&app_for_notify, prev_shortcut)?;
+        let prev_binding =
+            hotkey::parse_hotkey_setting(&previous.hotkey).map_err(|e| e.to_string())?;
+        register_hotkey_binding(&app_for_notify, prev_binding)?;
     }
     state
         .pipeline
@@ -462,10 +463,19 @@ async fn rollback_settings(
 }
 
 fn unregister_current_hotkey(app: &AppHandle, state: &AppState) -> Result<(), String> {
-    let gs = app.global_shortcut();
-    let current = *state.current_hotkey.lock();
-    if gs.is_registered(current) {
-        gs.unregister(current).map_err(|e| e.to_string())?;
+    match *state.current_hotkey.lock() {
+        hotkey::HotkeyBinding::KeyCombo(shortcut) => {
+            let gs = app.global_shortcut();
+            if gs.is_registered(shortcut) {
+                gs.unregister(shortcut).map_err(|e| e.to_string())?;
+            }
+        }
+        hotkey::HotkeyBinding::ModifiersOnly(_) => {
+            #[cfg(windows)]
+            hotkey::stop_modifier_dictation_hook()?;
+            #[cfg(not(windows))]
+            return Err("modifier-only hotkeys are only supported on Windows".into());
+        }
     }
     Ok(())
 }
@@ -493,9 +503,9 @@ fn resume_global_hotkey(app: &AppHandle, state: &AppState) -> Result<(), String>
             Ok(_) => {
                 if current - 1 == 0 {
                     let settings = state.store.load_settings().map_err(|e| e.to_string())?;
-                    let shortcut =
-                        hotkey::parse_shortcut(&settings.hotkey).map_err(|e| e.to_string())?;
-                    register_hotkey(app, shortcut)?;
+                    let binding =
+                        hotkey::parse_hotkey_setting(&settings.hotkey).map_err(|e| e.to_string())?;
+                    register_hotkey_binding(app, binding)?;
                 }
                 return Ok(());
             }
@@ -508,17 +518,26 @@ fn is_mic_probe_active(state: &AppState) -> bool {
     state.mic_probe.capture.lock().is_some()
 }
 
-fn register_hotkey(app: &AppHandle, shortcut: Shortcut) -> Result<(), String> {
-    let gs = app.global_shortcut();
-    let current = *app.state::<AppState>().current_hotkey.lock();
-    if gs.is_registered(current) {
-        gs.unregister(current).map_err(|e| e.to_string())?;
+fn register_hotkey_binding(app: &AppHandle, binding: hotkey::HotkeyBinding) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    unregister_current_hotkey(app, state.inner())?;
+
+    match binding {
+        hotkey::HotkeyBinding::KeyCombo(shortcut) => {
+            let gs = app.global_shortcut();
+            gs.register(shortcut).map_err(|e| e.to_string())?;
+        }
+        hotkey::HotkeyBinding::ModifiersOnly(modifiers) => {
+            #[cfg(windows)]
+            hotkey::start_modifier_dictation_hook(app, modifiers)?;
+            #[cfg(not(windows))]
+            return Err("modifier-only hotkeys are only supported on Windows".into());
+        }
     }
-    gs.register(shortcut).map_err(|e| e.to_string())?;
-    *app.state::<AppState>().current_hotkey.lock() = shortcut;
+
+    *state.current_hotkey.lock() = binding;
     Ok(())
 }
-
 fn parse_stt_language(value: &str) -> Result<SttLanguage, String> {
     SttLanguage::parse(value).ok_or_else(|| user_error_string(UserError::UnsupportedSttLanguage))
 }
@@ -834,22 +853,22 @@ async fn set_hotkey(
     state: State<'_, AppState>,
     hotkey: String,
 ) -> Result<(), String> {
-    let shortcut = hotkey::parse_shortcut(&hotkey).map_err(|e| e.to_string())?;
+    let binding = hotkey::parse_hotkey_setting(&hotkey).map_err(|e| e.to_string())?;
     let previous = state.store.load_settings().map_err(|e| e.to_string())?;
     let previous_hotkey = previous.hotkey.clone();
     let capture_active = state.hotkey_suspend_depth.load(Ordering::SeqCst) > 0;
 
     if !capture_active {
-        register_hotkey(&app, shortcut)?;
+        register_hotkey_binding(&app, binding)?;
     }
 
     let mut next = previous.clone();
-    next.hotkey = hotkey::format_shortcut(&shortcut);
+    next.hotkey = hotkey::format_hotkey_setting(binding);
     if let Err(err) = state.store.save_settings(&next).map_err(|e| e.to_string()) {
         if !capture_active {
-            let rollback_shortcut =
-                hotkey::parse_shortcut(&previous_hotkey).map_err(|e| e.to_string())?;
-            let _ = register_hotkey(&app, rollback_shortcut);
+            let rollback =
+                hotkey::parse_hotkey_setting(&previous_hotkey).map_err(|e| e.to_string())?;
+            let _ = register_hotkey_binding(&app, rollback);
         }
         return Err(err);
     }
@@ -927,8 +946,8 @@ async fn set_settings(
     let whisper_effective_changed = prev_effective_whisper != next_effective_whisper;
     let llm_effective_changed = prev_effective_llm != next_effective_llm;
 
-    let hotkey_shortcut = hotkey::parse_shortcut(&settings.hotkey).map_err(|e| e.to_string())?;
-    let next_hotkey = hotkey::format_shortcut(&hotkey_shortcut);
+    let binding = hotkey::parse_hotkey_setting(&settings.hotkey).map_err(|e| e.to_string())?;
+    let next_hotkey = hotkey::format_hotkey_setting(binding);
     let hotkey_changed = previous.hotkey != next_hotkey;
 
     let next_settings = AppSettings {
@@ -975,7 +994,7 @@ async fn set_settings(
     }
 
     if hotkey_changed {
-        if let Err(err) = register_hotkey(&app, hotkey_shortcut) {
+        if let Err(err) = register_hotkey_binding(&app, binding) {
             if let Err(rollback_err) =
                 rollback_settings(&app, &state, &previous, rollback_ctx).await
             {
@@ -2013,6 +2032,10 @@ async fn ensure_model_then_toggle(app: AppHandle) {
     spawn_toggle(app, pipeline);
 }
 
+pub(crate) fn dispatch_dictation_hotkey(app: &AppHandle, shortcut_state: ShortcutState) {
+    handle_hotkey(app, shortcut_state);
+}
+
 fn handle_hotkey(app: &AppHandle, shortcut_state: ShortcutState) {
     let state = app.state::<AppState>();
     if is_mic_probe_active(&state) {
@@ -2544,7 +2567,9 @@ pub fn run() {
             deferred_llm_on_boot: AtomicBool::new(
                 initial_settings.auto_edit && initial_perf.llm_lazy_load,
             ),
-            current_hotkey: Mutex::new(hotkey::default_shortcut()),
+            current_hotkey: Mutex::new(hotkey::HotkeyBinding::KeyCombo(
+                hotkey::default_shortcut(),
+            )),
             hotkey_suspend_depth: AtomicU32::new(0),
             whisper_settings_change_depth: AtomicU32::new(0),
             loaded_whisper: Mutex::new(None),
@@ -2561,11 +2586,14 @@ pub fn run() {
             let _ = app_context::get_active_window();
 
             let hotkey_setting = initial_settings.hotkey.clone();
-            let shortcut = hotkey::parse_shortcut(&hotkey_setting).unwrap_or_else(|err| {
-                eprintln!("invalid stored hotkey ({hotkey_setting}): {err}, using default");
-                hotkey::default_shortcut()
-            });
-            register_hotkey(app.handle(), shortcut)?;
+            let binding =
+                hotkey::parse_hotkey_setting(&hotkey_setting).unwrap_or_else(|err| {
+                    eprintln!(
+                        "invalid stored hotkey ({hotkey_setting}): {err}, using default"
+                    );
+                    hotkey::HotkeyBinding::KeyCombo(hotkey::default_shortcut())
+                });
+            register_hotkey_binding(app.handle(), binding)?;
 
             if let Some(overlay) = app.get_webview_window("overlay") {
                 let _ = overlay.set_background_color(Some(tauri::window::Color(0, 0, 0, 0)));

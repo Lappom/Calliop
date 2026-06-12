@@ -97,15 +97,18 @@ export function useHistory() {
   }, [loadEntries]);
 
   const copyEntry = useCallback(async (id: number) => {
+    setEntryFeedback({ [id]: "copied" });
+    const resetTimer = window.setTimeout(() => {
+      setEntryFeedback((prev) => (prev[id] === "copied" ? {} : prev));
+    }, 1500);
+
     setBusy(true);
     try {
       await invoke("copy_dictation", { id });
-      setEntryFeedback({ [id]: "copied" });
-      window.setTimeout(() => {
-        setEntryFeedback((prev) => (prev[id] === "copied" ? {} : prev));
-      }, 1500);
       setErrorMessage(null);
     } catch (err) {
+      window.clearTimeout(resetTimer);
+      setEntryFeedback((prev) => (prev[id] === "copied" ? {} : prev));
       setErrorMessage(String(err));
     } finally {
       setBusy(false);

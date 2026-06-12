@@ -25,10 +25,10 @@ export function CopyButton({
       onClick={onClick}
       className={[
         "inline-flex size-8 shrink-0 items-center justify-center rounded-md border border-transparent",
-        "text-charcoal transition-[transform,background-color,border-color,color]",
+        "text-charcoal transition-[background-color,border-color,color]",
         "duration-[var(--motion-fast)] ease-[var(--ease-enter)]",
         "hover:border-hairline-strong hover:bg-surface-elevated hover:text-ink",
-        "active:scale-[0.97] disabled:active:scale-100",
+        "active:bg-surface-elevated",
         "disabled:cursor-not-allowed disabled:opacity-40",
         className,
       ]

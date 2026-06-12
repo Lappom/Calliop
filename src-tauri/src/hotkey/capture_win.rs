@@ -1,104 +1,27 @@
 //! Low-level keyboard hook for reliable hotkey capture on Windows (WebView2 misses many combos).
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use tauri::{AppHandle, Emitter};
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetAsyncKeyState, VIRTUAL_KEY, VK_0, VK_1, VK_2, VK_3, VK_4, VK_5, VK_6, VK_7, VK_8, VK_9,
-    VK_A, VK_B, VK_BACK, VK_C, VK_CONTROL, VK_D, VK_E, VK_ESCAPE, VK_F, VK_F1, VK_F10, VK_F11,
-    VK_F12, VK_F2, VK_F3, VK_F4, VK_F5, VK_F6, VK_F7, VK_F8, VK_F9, VK_G, VK_H, VK_I, VK_J, VK_K,
-    VK_L, VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_M, VK_MENU, VK_N, VK_O, VK_P, VK_Q, VK_R,
-    VK_RETURN, VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_S, VK_SHIFT, VK_SPACE, VK_T, VK_TAB,
-    VK_U, VK_V, VK_W, VK_X, VK_Y, VK_Z,
+    VIRTUAL_KEY, VK_0, VK_1, VK_2, VK_3, VK_4, VK_5, VK_6, VK_7, VK_8, VK_9, VK_A, VK_B, VK_BACK,
+    VK_C, VK_D, VK_E, VK_ESCAPE, VK_F, VK_F1, VK_F10, VK_F11, VK_F12, VK_F2, VK_F3, VK_F4, VK_F5,
+    VK_F6, VK_F7, VK_F8, VK_F9, VK_G, VK_H, VK_I, VK_J, VK_K, VK_L, VK_LCONTROL, VK_LMENU, VK_M,
+    VK_N, VK_O, VK_P, VK_Q, VK_R, VK_RETURN, VK_S, VK_SPACE, VK_T, VK_TAB, VK_U, VK_V, VK_W, VK_X,
+    VK_Y, VK_Z,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, SetWindowsHookExW, UnhookWindowsHookEx, HHOOK, KBDLLHOOKSTRUCT, LLKHF_UP,
     WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
 };
 
-use super::parse_shortcut;
+use super::modifiers::{compose_modifier_only, is_modifier_vk, TrackedModifiers};
+use super::parse_hotkey_setting;
 
 const PREVIOUS_KEY_DOWN: u32 = 1 << 30;
 
 static CAPTURE: Mutex<Option<HotkeyCaptureSession>> = Mutex::new(None);
-
-struct TrackedModifiers {
-    ctrl: AtomicBool,
-    alt: AtomicBool,
-    shift: AtomicBool,
-    super_key: AtomicBool,
-}
-
-impl TrackedModifiers {
-    const fn new() -> Self {
-        Self {
-            ctrl: AtomicBool::new(false),
-            alt: AtomicBool::new(false),
-            shift: AtomicBool::new(false),
-            super_key: AtomicBool::new(false),
-        }
-    }
-
-    fn reset(&self) {
-        self.ctrl.store(false, Ordering::SeqCst);
-        self.alt.store(false, Ordering::SeqCst);
-        self.shift.store(false, Ordering::SeqCst);
-        self.super_key.store(false, Ordering::SeqCst);
-    }
-
-    fn set_vk(&self, vk: VIRTUAL_KEY, pressed: bool) {
-        match vk {
-            VK_CONTROL | VK_LCONTROL | VK_RCONTROL => {
-                self.ctrl.store(pressed, Ordering::SeqCst);
-            }
-            VK_MENU | VK_LMENU | VK_RMENU => {
-                self.alt.store(pressed, Ordering::SeqCst);
-            }
-            VK_SHIFT | VK_LSHIFT | VK_RSHIFT => {
-                self.shift.store(pressed, Ordering::SeqCst);
-            }
-            VK_LWIN | VK_RWIN => {
-                self.super_key.store(pressed, Ordering::SeqCst);
-            }
-            _ => {}
-        }
-    }
-
-    fn any_pressed(&self) -> bool {
-        self.ctrl.load(Ordering::SeqCst)
-            || self.alt.load(Ordering::SeqCst)
-            || self.shift.load(Ordering::SeqCst)
-            || self.super_key.load(Ordering::SeqCst)
-            || modifier_pressed(VK_CONTROL)
-            || modifier_pressed(VK_MENU)
-            || modifier_pressed(VK_SHIFT)
-            || modifier_pressed(VK_LWIN)
-            || modifier_pressed(VK_RWIN)
-    }
-
-    fn labels(&self) -> Vec<&'static str> {
-        let mut parts = Vec::new();
-        if self.ctrl.load(Ordering::SeqCst) || modifier_pressed(VK_CONTROL) {
-            parts.push("Ctrl");
-        }
-        if self.alt.load(Ordering::SeqCst) || modifier_pressed(VK_MENU) {
-            parts.push("Alt");
-        }
-        if self.shift.load(Ordering::SeqCst) || modifier_pressed(VK_SHIFT) {
-            parts.push("Shift");
-        }
-        if self.super_key.load(Ordering::SeqCst)
-            || modifier_pressed(VK_LWIN)
-            || modifier_pressed(VK_RWIN)
-        {
-            parts.push("Super");
-        }
-        parts
-    }
-}
-
 static MODIFIERS: TrackedModifiers = TrackedModifiers::new();
 
 struct HotkeyCaptureSession {
@@ -191,6 +114,18 @@ unsafe extern "system" fn keyboard_proc(
 
     if is_key_up {
         if is_modifier_vk(vk) {
+            let labels = MODIFIERS.labels_with_vk(vk);
+            if let Some(hotkey) = compose_modifier_only(&labels) {
+                if parse_hotkey_setting(&hotkey).is_ok() {
+                    if let Some(app) = CAPTURE
+                        .lock()
+                        .ok()
+                        .and_then(|guard| guard.as_ref().map(|session| session.app.clone()))
+                    {
+                        emit_on_main_thread(&app, "hotkey-captured", Some(hotkey));
+                    }
+                }
+            }
             MODIFIERS.set_vk(vk, false);
         }
         return CallNextHookEx(hook, code, wparam, lparam);
@@ -219,7 +154,7 @@ unsafe extern "system" fn keyboard_proc(
     }
 
     if let Some(hotkey) = compose_hotkey_from_vk(vk) {
-        if parse_shortcut(&hotkey).is_ok() {
+        if parse_hotkey_setting(&hotkey).is_ok() {
             emit_on_main_thread(&app, "hotkey-captured", Some(hotkey));
         } else {
             emit_on_main_thread(&app, "hotkey-capture-invalid", None);
@@ -229,37 +164,14 @@ unsafe extern "system" fn keyboard_proc(
     CallNextHookEx(hook, code, wparam, lparam)
 }
 
-fn is_modifier_vk(vk: VIRTUAL_KEY) -> bool {
-    matches!(
-        vk,
-        VK_CONTROL
-            | VK_LCONTROL
-            | VK_RCONTROL
-            | VK_MENU
-            | VK_LMENU
-            | VK_RMENU
-            | VK_SHIFT
-            | VK_LSHIFT
-            | VK_RSHIFT
-            | VK_LWIN
-            | VK_RWIN
-    )
-}
-
-fn modifier_pressed(vk: VIRTUAL_KEY) -> bool {
-    unsafe { (GetAsyncKeyState(vk.0 as i32) as u16 & 0x8000) != 0 }
-}
-
 fn compose_hotkey_from_vk(vk: VIRTUAL_KEY) -> Option<String> {
-    if !MODIFIERS.any_pressed() {
+    let labels = MODIFIERS.labels();
+    if labels.is_empty() {
         return None;
     }
 
     let key = vk_to_key_label(vk)?;
-    let mut parts = MODIFIERS.labels();
-    if parts.is_empty() {
-        return None;
-    }
+    let mut parts = labels;
     parts.push(key);
     Some(parts.join("+"))
 }
@@ -335,7 +247,6 @@ mod tests {
     #[test]
     fn rejects_modifier_vk_as_key() {
         assert!(is_modifier_vk(VK_LCONTROL));
-        assert!(is_modifier_vk(VK_LWIN));
     }
 
     #[test]
@@ -343,6 +254,16 @@ mod tests {
         MODIFIERS.reset();
         MODIFIERS.set_vk(VK_LCONTROL, true);
         assert_eq!(compose_hotkey_from_vk(VK_A), Some("Ctrl+A".into()));
+        MODIFIERS.reset();
+    }
+
+    #[test]
+    fn tracked_modifiers_compose_ctrl_alt_on_release() {
+        MODIFIERS.reset();
+        MODIFIERS.set_vk(VK_LCONTROL, true);
+        MODIFIERS.set_vk(VK_LMENU, true);
+        let labels = MODIFIERS.labels_with_vk(VK_LMENU);
+        assert_eq!(compose_modifier_only(&labels), Some("Ctrl+Alt".into()));
         MODIFIERS.reset();
     }
 }
