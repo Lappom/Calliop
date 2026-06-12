@@ -19,14 +19,10 @@ jobs:
         include:
           - platform: windows-latest
             build_args: "--features gpu"
-          - platform: macos-latest
-            build_args: ""
-          - platform: ubuntu-latest
-            build_args: ""
+            cache_key: windows-gpu
     runs-on: ${{ matrix.platform }}
     env:
-      MACOSX_DEPLOYMENT_TARGET: "10.15"
-      CMAKE_OSX_DEPLOYMENT_TARGET: "10.15"
+      CMAKE_OBJECT_PATH_MAX: "1024"
     steps:
       - uses: actions/checkout@v4
 
@@ -39,36 +35,30 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - uses: Swatinem/rust-cache@v2
+      - name: Cache Vulkan SDK (Windows)
+        if: matrix.platform == 'windows-latest'
+        uses: actions/cache@v4
+        id: vulkan_sdk
         with:
-          workspaces: src-tauri
-
-      - name: Install Linux dependencies
-        if: matrix.platform == 'ubuntu-latest'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libasound2-dev \
-            libwebkit2gtk-4.1-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            libxdo-dev \
-            patchelf \
-            cmake \
-            clang \
-            libclang-dev
+          path: C:\VulkanSDK
+          key: vulkan-sdk-1.4.350.0-windows
 
       - name: Install Vulkan SDK (Windows)
-        if: matrix.platform == 'windows-latest'
+        if: matrix.platform == 'windows-latest' && steps.vulkan_sdk.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           choco install vulkan-sdk ninja -y --no-progress
           $sdk = (Get-ChildItem "C:\VulkanSDK" -Directory | Sort-Object Name -Descending | Select-Object -First 1).FullName
+          if (-not $sdk) { throw "Vulkan SDK install did not populate C:\VulkanSDK" }
+
+      - name: Configure Vulkan SDK env (Windows)
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          $sdk = (Get-ChildItem "C:\VulkanSDK" -Directory | Sort-Object Name -Descending | Select-Object -First 1).FullName
           $bin = Join-Path $sdk "Bin"
           "VULKAN_SDK=$sdk" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "$bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
-          $env:VULKAN_SDK = $sdk
-          $env:PATH = "$bin;$env:PATH"
           & (Join-Path $bin "glslc.exe") --version
 
       - name: Setup MSVC
@@ -84,30 +74,18 @@ jobs:
           "CARGO_TARGET_DIR=X:\ct" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "CMAKE_OBJECT_PATH_MAX=1024" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
-      - name: Prepare LLM sidecar (Windows)
-        if: matrix.platform == 'windows-latest'
-        shell: pwsh
-        run: ./scripts/prepare-llm-sidecar.ps1
-
-      - name: Prepare LLM sidecar (Linux)
-        if: matrix.platform == 'ubuntu-latest'
-        working-directory: src-tauri
-        run: bash ../scripts/prepare-llm-sidecar.sh
-
-      - name: Prepare LLM sidecar (macOS)
-        if: matrix.platform == 'macos-latest'
-        working-directory: src-tauri
-        run: bash ../scripts/prepare-llm-sidecar.sh
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          shared-key: calliop-${{ matrix.cache_key }}
+          cache-all-crates: true
+          save-if: ${{ github.ref_type == 'tag' || github.ref == 'refs/heads/main' }}
 
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Verify updater signing pubkey
         run: node scripts/verify-updater-pubkey.mjs
-
-      - name: Set macOS C++ deployment target
-        if: matrix.platform == 'macos-latest'
-        run: echo "CXXFLAGS=-mmacosx-version-min=10.15" >> "$GITHUB_ENV"
 
       - name: Load release notes
         id: release_notes

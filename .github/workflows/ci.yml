@@ -85,8 +85,11 @@ jobs:
       matrix:
         include:
           - platform: windows-latest
+            cache_key: windows-gpu
           - platform: macos-latest
+            cache_key: macos
           - platform: ubuntu-latest
+            cache_key: linux
     runs-on: ${{ matrix.platform }}
     env:
       MACOSX_DEPLOYMENT_TARGET: "10.15"
@@ -103,10 +106,6 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-
       - name: Install Linux dependencies
         if: matrix.platform == 'ubuntu-latest'
         run: |
@@ -122,17 +121,30 @@ jobs:
             clang \
             libclang-dev
 
-      - name: Install Vulkan SDK (Windows)
+      - name: Cache Vulkan SDK (Windows)
         if: matrix.platform == 'windows-latest'
+        uses: actions/cache@v4
+        id: vulkan_sdk
+        with:
+          path: C:\VulkanSDK
+          key: vulkan-sdk-1.4.350.0-windows
+
+      - name: Install Vulkan SDK (Windows)
+        if: matrix.platform == 'windows-latest' && steps.vulkan_sdk.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           choco install vulkan-sdk ninja -y --no-progress
           $sdk = (Get-ChildItem "C:\VulkanSDK" -Directory | Sort-Object Name -Descending | Select-Object -First 1).FullName
+          if (-not $sdk) { throw "Vulkan SDK install did not populate C:\VulkanSDK" }
+
+      - name: Configure Vulkan SDK env (Windows)
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          $sdk = (Get-ChildItem "C:\VulkanSDK" -Directory | Sort-Object Name -Descending | Select-Object -First 1).FullName
           $bin = Join-Path $sdk "Bin"
           "VULKAN_SDK=$sdk" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "$bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
-          $env:VULKAN_SDK = $sdk
-          $env:PATH = "$bin;$env:PATH"
           & (Join-Path $bin "glslc.exe") --version
 
       - name: Setup MSVC
@@ -148,20 +160,12 @@ jobs:
           "CARGO_TARGET_DIR=X:\ct" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "CMAKE_OBJECT_PATH_MAX=1024" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
-      - name: Prepare LLM sidecar (Windows)
-        if: matrix.platform == 'windows-latest'
-        shell: pwsh
-        run: ./scripts/prepare-llm-sidecar.ps1
-
-      - name: Prepare LLM sidecar (Linux)
-        if: matrix.platform == 'ubuntu-latest'
-        working-directory: src-tauri
-        run: bash ../scripts/prepare-llm-sidecar.sh
-
-      - name: Prepare LLM sidecar (macOS)
-        if: matrix.platform == 'macos-latest'
-        working-directory: src-tauri
-        run: bash ../scripts/prepare-llm-sidecar.sh
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          shared-key: calliop-${{ matrix.cache_key }}
+          cache-all-crates: true
+          save-if: ${{ github.ref_type == 'tag' || github.ref == 'refs/heads/main' }}
 
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
