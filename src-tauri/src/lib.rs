@@ -862,11 +862,14 @@ fn set_hotkey_capture_active(
     app: AppHandle,
     state: State<'_, AppState>,
     active: bool,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     if active {
-        suspend_global_hotkey(&app, &state)
+        suspend_global_hotkey(&app, &state)?;
+        hotkey::start_hotkey_capture(&app)
     } else {
-        resume_global_hotkey(&app, &state)
+        hotkey::stop_hotkey_capture()?;
+        resume_global_hotkey(&app, &state)?;
+        Ok(false)
     }
 }
 

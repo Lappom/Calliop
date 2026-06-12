@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { UiLanguageCode } from "../../i18n/locale";
 import { useAppVersion } from "../../hooks/useAppVersion";
@@ -75,37 +76,58 @@ export function SettingsView() {
     [settingsSections],
   );
 
+  const captureInFlightRef = useRef(false);
+
+  const saveCapturedHotkey = useCallback(
+    async (hotkey: string) => {
+      if (captureInFlightRef.current) {
+        return;
+      }
+      captureInFlightRef.current = true;
+      setHotkeyCaptureError(null);
+      setPendingHotkey(hotkey);
+      try {
+        await setHotkey(hotkey);
+        setPendingHotkey(null);
+      } catch {
+        setPendingHotkey(null);
+      } finally {
+        captureInFlightRef.current = false;
+        setRecordingHotkey(false);
+      }
+    },
+    [setHotkey],
+  );
+
+  const applyCapturedHotkeyFromEvent = useCallback(
+    async (event: KeyboardEvent) => {
+      const result = captureHotkey(event);
+      if (result.action === "ignore") {
+        return;
+      }
+      if (result.action === "cancel") {
+        setPendingHotkey(null);
+        setRecordingHotkey(false);
+        return;
+      }
+      if (result.action === "invalid") {
+        setHotkeyCaptureError(t("keys.hotkeyUnsupported"));
+        return;
+      }
+      if (!isHotkeySupported(result.hotkey)) {
+        setHotkeyCaptureError(t("keys.hotkeyUnsupported"));
+        return;
+      }
+      await saveCapturedHotkey(result.hotkey);
+    },
+    [saveCapturedHotkey, t],
+  );
+
   const handleHotkeyCapture = useCallback(
     (event: KeyboardEvent) => {
-      void (async () => {
-        const result = captureHotkey(event);
-        if (result.action === "ignore") {
-          return;
-        }
-        if (result.action === "cancel") {
-          setPendingHotkey(null);
-          setRecordingHotkey(false);
-          return;
-        }
-        if (result.action === "invalid") {
-          setHotkeyCaptureError(t("keys.hotkeyUnsupported"));
-          return;
-        }
-        if (!isHotkeySupported(result.hotkey)) {
-          return;
-        }
-        setPendingHotkey(result.hotkey);
-        try {
-          await setHotkey(result.hotkey);
-          setPendingHotkey(null);
-        } catch {
-          setPendingHotkey(null);
-        } finally {
-          setRecordingHotkey(false);
-        }
-      })();
+      void applyCapturedHotkeyFromEvent(event);
     },
-    [setHotkey, t],
+    [applyCapturedHotkeyFromEvent],
   );
 
   const restoreGlobalHotkey = useCallback(async () => {
@@ -123,10 +145,15 @@ export function SettingsView() {
 
     let cancelled = false;
     let listening = false;
+    let unlistenCaptured: (() => void) | undefined;
+    let unlistenCancelled: (() => void) | undefined;
+    let unlistenInvalid: (() => void) | undefined;
 
     void (async () => {
       try {
-        await invoke("set_hotkey_capture_active", { active: true });
+        const nativeCapture = await invoke<boolean>("set_hotkey_capture_active", {
+          active: true,
+        });
         if (cancelled) {
           await invoke("set_hotkey_capture_active", { active: false }).catch(
             (err) => {
@@ -135,6 +162,25 @@ export function SettingsView() {
           );
           return;
         }
+
+        if (nativeCapture) {
+          unlistenCaptured = await listen<string>("hotkey-captured", (event) => {
+            if (!isHotkeySupported(event.payload)) {
+              setHotkeyCaptureError(t("keys.hotkeyUnsupported"));
+              return;
+            }
+            void saveCapturedHotkey(event.payload);
+          });
+          unlistenCancelled = await listen("hotkey-capture-cancelled", () => {
+            setPendingHotkey(null);
+            setRecordingHotkey(false);
+          });
+          unlistenInvalid = await listen("hotkey-capture-invalid", () => {
+            setHotkeyCaptureError(t("keys.hotkeyUnsupported"));
+          });
+        }
+
+        // WebView2 fallback — required for simple combos when the native hook misses events.
         window.addEventListener("keydown", handleHotkeyCapture, true);
         listening = true;
       } catch (err) {
@@ -147,12 +193,21 @@ export function SettingsView() {
 
     return () => {
       cancelled = true;
+      unlistenCaptured?.();
+      unlistenCancelled?.();
+      unlistenInvalid?.();
       if (listening) {
         window.removeEventListener("keydown", handleHotkeyCapture, true);
       }
       void restoreGlobalHotkey();
     };
-  }, [recordingHotkey, handleHotkeyCapture, restoreGlobalHotkey]);
+  }, [
+    recordingHotkey,
+    handleHotkeyCapture,
+    restoreGlobalHotkey,
+    saveCapturedHotkey,
+    t,
+  ]);
 
   const displayHotkey = pendingHotkey ?? settings.hotkey;
 

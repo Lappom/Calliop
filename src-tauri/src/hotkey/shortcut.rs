@@ -256,6 +256,18 @@ mod tests {
     }
 
     #[test]
+    fn parses_ctrl_alt_space() {
+        let shortcut = parse_shortcut("Ctrl+Alt+Space").unwrap();
+        assert_eq!(format_shortcut(&shortcut), "Ctrl+Alt+Space");
+    }
+
+    #[test]
+    fn parses_super_space() {
+        let shortcut = parse_shortcut("Super+Space").unwrap();
+        assert_eq!(format_shortcut(&shortcut), "Super+Space");
+    }
+
+    #[test]
     fn rejects_unsupported_keys() {
         assert!(parse_shortcut("Ctrl+ArrowUp").is_err());
     }

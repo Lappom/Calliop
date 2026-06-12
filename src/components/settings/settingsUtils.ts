@@ -63,7 +63,55 @@ export type HotkeyCaptureResult =
   | { action: "invalid" }
   | { action: "capture"; hotkey: string };
 
-const MODIFIER_KEYS = new Set(["Control", "Alt", "Shift", "Meta"]);
+const MODIFIER_KEYS = new Set(["Control", "Alt", "Shift", "Meta", "OS"]);
+const MODIFIER_CODES = new Set([
+  "ControlLeft",
+  "ControlRight",
+  "AltLeft",
+  "AltRight",
+  "ShiftLeft",
+  "ShiftRight",
+  "MetaLeft",
+  "MetaRight",
+  "OSLeft",
+  "OSRight",
+]);
+
+export function physicalKeyFromCode(code: string): string | null {
+  if (code === "Space") {
+    return "Space";
+  }
+  if (code.startsWith("Key") && code.length === 4) {
+    return code.slice(3);
+  }
+  if (code.startsWith("Digit") && code.length === 6) {
+    return code.slice(5);
+  }
+  if (/^F\d+$/.test(code)) {
+    return code;
+  }
+  switch (code) {
+    case "Enter":
+    case "NumpadEnter":
+      return "Enter";
+    case "Tab":
+      return "Tab";
+    case "Backspace":
+      return "Backspace";
+    case "Escape":
+      return "Escape";
+    default:
+      return null;
+  }
+}
+
+function isModifierEvent(event: KeyboardEvent): boolean {
+  return (
+    MODIFIER_KEYS.has(event.key) ||
+    MODIFIER_CODES.has(event.code) ||
+    (event.key.length > 1 && event.key.endsWith("Lock"))
+  );
+}
 
 const SUPPORTED_HOTKEY_KEYS = new Set([
   "Space",
@@ -142,11 +190,12 @@ export function captureHotkey(event: KeyboardEvent): HotkeyCaptureResult {
   if (event.metaKey) parts.push("Super");
 
   const key = event.key;
-  if (MODIFIER_KEYS.has(key)) {
+  if (isModifierEvent(event)) {
     return { action: "ignore" };
   }
 
-  const normalizedKey = normalizeHotkeyKey(key);
+  const normalizedKey =
+    physicalKeyFromCode(event.code) ?? normalizeHotkeyKey(key);
 
   if (parts.length === 0) {
     return { action: "invalid" };
