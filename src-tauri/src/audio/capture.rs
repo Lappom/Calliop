@@ -7,8 +7,16 @@ use cpal::traits::{DeviceTrait, StreamTrait};
 use thiserror::Error;
 
 pub const TARGET_SAMPLE_RATE: u32 = 16_000;
+pub const AUDIO_BAND_COUNT: usize = 14;
+
 pub type AudioChunkSender = std::sync::mpsc::Sender<Vec<f32>>;
-pub type AudioLevelSender = std::sync::mpsc::Sender<f32>;
+pub type AudioLevelSender = std::sync::mpsc::Sender<AudioLevelSample>;
+
+#[derive(Debug, Clone, Copy)]
+pub struct AudioLevelSample {
+    pub level: f32,
+    pub bands: [f32; AUDIO_BAND_COUNT],
+}
 
 #[derive(Debug, Error)]
 pub enum AudioError {
@@ -157,7 +165,7 @@ impl StreamingSidecar {
         if let Some(level_tx) = &self.level_tx {
             let mut last = self.last_level_emit.lock().expect("level lock");
             if last.elapsed() >= Duration::from_millis(50) {
-                let _ = level_tx.send(compute_rms(&delta));
+                let _ = level_tx.send(compute_audio_level(&delta));
                 *last = Instant::now();
             }
         }
@@ -542,6 +550,53 @@ pub fn compute_rms(samples: &[f32]) -> f32 {
     (sum / samples.len() as f32).sqrt()
 }
 
+pub fn compute_audio_level(samples: &[f32]) -> AudioLevelSample {
+    let level = compute_rms(samples);
+    let bands = compute_band_levels(samples, AUDIO_BAND_COUNT);
+    AudioLevelSample { level, bands }
+}
+
+/// RMS per temporal band with triangular overlap — voice-correlated variation without FFT.
+pub fn compute_band_levels(samples: &[f32], bands: usize) -> [f32; AUDIO_BAND_COUNT] {
+    let mut out = [0.0f32; AUDIO_BAND_COUNT];
+    if samples.is_empty() || bands == 0 {
+        return out;
+    }
+
+    let band_count = bands.min(AUDIO_BAND_COUNT);
+    let n = samples.len() as f32;
+    let global_rms = compute_rms(samples);
+    if global_rms < f32::EPSILON {
+        return out;
+    }
+
+    let half_width = (n / band_count as f32) * 1.15;
+
+    for band in 0..band_count {
+        let center = (band as f32 + 0.5) / band_count as f32 * n;
+        let mut weighted_sum_sq = 0.0f32;
+        let mut weight_sum = 0.0f32;
+
+        for (i, &sample) in samples.iter().enumerate() {
+            let dist = (i as f32 - center).abs();
+            let weight = (1.0 - dist / half_width).max(0.0);
+            if weight > 0.0 {
+                weighted_sum_sq += sample * sample * weight;
+                weight_sum += weight;
+            }
+        }
+
+        let band_rms = if weight_sum > 0.0 {
+            (weighted_sum_sq / weight_sum).sqrt()
+        } else {
+            0.0
+        };
+        out[band] = (band_rms / global_rms).min(1.0);
+    }
+
+    out
+}
+
 /// Downmixes to mono and resamples to 16 kHz using linear interpolation.
 pub fn resample_to_16k_mono(input: &[f32], source_rate: u32, channels: u16) -> Vec<f32> {
     if input.is_empty() {
@@ -600,6 +655,44 @@ mod tests {
     fn compute_rms_of_unit_signal() {
         let rms = compute_rms(&[1.0, -1.0, 1.0, -1.0]);
         assert!((rms - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn compute_band_levels_silence_is_zero() {
+        let bands = compute_band_levels(&[0.0; 140], AUDIO_BAND_COUNT);
+        assert!(bands.iter().all(|b| *b < f32::EPSILON));
+    }
+
+    #[test]
+    fn compute_band_levels_constant_signal_is_uniform() {
+        let samples = vec![0.5f32; 280];
+        let bands = compute_band_levels(&samples, AUDIO_BAND_COUNT);
+        for band in &bands {
+            assert!((*band - 1.0).abs() < 0.05, "band={band}");
+        }
+    }
+
+    #[test]
+    fn compute_band_levels_localized_impulse_concentrates_energy() {
+        let mut samples = vec![0.0f32; 280];
+        let center = 140usize;
+        for i in center.saturating_sub(4)..=(center + 4).min(samples.len() - 1) {
+            samples[i] = 1.0;
+        }
+
+        let bands = compute_band_levels(&samples, AUDIO_BAND_COUNT);
+        let peak_band = bands
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+            .map(|(i, _)| i)
+            .unwrap();
+        let mid_band = AUDIO_BAND_COUNT / 2;
+        assert!(
+            (peak_band as i32 - mid_band as i32).abs() <= 3,
+            "peak_band={peak_band}, bands={bands:?}"
+        );
+        assert!(bands[peak_band] > 0.5);
     }
 
     #[test]

@@ -1,33 +1,62 @@
 import { useEffect, useRef, useState } from "react";
 import type { PipelineState } from "../../hooks/usePipelineState";
+import {
+  BAR_COUNT,
+  createWaveformPhysicsState,
+  MIN_BAR_SCALE,
+  tickWaveformPhysics,
+} from "./waveformPhysics";
 
 interface WaveformVisualizerProps {
   state: PipelineState;
   level: number;
+  bands: number[];
 }
 
-const BAR_COUNT = 14;
 const MAX_BAR_HEIGHT = 22;
-const ATTACK = 0.58;
-const DECAY = 0.08;
+const EPSILON_PX = 0.5;
 
-function normalizeLevel(level: number): number {
-  const boosted = Math.min(1, level * 24);
-  return Math.pow(boosted, 0.62);
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
 }
 
-export function WaveformVisualizer({ state, level }: WaveformVisualizerProps) {
+export function WaveformVisualizer({
+  state,
+  level,
+  bands,
+}: WaveformVisualizerProps) {
   const isRecording = state === "recording";
   const isProcessing = state === "transcribing" || state === "injecting";
 
-  const targetRef = useRef(0);
-  const smoothedRef = useRef(0);
+  const levelRef = useRef(0);
+  const bandsRef = useRef<number[]>(bands);
+  const stateRef = useRef(state);
   const timeRef = useRef(0);
-  const [bars, setBars] = useState<number[]>(() =>
-    Array.from({ length: BAR_COUNT }, () => 0.14),
+  const physicsRef = useRef(createWaveformPhysicsState());
+  const reducedMotionRef = useRef(prefersReducedMotion());
+  const [renderBars, setRenderBars] = useState(() =>
+    Array.from({ length: BAR_COUNT }, () => MIN_BAR_SCALE),
   );
+  const [renderOpacities, setRenderOpacities] = useState(() =>
+    Array.from({ length: BAR_COUNT }, () => 0.35),
+  );
+  const lastRenderScalesRef = useRef(renderBars);
 
-  targetRef.current = normalizeLevel(level);
+  levelRef.current = level;
+  bandsRef.current = bands;
+  stateRef.current = state;
+
+  useEffect(() => {
+    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const onChange = () => {
+      reducedMotionRef.current = media.matches;
+    };
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+  }, []);
 
   useEffect(() => {
     let raf = 0;
@@ -47,31 +76,36 @@ export function WaveformVisualizer({ state, level }: WaveformVisualizerProps) {
       timeRef.current = now;
       const dt = prevTime > 0 ? Math.min((now - prevTime) / 16, 2) : 1;
 
-      const target = targetRef.current;
-      const prev = smoothedRef.current;
-      const coeff = target > prev ? ATTACK : DECAY;
-      const smoothed = prev + (target - prev) * coeff * dt;
-      smoothedRef.current = smoothed;
-
-      const t = now / 1000;
-      const nextBars = Array.from({ length: BAR_COUNT }, (_, i) => {
-        if (isProcessing) {
-          return 0.14 + (i % 3) * 0.06;
-        }
-
-        const center = (BAR_COUNT - 1) / 2;
-        const centerDistance = Math.abs(i - center) / center;
-        const centerBoost = 1 - centerDistance * 0.18;
-        const barOffset = ((i % 5) + 1) * 0.1;
-        const idlePulse =
-          smoothed < 0.08
-            ? 0.18 + Math.sin(t * 3.6 + i * 0.5) * 0.1
-            : 0;
-        const active = smoothed * centerBoost * (0.88 + barOffset);
-        return Math.min(1, Math.max(0.14, active + idlePulse));
+      const result = tickWaveformPhysics(physicsRef.current, {
+        bands: bandsRef.current,
+        level: levelRef.current,
+        state: stateRef.current,
+        timeSec: now / 1000,
+        dt,
+        reducedMotion: reducedMotionRef.current,
       });
 
-      setBars(nextBars);
+      if (result.changed) {
+        const minPx = MIN_BAR_SCALE * MAX_BAR_HEIGHT;
+        let meaningfulChange = false;
+        for (let i = 0; i < BAR_COUNT; i++) {
+          const nextPx = Math.max(minPx, result.scales[i] * MAX_BAR_HEIGHT);
+          const prevPx = Math.max(
+            minPx,
+            lastRenderScalesRef.current[i] * MAX_BAR_HEIGHT,
+          );
+          if (Math.abs(nextPx - prevPx) > EPSILON_PX) {
+            meaningfulChange = true;
+            break;
+          }
+        }
+        if (meaningfulChange) {
+          lastRenderScalesRef.current = result.scales;
+          setRenderBars(result.scales);
+          setRenderOpacities(result.opacities);
+        }
+      }
+
       raf = requestAnimationFrame(tick);
     };
 
@@ -97,18 +131,18 @@ export function WaveformVisualizer({ state, level }: WaveformVisualizerProps) {
       document.removeEventListener("visibilitychange", onVisibilityChange);
       cancel();
     };
-  }, [isProcessing]);
+  }, []);
 
   return (
     <div
       className="flex h-[22px] items-center justify-center gap-[2px]"
       aria-hidden="true"
     >
-      {bars.map((height, i) => (
+      {renderBars.map((scale, i) => (
         <span
           key={i}
           className={[
-            "w-[2.5px] shrink-0 rounded-full transition-[height,background-color] duration-75",
+            "h-[22px] w-[2.5px] shrink-0 origin-center rounded-full",
             isProcessing
               ? "bg-accent-blue/60"
               : isRecording
@@ -116,7 +150,8 @@ export function WaveformVisualizer({ state, level }: WaveformVisualizerProps) {
                 : "bg-ink/30",
           ].join(" ")}
           style={{
-            height: `${Math.max(4, Math.round(height * MAX_BAR_HEIGHT))}px`,
+            transform: `scaleY(${scale})`,
+            opacity: renderOpacities[i],
           }}
         />
       ))}

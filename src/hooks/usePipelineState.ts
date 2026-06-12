@@ -28,6 +28,13 @@ export interface PartialTranscriptPayload {
 
 export type LlmStatus = "applied" | "skipped" | "failed" | "disabled";
 
+export const AUDIO_BAND_COUNT = 14;
+
+export interface AudioLevelPayload {
+  level: number;
+  bands?: number[];
+}
+
 export interface LatencyMetricsPayload {
   sttMs: number;
   sttWaitMs?: number;
@@ -48,6 +55,9 @@ export function usePipelineState() {
   const [modelReady, setModelReady] = useState(false);
   const [modelProgress, setModelProgress] = useState<number | null>(null);
   const [audioLevel, setAudioLevel] = useState(0);
+  const [audioBands, setAudioBands] = useState<number[]>(() =>
+    Array.from({ length: AUDIO_BAND_COUNT }, () => 0),
+  );
   const [latencyMetrics, setLatencyMetrics] =
     useState<LatencyMetricsPayload | null>(null);
 
@@ -92,8 +102,17 @@ export function usePipelineState() {
       listen("partial-transcript-reset", () => {
         setPartialTranscript("");
       }),
-      listen<{ level: number }>("audio-level", (event) => {
-        setAudioLevel(event.payload.level);
+      listen<AudioLevelPayload>("audio-level", (event) => {
+        const { level, bands } = event.payload;
+        setAudioLevel(level);
+        if (bands && bands.length > 0) {
+          setAudioBands(bands.slice(0, AUDIO_BAND_COUNT));
+        } else {
+          const uniform = Math.min(1, level * 24);
+          setAudioBands(
+            Array.from({ length: AUDIO_BAND_COUNT }, () => uniform),
+          );
+        }
       }),
       listen<LatencyMetricsPayload>("latency-metrics", (event) => {
         setLatencyMetrics(event.payload);
@@ -137,6 +156,7 @@ export function usePipelineState() {
     modelReady,
     modelProgress,
     audioLevel,
+    audioBands,
     latencyMetrics,
   };
 }

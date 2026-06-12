@@ -134,6 +134,7 @@ pub struct LatencyMetricsEvent {
 #[derive(Debug, Clone, Serialize)]
 pub struct AudioLevelEvent {
     pub level: f32,
+    pub bands: Vec<f32>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -461,8 +462,14 @@ impl PipelineOrchestrator {
         let app_level = app.clone();
         let level_stop = Arc::clone(&stop_flag);
         let level_listener = thread::spawn(move || {
-            while let Ok(level) = level_rx.recv() {
-                let _ = app_level.emit("audio-level", AudioLevelEvent { level });
+            while let Ok(sample) = level_rx.recv() {
+                let _ = app_level.emit(
+                    "audio-level",
+                    AudioLevelEvent {
+                        level: sample.level,
+                        bands: sample.bands.to_vec(),
+                    },
+                );
                 if level_stop.load(Ordering::SeqCst) {
                     break;
                 }

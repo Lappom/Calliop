@@ -1542,7 +1542,7 @@ async fn start_mic_probe(app: AppHandle, state: State<'_, AppState>) -> Result<(
         .input_device;
 
     let mut capture = audio::AudioCapture::new().map_err(|e| e.to_string())?;
-    let (level_tx, level_rx) = std::sync::mpsc::channel::<f32>();
+    let (level_tx, level_rx) = std::sync::mpsc::channel::<audio::AudioLevelSample>();
     if let Err(err) = capture.start_with_streaming(None, Some(level_tx), Some(&input_device)) {
         let _ = resume_global_hotkey(&app, &state);
         return Err(err.to_string());
@@ -1550,8 +1550,14 @@ async fn start_mic_probe(app: AppHandle, state: State<'_, AppState>) -> Result<(
 
     let app_clone = app.clone();
     let level_task = tauri::async_runtime::spawn(async move {
-        while let Ok(level) = level_rx.recv() {
-            let _ = app_clone.emit("audio-level", pipeline::AudioLevelEvent { level });
+        while let Ok(sample) = level_rx.recv() {
+            let _ = app_clone.emit(
+                "audio-level",
+                pipeline::AudioLevelEvent {
+                    level: sample.level,
+                    bands: sample.bands.to_vec(),
+                },
+            );
         }
     });
 

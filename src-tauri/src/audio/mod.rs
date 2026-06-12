@@ -5,8 +5,8 @@ mod devices;
 mod vad;
 
 pub use capture::{
-    resample_to_16k_mono, AudioCapture, AudioChunkSender, AudioError, AudioLevelSender,
-    TARGET_SAMPLE_RATE,
+    resample_to_16k_mono, AudioCapture, AudioChunkSender, AudioError, AudioLevelSample,
+    AudioLevelSender, AUDIO_BAND_COUNT, TARGET_SAMPLE_RATE,
 };
 pub use devices::{list_input_devices, InputDeviceInfo, DEFAULT_INPUT_DEVICE_ID};
 pub use vad::{VadError, VadSegmenter, VAD_CHUNK_SIZE};

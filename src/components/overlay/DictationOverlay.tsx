@@ -25,7 +25,8 @@ function glowStateClass(state: PipelineState, hasError: boolean): string {
 
 export function DictationOverlay() {
   const { t } = useTranslation();
-  const { pipelineState, errorMessage, audioLevel } = usePipelineState();
+  const { pipelineState, errorMessage, audioLevel, audioBands } =
+    usePipelineState();
   const hasError = Boolean(errorMessage);
 
   return (
@@ -42,7 +43,11 @@ export function DictationOverlay() {
       aria-label={t(OVERLAY_STATE_KEYS[pipelineState])}
     >
       <div className="overlay-pill">
-        <WaveformVisualizer state={pipelineState} level={audioLevel} />
+        <WaveformVisualizer
+          state={pipelineState}
+          level={audioLevel}
+          bands={audioBands}
+        />
       </div>
     </div>
   );
