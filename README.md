@@ -1,4 +1,10 @@
 <p align="center">
+  <video src="docs/export-1781355100956.mp4" width="720" autoplay muted loop playsinline controls>
+    <a href="docs/export-1781355100956.mp4">Watch the demo</a>
+  </video>
+</p>
+
+<p align="center">
   <img src="public/app-icon.png" alt="Calliop" width="96" height="96" />
 </p>
 
