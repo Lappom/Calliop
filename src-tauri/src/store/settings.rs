@@ -17,6 +17,7 @@ pub const KEY_INFERENCE_BACKEND: &str = "inference_backend";
 pub const KEY_ONBOARDING_DONE: &str = "onboarding_done";
 pub const KEY_AUTO_UPDATE: &str = "auto_update";
 pub const KEY_AUTOSTART: &str = "autostart";
+const KEY_AUTO_EDIT_DEFAULT_APPLIED: &str = "auto_edit_default_applied_v1";
 pub const KEY_LOW_POWER_MODE: &str = "low_power_mode";
 pub const KEY_ADAPTIVE_PERF: &str = "adaptive_perf";
 pub const KEY_UI_LANGUAGE: &str = "ui_language";
@@ -273,6 +274,17 @@ impl Store {
     pub fn set_autostart(&self, enabled: bool) -> Result<(), StoreError> {
         self.set_bool(KEY_AUTOSTART, enabled)
     }
+
+    /// Ensures AI auto-edit is enabled by default (one-time migration + fresh installs).
+    pub fn apply_auto_edit_default(&self) -> Result<bool, StoreError> {
+        if self.has_setting(KEY_AUTO_EDIT_DEFAULT_APPLIED)? {
+            return self.get_bool(KEY_AUTO_EDIT, true);
+        }
+
+        self.set_bool(KEY_AUTO_EDIT, true)?;
+        self.set_bool(KEY_AUTO_EDIT_DEFAULT_APPLIED, true)?;
+        Ok(true)
+    }
 }
 
 #[cfg(test)]
@@ -371,6 +383,38 @@ mod tests {
         let store = Store::from_connection(conn);
         let loaded = store.load_settings().expect("load");
         assert_eq!(loaded.input_device, DEFAULT_INPUT_DEVICE);
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn auto_edit_default_migration_enables_and_is_idempotent() {
+        let dir = std::env::temp_dir().join(format!(
+            "calliop-auto-edit-default-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::create_dir_all(&dir);
+        let db_file = dir.join("settings.db");
+        let conn = rusqlite::Connection::open(&db_file).unwrap();
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )",
+            [],
+        )
+        .unwrap();
+
+        let store = Store::from_connection(conn);
+        store.set_bool(KEY_AUTO_EDIT, false).expect("seed legacy off");
+        assert!(store.apply_auto_edit_default().expect("migrate"));
+        assert!(store.get_bool(KEY_AUTO_EDIT, false).expect("read"));
+        store.set_bool(KEY_AUTO_EDIT, false).expect("user disables");
+        assert!(!store.apply_auto_edit_default().expect("re-run"));
+        assert!(!store.get_bool(KEY_AUTO_EDIT, false).expect("respect user choice"));
 
         let _ = std::fs::remove_dir_all(dir);
     }

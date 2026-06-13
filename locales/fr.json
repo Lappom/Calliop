@@ -725,5 +725,17 @@
       "whisper": "Téléchargement Whisper",
       "llm": "Téléchargement LLM"
     }
+  },
+  "system": {
+    "notifications": {
+      "modelsReady": {
+        "title": "Calliop",
+        "body": "Modèles prêts. Vous pouvez dicter."
+      },
+      "updateReady": {
+        "title": "Calliop",
+        "body": "Mise à jour {{version}} prête à installer."
+      }
+    }
   }
 }

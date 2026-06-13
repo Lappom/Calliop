@@ -11,6 +11,7 @@ pub mod process_util;
 pub mod store;
 pub mod stt;
 pub mod system;
+pub mod system_notify;
 pub mod ui;
 pub mod update;
 pub mod user_error;
@@ -21,6 +22,7 @@ use std::time::{Duration, Instant};
 
 use calliop_prompt::ToneProfile;
 use dictionary_notify::{DictionaryNotifier, DictionaryUpdatedPayload};
+use system_notify::{ModelsReadyNotifier, notify_update_ready};
 use inject::TextInjector;
 use parking_lot::Mutex;
 use pipeline::{
@@ -114,6 +116,7 @@ struct AppState {
     store: Arc<Store>,
     prompt_cache: Mutex<WhisperPromptCache>,
     dictionary_notifier: Arc<DictionaryNotifier>,
+    models_ready_notifier: Arc<ModelsReadyNotifier>,
     capabilities: SystemCapabilities,
     perf_config: Mutex<RuntimePerfConfig>,
     last_activity: Mutex<Instant>,
@@ -371,6 +374,7 @@ fn invalidate_whisper_engine(state: &AppState) {
     state.model_ready.store(false, Ordering::SeqCst);
     *state.whisper_engine.lock() = None;
     *state.loaded_whisper.lock() = None;
+    state.models_ready_notifier.reset();
 }
 
 fn whisper_engine_matches(state: &AppState, expected: WhisperModel) -> bool {
@@ -1225,6 +1229,8 @@ async fn ensure_llm_model_inner(app: &AppHandle, state: &AppState) -> Result<(),
         return Ok(());
     }
 
+    state.models_ready_notifier.reset_for_llm_reload();
+
     if state.llm_ready.load(Ordering::SeqCst) || state.llm_engine.lock().is_some() {
         shutdown_llm_engine(state);
     }
@@ -1293,6 +1299,9 @@ async fn ensure_llm_model_inner(app: &AppHandle, state: &AppState) -> Result<(),
     *state.loaded_llm.lock() = Some(llm_model);
     state.llm_ready.store(true, Ordering::SeqCst);
     let _ = app.emit("llm-ready", ());
+    state
+        .models_ready_notifier
+        .on_llm_loaded(app, &state.store);
     Ok(())
 }
 
@@ -2104,6 +2113,12 @@ async fn ensure_model_inner(app: &AppHandle, state: &AppState) -> Result<(), Str
             message: None,
         },
     );
+    state.models_ready_notifier.on_whisper_loaded(
+        app,
+        &state.store,
+        settings.auto_edit,
+        perf.preload_llm,
+    );
     Ok(())
 }
 
@@ -2627,12 +2642,13 @@ async fn download_and_store_update(
         update,
         bytes_path,
     });
+    let version_for_notify = version.clone();
     let _ = app.emit(
         "update-ready",
-        update::UpdateReadyPayload {
-            version,
-        },
+        update::UpdateReadyPayload { version },
     );
+    let state = app.state::<AppState>();
+    notify_update_ready(app, &state.store, &version_for_notify);
     Ok(())
 }
 
@@ -2875,6 +2891,11 @@ pub fn run() {
         }
     }
 
+    match store.apply_auto_edit_default() {
+        Ok(enabled) => initial_settings.auto_edit = enabled,
+        Err(err) => eprintln!("failed to apply auto_edit default: {err}"),
+    }
+
     pipeline.lock().set_auto_edit(initial_settings.auto_edit);
     pipeline.lock().set_auto_learn(initial_settings.auto_learn);
     pipeline
@@ -2950,6 +2971,7 @@ pub fn run() {
             store,
             prompt_cache,
             dictionary_notifier,
+            models_ready_notifier: Arc::new(ModelsReadyNotifier::new()),
             capabilities,
             perf_config: Mutex::new(initial_perf),
             last_activity: Mutex::new(Instant::now()),
