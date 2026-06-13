@@ -4,13 +4,14 @@ import type { SelectOption } from "../ui/Select";
 
 export type ModelInstallStatus = "active" | "installed" | "missing";
 
-const WHISPER_MODEL_IDS = ["auto", "small", "distil-fr-dec16"] as const;
+const WHISPER_MODEL_IDS = ["auto", "small", "distil-fr-dec16", "distil-fr-dec16-q8_0"] as const;
 const LLM_MODEL_IDS = ["auto", "qwen3-0.6b", "qwen3-1.7b", "qwen3.5-4b"] as const;
 
 const WHISPER_LABEL_KEYS: Record<(typeof WHISPER_MODEL_IDS)[number], string> = {
   auto: "settings.modelsPanel.whisper.auto",
   small: "settings.modelsPanel.whisper.small",
   "distil-fr-dec16": "settings.modelsPanel.whisper.distilFr",
+  "distil-fr-dec16-q8_0": "settings.modelsPanel.whisper.distilFrQ8",
 };
 
 const LLM_LABEL_KEYS: Record<(typeof LLM_MODEL_IDS)[number], string> = {

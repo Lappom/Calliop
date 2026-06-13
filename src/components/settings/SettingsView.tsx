@@ -358,7 +358,8 @@ export function SettingsView() {
                 if (
                   value === "auto" ||
                   value === "small" ||
-                  value === "distil-fr-dec16"
+                  value === "distil-fr-dec16" ||
+                  value === "distil-fr-dec16-q8_0"
                 ) {
                   void setWhisperModel(value);
                 }

@@ -13,6 +13,7 @@ pub enum WhisperModel {
     Auto,
     Small,
     DistilFrDec16,
+    DistilFrDec16Q8_0,
 }
 
 impl WhisperModel {
@@ -22,6 +23,7 @@ impl WhisperModel {
             "small" => Some(Self::Small),
             // Legacy: medium replaced by distil-fr-dec16 (option 3 tier lineup).
             "medium" | "distil-fr-dec16" => Some(Self::DistilFrDec16),
+            "distil-fr-dec16-q8_0" => Some(Self::DistilFrDec16Q8_0),
             _ => None,
         }
     }
@@ -31,6 +33,7 @@ impl WhisperModel {
             Self::Auto => "auto",
             Self::Small => "small",
             Self::DistilFrDec16 => "distil-fr-dec16",
+            Self::DistilFrDec16Q8_0 => "distil-fr-dec16-q8_0",
         }
     }
 
@@ -43,6 +46,7 @@ impl WhisperModel {
             Self::Auto => None,
             Self::Small => Some("ggml-small.bin"),
             Self::DistilFrDec16 => Some("whisper-distil-fr-dec16-q5_0.bin"),
+            Self::DistilFrDec16Q8_0 => Some("whisper-distil-fr-dec16-q8_0.bin"),
         }
     }
 
@@ -50,7 +54,8 @@ impl WhisperModel {
         match self {
             Self::Auto => "Automatique (recommandé)",
             Self::Small => "Rapide — Small (~466 Mo)",
-            Self::DistilFrDec16 => "Équilibré — Distil FR dec16 (~755 Mo)",
+            Self::DistilFrDec16 => "Équilibré — Distil FR dec16 Q5_0 (~755 Mo)",
+            Self::DistilFrDec16Q8_0 => "Précision — Distil FR dec16 Q8_0 (~1,2 Go)",
         }
     }
 
@@ -59,6 +64,7 @@ impl WhisperModel {
             Self::Auto => 0,
             Self::Small => 450_000_000,
             Self::DistilFrDec16 => 750_000_000,
+            Self::DistilFrDec16Q8_0 => 1_150_000_000,
         }
     }
 
@@ -70,6 +76,9 @@ impl WhisperModel {
             }
             Self::DistilFrDec16 => &[
                 "https://huggingface.co/bofenghuang/whisper-large-v3-french-distil-dec16/resolve/main/ggml-model-q5_0.bin",
+            ],
+            Self::DistilFrDec16Q8_0 => &[
+                "https://huggingface.co/Pomni/whisper-large-v3-french-distil-dec16-GGML-allquants/resolve/main/ggml-large-v3-french-distil-dec16-q8_0.bin",
             ],
         }
     }
@@ -85,12 +94,17 @@ impl WhisperModel {
         is_valid_model_file(self, &self.path())
     }
 
-    pub fn all_concrete() -> [Self; 2] {
-        [Self::Small, Self::DistilFrDec16]
+    pub fn all_concrete() -> [Self; 3] {
+        [Self::Small, Self::DistilFrDec16, Self::DistilFrDec16Q8_0]
     }
 
-    pub fn all_selectable() -> [Self; 3] {
-        [Self::Auto, Self::Small, Self::DistilFrDec16]
+    pub fn all_selectable() -> [Self; 4] {
+        [
+            Self::Auto,
+            Self::Small,
+            Self::DistilFrDec16,
+            Self::DistilFrDec16Q8_0,
+        ]
     }
 }
 
@@ -369,6 +383,10 @@ mod tests {
         assert_eq!(
             WhisperModel::parse("distil-fr-dec16"),
             Some(WhisperModel::DistilFrDec16)
+        );
+        assert_eq!(
+            WhisperModel::parse("distil-fr-dec16-q8_0"),
+            Some(WhisperModel::DistilFrDec16Q8_0)
         );
         assert_eq!(WhisperModel::parse("unknown"), None);
     }

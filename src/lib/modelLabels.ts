@@ -4,6 +4,7 @@ import type { ModelDownloadKind } from "../hooks/useModelDownloads";
 const MODEL_LABEL_KEYS: Record<string, string> = {
   small: "settings.modelsPanel.whisper.small",
   "distil-fr-dec16": "settings.modelsPanel.whisper.distilFr",
+  "distil-fr-dec16-q8_0": "settings.modelsPanel.whisper.distilFrQ8",
   medium: "settings.modelsPanel.whisper.distilFr",
   "qwen3-0.6b": "settings.modelsPanel.llm.qwen06",
   "qwen3-1.7b": "settings.modelsPanel.llm.qwen17",

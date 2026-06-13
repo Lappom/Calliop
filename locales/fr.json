@@ -186,7 +186,8 @@
       "whisper": {
         "auto": "Automatique (recommandé)",
         "small": "Small (~466 Mo)",
-        "distilFr": "Distil FR dec16 (~755 Mo)"
+        "distilFr": "Distil FR dec16 Q5_0 (~755 Mo)",
+        "distilFrQ8": "Distil FR dec16 Q8_0 (~1,2 Go)"
       },
       "llm": {
         "auto": "Automatique (recommandé)",

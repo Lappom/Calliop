@@ -186,7 +186,8 @@
       "whisper": {
         "auto": "Automatic (recommended)",
         "small": "Small (~466 MB)",
-        "distilFr": "Distil FR dec16 (~755 MB)"
+        "distilFr": "Distil FR dec16 Q5_0 (~755 MB)",
+        "distilFrQ8": "Distil FR dec16 Q8_0 (~1.2 GB)"
       },
       "llm": {
         "auto": "Automatic (recommended)",

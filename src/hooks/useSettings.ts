@@ -7,7 +7,7 @@ import { parseUiLanguage } from "../i18n/locale";
 import { translateError } from "../lib/translateError";
 import type { SttLanguageCode } from "./useSttLanguage";
 
-export type WhisperModelId = "auto" | "small" | "distil-fr-dec16";
+export type WhisperModelId = "auto" | "small" | "distil-fr-dec16" | "distil-fr-dec16-q8_0";
 export type LlmModelId = "auto" | "qwen3-0.6b" | "qwen3-1.7b" | "qwen3.5-4b";
 export type InferenceBackendId = "auto" | "cpu";
 
@@ -75,7 +75,7 @@ interface DownloadProgress {
   source: string;
 }
 
-const WHISPER_MODEL_IDS = ["auto", "small", "distil-fr-dec16"] as const;
+const WHISPER_MODEL_IDS = ["auto", "small", "distil-fr-dec16", "distil-fr-dec16-q8_0"] as const;
 const LLM_MODEL_IDS = ["auto", "qwen3-0.6b", "qwen3-1.7b", "qwen3.5-4b"] as const;
 
 function isModelInstalled(
