@@ -4,7 +4,7 @@ resolver = "2"
 
 [package]
 name = "calliop"
-version = "0.1.5"
+version = "0.1.6"
 description = "Local voice dictation for any application"
 authors = ["Calliop Contributors"]
 edition = "2021"
