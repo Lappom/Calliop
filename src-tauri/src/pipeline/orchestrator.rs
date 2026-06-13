@@ -1087,38 +1087,44 @@ impl PipelineOrchestrator {
         let failed_segments = self.failed_segments.lock().drain(..).collect::<Vec<_>>();
 
         let mut fallback_stt_ms = 0_u64;
-        {
+        let needs_engine_fallback =
+            !failed_segments.is_empty() || (transcripts.is_empty() && !samples.is_empty());
+        if needs_engine_fallback {
             let mut engine_guard = self.whisper.lock();
-            let Some(engine) = engine_guard.as_mut() else {
-                return Err(PipelineError::ModelNotLoaded);
-            };
+            if let Some(engine) = engine_guard.as_mut() {
+                let prompt = self.dictionary_prompt.read().clone();
+                for FailedSegment { samples, language } in failed_segments {
+                    let retry_start = Instant::now();
+                    match engine.transcribe_with_language(&samples, prompt.as_deref(), language) {
+                        Ok(result) if !result.text.is_empty() => {
+                            fallback_stt_ms += retry_start.elapsed().as_millis() as u64;
+                            transcripts.push((result.text, 0));
+                        }
+                        Ok(_) => {}
+                        Err(err) => eprintln!("failed segment retry transcription failed: {err}"),
+                    }
+                }
 
-            let prompt = self.dictionary_prompt.read().clone();
-            for FailedSegment { samples, language } in failed_segments {
-                let retry_start = Instant::now();
-                match engine.transcribe_with_language(&samples, prompt.as_deref(), language) {
-                    Ok(result) if !result.text.is_empty() => {
-                        fallback_stt_ms += retry_start.elapsed().as_millis() as u64;
+                // Fallback: if VAD produced no segments, transcribe the full buffer.
+                if transcripts.is_empty() && !samples.is_empty() {
+                    let fallback_start = Instant::now();
+                    let fallback_language = *self.session_stt_language.read();
+                    let result = engine.transcribe_with_language(
+                        &samples,
+                        prompt.as_deref(),
+                        fallback_language,
+                    )?;
+                    fallback_stt_ms += fallback_start.elapsed().as_millis() as u64;
+                    if !result.text.is_empty() {
                         transcripts.push((result.text, 0));
                     }
-                    Ok(_) => {}
-                    Err(err) => eprintln!("failed segment retry transcription failed: {err}"),
                 }
-            }
-
-            // Fallback: if VAD produced no segments, transcribe the full buffer.
-            if transcripts.is_empty() && !samples.is_empty() {
-                let fallback_start = Instant::now();
-                let fallback_language = *self.session_stt_language.read();
-                let result = engine.transcribe_with_language(
-                    &samples,
-                    prompt.as_deref(),
-                    fallback_language,
-                )?;
-                fallback_stt_ms += fallback_start.elapsed().as_millis() as u64;
-                if !result.text.is_empty() {
-                    transcripts.push((result.text, 0));
-                }
+            } else if transcripts.is_empty() {
+                return Err(PipelineError::ModelNotLoaded);
+            } else {
+                eprintln!(
+                    "whisper engine unavailable for fallback STT; using streaming transcripts only"
+                );
             }
         }
 
@@ -1915,12 +1921,20 @@ pub fn emit_dictation_busy(app: &AppHandle, state: PipelineState, cancelable: bo
 pub fn spawn_start(app: AppHandle, orchestrator: Arc<Mutex<PipelineOrchestrator>>) {
     std::thread::spawn(move || {
         crate::touch_activity(&app);
+        if !crate::whisper_is_live(app.state::<crate::AppState>().inner()) {
+            crate::request_deferred_dictation_start(&app);
+            return;
+        }
         let result = {
             let mut guard = orchestrator.lock();
             guard.start(&app)
         };
 
         if let Err(err) = result {
+            if matches!(err, PipelineError::ModelNotLoaded) {
+                crate::request_deferred_dictation_start(&app);
+                return;
+            }
             emit_error(&app, &orchestrator, err);
         }
     });
@@ -1946,12 +1960,25 @@ pub fn spawn_stop(app: AppHandle, orchestrator: Arc<Mutex<PipelineOrchestrator>>
 
 pub fn spawn_toggle(app: AppHandle, orchestrator: Arc<Mutex<PipelineOrchestrator>>) {
     std::thread::spawn(move || {
+        let state = app.state::<crate::AppState>();
+        let pipeline_state = state.pipeline.lock().state();
+        if pipeline_state == PipelineState::Idle
+            && !crate::whisper_is_live(state.inner())
+        {
+            crate::request_deferred_dictation_start(&app);
+            return;
+        }
+
         let result = {
             let mut guard = orchestrator.lock();
             guard.toggle(&app)
         };
 
         if let Err(err) = result {
+            if matches!(err, PipelineError::ModelNotLoaded) {
+                crate::request_deferred_dictation_start(&app);
+                return;
+            }
             emit_error(&app, &orchestrator, err);
         }
     });

@@ -67,6 +67,7 @@ pub fn registered_modules() -> [&'static str; 11] {
     ]
 }
 
+#[derive(Default)]
 struct HotkeyPressState {
     press_start: Option<Instant>,
     was_idle_on_press: bool,
@@ -239,8 +240,9 @@ fn spawn_whisper_idle_watchdog(app: AppHandle) {
             if state.last_activity.lock().elapsed() < idle_limit {
                 continue;
             }
-            invalidate_whisper_engine(&state);
-            let _ = app.emit("model-unready", ());
+            if invalidate_whisper_engine(&state, false) {
+                let _ = app.emit("model-unready", ());
+            }
         }
     });
 }
@@ -370,17 +372,54 @@ fn build_models_status(state: &AppState, settings: &AppSettings) -> ModelsStatus
     }
 }
 
-fn invalidate_whisper_engine(state: &AppState) {
+/// True when Whisper is loaded and safe to use for dictation.
+pub(crate) fn whisper_is_live(state: &AppState) -> bool {
+    state.model_ready.load(Ordering::SeqCst) && state.whisper_engine.lock().is_some()
+}
+
+/// Returns true when a previously live Whisper engine was invalidated.
+fn invalidate_whisper_engine(state: &AppState, force: bool) -> bool {
+    if !force && state.pipeline.lock().state() != PipelineState::Idle {
+        return false;
+    }
+    let was_live = whisper_is_live(state);
     state.model_ready.store(false, Ordering::SeqCst);
     *state.whisper_engine.lock() = None;
     *state.loaded_whisper.lock() = None;
     state.models_ready_notifier.reset();
+    was_live
+}
+
+fn emit_model_unready_if_needed(app: &AppHandle, was_live: bool) {
+    if was_live {
+        let _ = app.emit("model-unready", ());
+    }
+}
+
+/// Re-load Whisper then start dictation if the hotkey intent is still valid.
+pub(crate) fn request_deferred_dictation_start(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let spawn_load = {
+        let mut press = state.hotkey_press.lock();
+        if press.deferred_start_pending {
+            false
+        } else {
+            press.deferred_start_pending = true;
+            press.deferred_toggle_intent = true;
+            true
+        }
+    };
+    if !spawn_load {
+        return;
+    }
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        ensure_model_then_start(app).await;
+    });
 }
 
 fn whisper_engine_matches(state: &AppState, expected: WhisperModel) -> bool {
-    state.model_ready.load(Ordering::SeqCst)
-        && state.whisper_engine.lock().is_some()
-        && *state.loaded_whisper.lock() == Some(expected)
+    whisper_is_live(state) && *state.loaded_whisper.lock() == Some(expected)
 }
 
 fn llm_engine_matches(state: &AppState, expected: llm::LlmModel) -> bool {
@@ -453,7 +492,8 @@ async fn rollback_settings(
     state.pipeline.lock().set_auto_edit(previous.auto_edit);
 
     if ctx.whisper_invalidated {
-        invalidate_whisper_engine(state);
+        let was_live = invalidate_whisper_engine(state, true);
+        emit_model_unready_if_needed(app, was_live);
         ensure_model_inner(app, state).await?;
     }
 
@@ -495,6 +535,11 @@ fn suspend_global_hotkey(app: &AppHandle, state: &AppState) -> Result<(), String
     let prev = state.hotkey_suspend_depth.fetch_add(1, Ordering::SeqCst);
     if prev == 0 {
         unregister_current_hotkey(app, state)?;
+        // A release event may be lost while the hotkey is unregistered during model load.
+        let mut press = state.hotkey_press.lock();
+        press.shortcut_down = false;
+        press.press_start = None;
+        press.busy_cancel_on_release = false;
     }
     Ok(())
 }
@@ -796,7 +841,7 @@ fn get_pipeline_state(state: State<'_, AppState>) -> String {
 
 #[tauri::command]
 fn is_model_ready(state: State<'_, AppState>) -> bool {
-    state.model_ready.load(Ordering::SeqCst)
+    whisper_is_live(state.inner())
 }
 
 #[tauri::command]
@@ -911,7 +956,8 @@ async fn reinstall_model(
             }
             let reload_engine = model == effective_whisper;
             if reload_engine {
-                invalidate_whisper_engine(&state);
+                let was_live = invalidate_whisper_engine(&state, true);
+                emit_model_unready_if_needed(&app, was_live);
             }
             let path = model.path();
             if path.exists() {
@@ -1168,7 +1214,16 @@ async fn set_settings(
     }
 
     if whisper_reload_needed {
-        invalidate_whisper_engine(&state);
+        if state.pipeline.lock().state() != PipelineState::Idle {
+            if let Err(rollback_err) =
+                rollback_settings(&app, &state, &previous, rollback_ctx).await
+            {
+                eprintln!("settings rollback failed: {rollback_err}");
+            }
+            return Err(user_error_string(UserError::PipelineBusy));
+        }
+        let was_live = invalidate_whisper_engine(&state, true);
+        emit_model_unready_if_needed(&app, was_live);
         rollback_ctx.whisper_invalidated = true;
         if let Err(err) = ensure_model_inner(&app, &state).await {
             if let Err(rollback_err) =
@@ -2042,10 +2097,6 @@ async fn ensure_model_inner(app: &AppHandle, state: &AppState) -> Result<(), Str
         return Ok(());
     }
 
-    if state.model_ready.load(Ordering::SeqCst) || state.whisper_engine.lock().is_some() {
-        invalidate_whisper_engine(state);
-    }
-
     let _init_guard = state.model_init.lock().await;
 
     if whisper_engine_matches(state, expected) {
@@ -2055,7 +2106,8 @@ async fn ensure_model_inner(app: &AppHandle, state: &AppState) -> Result<(), Str
     }
 
     if state.model_ready.load(Ordering::SeqCst) || state.whisper_engine.lock().is_some() {
-        invalidate_whisper_engine(state);
+        let was_live = invalidate_whisper_engine(state, true);
+        emit_model_unready_if_needed(app, was_live);
     }
 
     suspend_global_hotkey(app, state)?;
@@ -2142,7 +2194,7 @@ fn spawn_deferred_llm_if_needed(app: AppHandle) {
 
 async fn ensure_model_then_start(app: AppHandle) {
     let state = app.state::<AppState>();
-    if !state.model_ready.load(Ordering::SeqCst) {
+    if !whisper_is_live(&state) {
         let _ = app.emit(
             "pipeline-state",
             PipelineStateEvent {
@@ -2194,7 +2246,7 @@ async fn ensure_model_then_toggle(app: AppHandle) {
         notify_dictation_blocked_by_settings(&app, &state);
         return;
     }
-    if !state.model_ready.load(Ordering::SeqCst) {
+    if !whisper_is_live(&state) {
         let _ = app.emit(
             "pipeline-state",
             PipelineStateEvent {
@@ -2249,7 +2301,7 @@ fn handle_hotkey(app: &AppHandle, shortcut_state: ShortcutState) {
                         notify_dictation_blocked_by_settings(app, &state);
                         return;
                     }
-                    if state.model_ready.load(Ordering::SeqCst) {
+                    if whisper_is_live(&state) {
                         press.deferred_start_pending = false;
                         press.deferred_toggle_intent = false;
                         spawn_start(app.clone(), state.pipeline.clone());
@@ -2969,6 +3021,11 @@ pub fn run() {
     pipeline
         .lock()
         .set_vad_chunk_size(initial_perf.vad_chunk_size);
+    pipeline
+        .lock()
+        .set_whisper_engine(Arc::clone(&whisper_engine));
+    pipeline.lock().set_llm_engine(Arc::clone(&llm_engine));
+    pipeline.lock().set_llm_ready(Arc::clone(&llm_ready));
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -3001,14 +3058,7 @@ pub fn run() {
             model_init: Arc::clone(&model_init),
             llm_ready: llm_ready.clone(),
             llm_init: Arc::clone(&llm_init),
-            hotkey_press: Mutex::new(HotkeyPressState {
-                press_start: None,
-                was_idle_on_press: false,
-                shortcut_down: false,
-                deferred_start_pending: false,
-                deferred_toggle_intent: false,
-                busy_cancel_on_release: false,
-            }),
+            hotkey_press: Mutex::new(HotkeyPressState::default()),
             deferred_llm_on_boot: AtomicBool::new(
                 initial_settings.auto_edit && initial_perf.llm_lazy_load,
             ),

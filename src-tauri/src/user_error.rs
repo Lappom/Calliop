@@ -33,6 +33,7 @@ pub enum UserError {
     DictationNotFound,
     MicProbeAlreadyActive,
     DictationActiveMicProbe,
+    PipelineBusy,
 }
 
 impl UserError {
@@ -71,6 +72,7 @@ impl UserError {
             Self::DictationNotFound => "DICTATION_NOT_FOUND",
             Self::MicProbeAlreadyActive => "MIC_PROBE_ALREADY_ACTIVE",
             Self::DictationActiveMicProbe => "DICTATION_ACTIVE_BEFORE_MIC_PROBE",
+            Self::PipelineBusy => "PIPELINE_BUSY",
         }
     }
 }
