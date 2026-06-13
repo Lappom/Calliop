@@ -492,10 +492,7 @@ mod tests {
 
     #[test]
     fn parses_model_ids() {
-        assert_eq!(
-            LlmModel::parse("qwen3-0.6b"),
-            Some(LlmModel::Qwen3_5_0_8B)
-        );
+        assert_eq!(LlmModel::parse("qwen3-0.6b"), Some(LlmModel::Qwen3_5_0_8B));
         assert_eq!(
             LlmModel::parse("qwen3.5-0.8b"),
             Some(LlmModel::Qwen3_5_0_8B)

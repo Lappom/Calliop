@@ -208,7 +208,10 @@ mod tests {
             resolve_whisper_model(WhisperModel::Auto, &c),
             WhisperModel::DistilFrV02
         );
-        assert_eq!(resolve_llm_model(LlmModel::Auto, &c), LlmModel::Qwen3_5_0_8B);
+        assert_eq!(
+            resolve_llm_model(LlmModel::Auto, &c),
+            LlmModel::Qwen3_5_0_8B
+        );
     }
 
     #[test]

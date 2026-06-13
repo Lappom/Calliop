@@ -1,7 +1,7 @@
 //! OS notifications for model readiness and app updates (works when the window is hidden).
 
-use parking_lot::Mutex;
 use crate::store::{self, Store};
+use parking_lot::Mutex;
 use tauri::AppHandle;
 use tauri_plugin_notification::NotificationExt;
 
@@ -33,10 +33,7 @@ fn models_ready_copy(ui_language: &str) -> (&'static str, &'static str) {
 
 fn update_ready_copy(ui_language: &str, version: &str) -> (&'static str, String) {
     if ui_language.eq_ignore_ascii_case("en") {
-        (
-            "Calliop",
-            format!("Update {version} ready to install."),
-        )
+        ("Calliop", format!("Update {version} ready to install."))
     } else {
         (
             "Calliop",
@@ -57,12 +54,7 @@ fn onboarding_done(store: &Store) -> bool {
 }
 
 pub fn show_os_notification(app: &AppHandle, title: &str, body: &str) {
-    let _ = app
-        .notification()
-        .builder()
-        .title(title)
-        .body(body)
-        .show();
+    let _ = app.notification().builder().title(title).body(body).show();
 }
 
 pub struct ModelsReadyNotifier {

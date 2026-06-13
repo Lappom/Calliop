@@ -22,7 +22,6 @@ use std::time::{Duration, Instant};
 
 use calliop_prompt::ToneProfile;
 use dictionary_notify::{DictionaryNotifier, DictionaryUpdatedPayload};
-use system_notify::{ModelsReadyNotifier, notify_update_ready};
 use inject::TextInjector;
 use parking_lot::Mutex;
 use pipeline::{
@@ -39,6 +38,7 @@ use store::{
 };
 use stt::{SttLanguage, WhisperModel, WhisperPromptCache, MAX_INITIAL_PROMPT_WORDS};
 use system::{resolve_perf_config, RuntimePerfConfig, SystemCapabilities};
+use system_notify::{notify_update_ready, ModelsReadyNotifier};
 use tauri::{
     menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -1299,9 +1299,7 @@ async fn ensure_llm_model_inner(app: &AppHandle, state: &AppState) -> Result<(),
     *state.loaded_llm.lock() = Some(llm_model);
     state.llm_ready.store(true, Ordering::SeqCst);
     let _ = app.emit("llm-ready", ());
-    state
-        .models_ready_notifier
-        .on_llm_loaded(app, &state.store);
+    state.models_ready_notifier.on_llm_loaded(app, &state.store);
     Ok(())
 }
 
@@ -2543,7 +2541,7 @@ fn build_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 let _ = set_auto_edit_enabled(app.clone(), !enabled);
             }
             MENU_AUTOSTART => {
-                let enabled = autostart_enabled_from_store(&app);
+                let enabled = autostart_enabled_from_store(app);
                 let _ = set_autostart_enabled(app.clone(), !enabled);
             }
             MENU_QUIT => {
@@ -2616,7 +2614,8 @@ async fn download_and_store_update(
     let bytes = update
         .download(
             move |chunk_len, total| {
-                let current = downloaded_for_progress.fetch_add(chunk_len as u64, Ordering::Relaxed)
+                let current = downloaded_for_progress
+                    .fetch_add(chunk_len as u64, Ordering::Relaxed)
                     + chunk_len as u64;
                 let percent = total
                     .map(|total_bytes| (current as f32 / total_bytes as f32) * 100.0)
@@ -2643,10 +2642,7 @@ async fn download_and_store_update(
         bytes_path,
     });
     let version_for_notify = version.clone();
-    let _ = app.emit(
-        "update-ready",
-        update::UpdateReadyPayload { version },
-    );
+    let _ = app.emit("update-ready", update::UpdateReadyPayload { version });
     let state = app.state::<AppState>();
     notify_update_ready(app, &state.store, &version_for_notify);
     Ok(())
@@ -2673,9 +2669,7 @@ async fn run_update_download(
         eprintln!("auto-update: {err}");
         let _ = app.emit(
             "update-check-failed",
-            update::UpdateCheckFailedPayload {
-                message: err,
-            },
+            update::UpdateCheckFailedPayload { message: err },
         );
     }
     app.state::<AppState>()
@@ -2713,10 +2707,7 @@ fn spawn_update_check_if_enabled(app: AppHandle, store: Arc<Store>) {
         };
 
         let state = app.state::<AppState>();
-        if state
-            .update_check_in_progress
-            .swap(true, Ordering::SeqCst)
-        {
+        if state.update_check_in_progress.swap(true, Ordering::SeqCst) {
             return;
         }
 
@@ -2742,10 +2733,7 @@ async fn check_for_updates(
         return Ok(update::UpdateCheckResult::Ready { version });
     }
 
-    if state
-        .update_check_in_progress
-        .swap(true, Ordering::SeqCst)
-    {
+    if state.update_check_in_progress.swap(true, Ordering::SeqCst) {
         return Err("Une vérification de mise à jour est déjà en cours.".into());
     }
 
@@ -2917,7 +2905,8 @@ pub fn run() {
         eprintln!("failed to remove legacy qwen3 1.7b model: {err}");
     }
 
-    if !store.has_setting(KEY_AUTOSTART).unwrap_or(false) && !store.is_onboarding_done().unwrap_or(false)
+    if !store.has_setting(KEY_AUTOSTART).unwrap_or(false)
+        && !store.is_onboarding_done().unwrap_or(false)
     {
         if let Err(err) = store.set_autostart(true) {
             eprintln!("failed to seed autostart default: {err}");

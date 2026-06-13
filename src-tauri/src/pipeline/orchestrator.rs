@@ -1624,9 +1624,7 @@ fn start_llm_cleanup(
             Some(mut engine) => match engine.cleanup(&raw_for_worker, tone) {
                 Ok(cleaned) => LlmCleanupOutcome::Success { cleaned, engine },
                 Err(crate::llm::LlmError::Prompt(prompt_err)) => {
-                    eprintln!(
-                        "llm cleanup validation failed, using raw transcript: {prompt_err}"
-                    );
+                    eprintln!("llm cleanup validation failed, using raw transcript: {prompt_err}");
                     LlmCleanupOutcome::ValidationFailed { engine }
                 }
                 Err(crate::llm::LlmError::Worker(msg)) => {

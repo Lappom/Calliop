@@ -213,7 +213,11 @@ pub fn compute_streak_info(active_days: &[String]) -> StreakInfo {
     let mut best = 0_i64;
     let mut run = 1_i64;
     for index in 1..parsed.len() {
-        if parsed[index].signed_duration_since(parsed[index - 1]).num_days() == 1 {
+        if parsed[index]
+            .signed_duration_since(parsed[index - 1])
+            .num_days()
+            == 1
+        {
             run += 1;
         } else {
             best = best.max(run);

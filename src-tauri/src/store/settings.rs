@@ -409,12 +409,16 @@ mod tests {
         .unwrap();
 
         let store = Store::from_connection(conn);
-        store.set_bool(KEY_AUTO_EDIT, false).expect("seed legacy off");
+        store
+            .set_bool(KEY_AUTO_EDIT, false)
+            .expect("seed legacy off");
         assert!(store.apply_auto_edit_default().expect("migrate"));
         assert!(store.get_bool(KEY_AUTO_EDIT, false).expect("read"));
         store.set_bool(KEY_AUTO_EDIT, false).expect("user disables");
         assert!(!store.apply_auto_edit_default().expect("re-run"));
-        assert!(!store.get_bool(KEY_AUTO_EDIT, false).expect("respect user choice"));
+        assert!(!store
+            .get_bool(KEY_AUTO_EDIT, false)
+            .expect("respect user choice"));
 
         let _ = std::fs::remove_dir_all(dir);
     }
