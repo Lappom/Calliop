@@ -4,14 +4,14 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 use thiserror::Error;
 
-pub const DEFAULT_MODEL_FILE: &str = "ggml-small.bin";
+pub const DEFAULT_MODEL_FILE: &str = "whisper-distil-fr-v0.2-q5_0.bin";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum WhisperModel {
     #[default]
     Auto,
-    Small,
+    DistilFrV02,
     DistilFrDec16,
     DistilFrDec16Q8_0,
 }
@@ -20,7 +20,8 @@ impl WhisperModel {
     pub fn parse(value: &str) -> Option<Self> {
         match value.trim().to_lowercase().as_str() {
             "auto" => Some(Self::Auto),
-            "small" => Some(Self::Small),
+            // Legacy: small replaced by distil-fr-v0.2.
+            "small" | "distil-fr-v0.2" => Some(Self::DistilFrV02),
             // Legacy: medium replaced by distil-fr-dec16 (option 3 tier lineup).
             "medium" | "distil-fr-dec16" => Some(Self::DistilFrDec16),
             "distil-fr-dec16-q8_0" => Some(Self::DistilFrDec16Q8_0),
@@ -31,7 +32,7 @@ impl WhisperModel {
     pub fn as_setting_value(self) -> &'static str {
         match self {
             Self::Auto => "auto",
-            Self::Small => "small",
+            Self::DistilFrV02 => "distil-fr-v0.2",
             Self::DistilFrDec16 => "distil-fr-dec16",
             Self::DistilFrDec16Q8_0 => "distil-fr-dec16-q8_0",
         }
@@ -44,7 +45,7 @@ impl WhisperModel {
     pub fn file_name(self) -> Option<&'static str> {
         match self {
             Self::Auto => None,
-            Self::Small => Some("ggml-small.bin"),
+            Self::DistilFrV02 => Some("whisper-distil-fr-v0.2-q5_0.bin"),
             Self::DistilFrDec16 => Some("whisper-distil-fr-dec16-q5_0.bin"),
             Self::DistilFrDec16Q8_0 => Some("whisper-distil-fr-dec16-q8_0.bin"),
         }
@@ -53,7 +54,7 @@ impl WhisperModel {
     pub fn label(self) -> &'static str {
         match self {
             Self::Auto => "Automatique (recommandé)",
-            Self::Small => "Rapide — Small (~466 Mo)",
+            Self::DistilFrV02 => "Rapide — Distil FR v0.2 Q5_0 (~538 Mo)",
             Self::DistilFrDec16 => "Équilibré — Distil FR dec16 Q5_0 (~755 Mo)",
             Self::DistilFrDec16Q8_0 => "Précision — Distil FR dec16 Q8_0 (~1,2 Go)",
         }
@@ -62,7 +63,7 @@ impl WhisperModel {
     pub fn min_bytes(self) -> u64 {
         match self {
             Self::Auto => 0,
-            Self::Small => 450_000_000,
+            Self::DistilFrV02 => 500_000_000,
             Self::DistilFrDec16 => 750_000_000,
             Self::DistilFrDec16Q8_0 => 1_150_000_000,
         }
@@ -71,9 +72,9 @@ impl WhisperModel {
     pub fn download_urls(self) -> &'static [&'static str] {
         match self {
             Self::Auto => &[],
-            Self::Small => {
-                &["https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin"]
-            }
+            Self::DistilFrV02 => &[
+                "https://huggingface.co/bofenghuang/whisper-large-v3-distil-fr-v0.2/resolve/main/ggml-model-q5_0.bin",
+            ],
             Self::DistilFrDec16 => &[
                 "https://huggingface.co/bofenghuang/whisper-large-v3-french-distil-dec16/resolve/main/ggml-model-q5_0.bin",
             ],
@@ -95,13 +96,17 @@ impl WhisperModel {
     }
 
     pub fn all_concrete() -> [Self; 3] {
-        [Self::Small, Self::DistilFrDec16, Self::DistilFrDec16Q8_0]
+        [
+            Self::DistilFrV02,
+            Self::DistilFrDec16,
+            Self::DistilFrDec16Q8_0,
+        ]
     }
 
     pub fn all_selectable() -> [Self; 4] {
         [
             Self::Auto,
-            Self::Small,
+            Self::DistilFrV02,
             Self::DistilFrDec16,
             Self::DistilFrDec16Q8_0,
         ]
@@ -109,6 +114,7 @@ impl WhisperModel {
 }
 
 pub const LEGACY_MEDIUM_MODEL_FILE: &str = "ggml-medium.bin";
+pub const LEGACY_SMALL_MODEL_FILE: &str = "ggml-small.bin";
 
 pub fn models_dir() -> PathBuf {
     dirs::data_dir()
@@ -121,9 +127,23 @@ pub fn legacy_medium_model_path() -> PathBuf {
     models_dir().join(LEGACY_MEDIUM_MODEL_FILE)
 }
 
+pub fn legacy_small_model_path() -> PathBuf {
+    models_dir().join(LEGACY_SMALL_MODEL_FILE)
+}
+
 /// Remove orphaned Whisper medium weights after migration to distil-fr-dec16.
 pub fn remove_legacy_medium_model() -> std::io::Result<()> {
     let path = legacy_medium_model_path();
+    if path.exists() {
+        std::fs::remove_file(path)
+    } else {
+        Ok(())
+    }
+}
+
+/// Remove orphaned Whisper small weights after migration to distil-fr-v0.2.
+pub fn remove_legacy_small_model() -> std::io::Result<()> {
+    let path = legacy_small_model_path();
     if path.exists() {
         std::fs::remove_file(path)
     } else {
@@ -345,7 +365,7 @@ mod tests {
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("tiny.bin");
         std::fs::write(&path, vec![0u8; 1024]).unwrap();
-        assert!(!is_valid_model_file(WhisperModel::Small, &path));
+        assert!(!is_valid_model_file(WhisperModel::DistilFrV02, &path));
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -355,8 +375,8 @@ mod tests {
     }
 
     #[test]
-    fn concrete_small_model_filename() {
-        assert!(model_path(WhisperModel::Small).ends_with(DEFAULT_MODEL_FILE));
+    fn concrete_v02_model_filename() {
+        assert!(model_path(WhisperModel::DistilFrV02).ends_with(DEFAULT_MODEL_FILE));
     }
 
     #[test]
@@ -365,8 +385,18 @@ mod tests {
     }
 
     #[test]
+    fn legacy_small_path_uses_expected_filename() {
+        assert!(legacy_small_model_path().ends_with(LEGACY_SMALL_MODEL_FILE));
+    }
+
+    #[test]
     fn remove_legacy_medium_is_ok_when_file_absent() {
         assert!(remove_legacy_medium_model().is_ok());
+    }
+
+    #[test]
+    fn remove_legacy_small_is_ok_when_file_absent() {
+        assert!(remove_legacy_small_model().is_ok());
     }
 
     #[test]
@@ -376,6 +406,14 @@ mod tests {
 
     #[test]
     fn parses_model_ids() {
+        assert_eq!(
+            WhisperModel::parse("small"),
+            Some(WhisperModel::DistilFrV02)
+        );
+        assert_eq!(
+            WhisperModel::parse("distil-fr-v0.2"),
+            Some(WhisperModel::DistilFrV02)
+        );
         assert_eq!(
             WhisperModel::parse("medium"),
             Some(WhisperModel::DistilFrDec16)

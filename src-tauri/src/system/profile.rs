@@ -140,20 +140,20 @@ fn tier_from_caps(caps: &SystemCapabilities) -> PerfTier {
 fn tier_defaults(tier: PerfTier, cpu_cores: u32) -> TierDefaults {
     match tier {
         PerfTier::Eco => TierDefaults {
-            whisper: WhisperModel::Small,
-            llm: LlmModel::Qwen3_0_6B,
+            whisper: WhisperModel::DistilFrV02,
+            llm: LlmModel::Qwen3_5_0_8B,
             vad_chunk_size: 256,
             stt_threads: stt_threads_for_cores(cpu_cores, 4),
         },
         PerfTier::Balanced => TierDefaults {
-            whisper: WhisperModel::Small,
-            llm: LlmModel::Qwen3_1_7B,
+            whisper: WhisperModel::DistilFrV02,
+            llm: LlmModel::Qwen3_5_2B,
             vad_chunk_size: 512,
             stt_threads: stt_threads_for_cores(cpu_cores, 6),
         },
         PerfTier::HighBalanced => TierDefaults {
             whisper: WhisperModel::DistilFrDec16,
-            llm: LlmModel::Qwen3_1_7B,
+            llm: LlmModel::Qwen3_5_2B,
             vad_chunk_size: 512,
             stt_threads: stt_threads_for_cores(cpu_cores, 8),
         },
@@ -206,9 +206,9 @@ mod tests {
         let c = caps(8, 4, false, 4);
         assert_eq!(
             resolve_whisper_model(WhisperModel::Auto, &c),
-            WhisperModel::Small
+            WhisperModel::DistilFrV02
         );
-        assert_eq!(resolve_llm_model(LlmModel::Auto, &c), LlmModel::Qwen3_0_6B);
+        assert_eq!(resolve_llm_model(LlmModel::Auto, &c), LlmModel::Qwen3_5_0_8B);
     }
 
     #[test]
@@ -224,9 +224,13 @@ mod tests {
     #[test]
     fn manual_models_are_not_overridden() {
         let c = caps(32, 16, true, 8);
-        let cfg = resolve_perf_config(&settings("small", "qwen3-0.6b", false, true), &c, false);
-        assert_eq!(cfg.whisper, WhisperModel::Small);
-        assert_eq!(cfg.llm, LlmModel::Qwen3_0_6B);
+        let cfg = resolve_perf_config(
+            &settings("distil-fr-v0.2", "qwen3.5-0.8b", false, true),
+            &c,
+            false,
+        );
+        assert_eq!(cfg.whisper, WhisperModel::DistilFrV02);
+        assert_eq!(cfg.llm, LlmModel::Qwen3_5_0_8B);
     }
 
     #[test]

@@ -61,7 +61,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         manifest.version, manifest.language, manifest.model
     );
 
-    let whisper_model = WhisperModel::parse(&manifest.model).unwrap_or(WhisperModel::Small);
+    let whisper_model = WhisperModel::parse(&manifest.model).unwrap_or(WhisperModel::DistilFrV02);
     println!("Loading Whisper model (download on first run)...");
     let model_path = ensure_model_blocking(None, whisper_model)?;
 

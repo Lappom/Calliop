@@ -12,7 +12,7 @@ pub struct LlamaEngine {
 
 impl LlamaEngine {
     pub fn start() -> Result<Self, LlmError> {
-        let model = LlmModel::Qwen3_1_7B;
+        let model = LlmModel::Qwen3_5_2B;
         let path = model.path();
         Self::start_with_config(
             &path,
@@ -53,7 +53,7 @@ mod tests {
 
     #[test]
     fn start_requires_downloaded_model_or_worker() {
-        let path = super::super::model::LlmModel::Qwen3_1_7B.path();
+        let path = super::super::model::LlmModel::Qwen3_5_2B.path();
         if !path.exists() {
             return;
         }

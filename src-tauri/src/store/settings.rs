@@ -335,7 +335,7 @@ mod tests {
                 auto_update: true,
                 stt_language: "en".into(),
                 whisper_model: "distil-fr-dec16".into(),
-                llm_model: "qwen3-0.6b".into(),
+                llm_model: "qwen3.5-0.8b".into(),
                 hotkey: "Ctrl+Shift+Space".into(),
                 inference_backend: "cpu".into(),
                 low_power_mode: true,
@@ -350,7 +350,7 @@ mod tests {
         assert!(loaded.auto_update);
         assert_eq!(loaded.stt_language, "en");
         assert_eq!(loaded.whisper_model, "distil-fr-dec16");
-        assert_eq!(loaded.llm_model, "qwen3-0.6b");
+        assert_eq!(loaded.llm_model, "qwen3.5-0.8b");
         assert!(loaded.low_power_mode);
         assert!(!loaded.adaptive_perf);
         assert_eq!(loaded.ui_language, "en");

@@ -7,8 +7,12 @@ import { parseUiLanguage } from "../i18n/locale";
 import { translateError } from "../lib/translateError";
 import type { SttLanguageCode } from "./useSttLanguage";
 
-export type WhisperModelId = "auto" | "small" | "distil-fr-dec16" | "distil-fr-dec16-q8_0";
-export type LlmModelId = "auto" | "qwen3-0.6b" | "qwen3-1.7b" | "qwen3.5-4b";
+export type WhisperModelId =
+  | "auto"
+  | "distil-fr-v0.2"
+  | "distil-fr-dec16"
+  | "distil-fr-dec16-q8_0";
+export type LlmModelId = "auto" | "qwen3.5-0.8b" | "qwen3.5-2b" | "qwen3.5-4b";
 export type InferenceBackendId = "auto" | "cpu";
 
 export interface AppSettings {
@@ -75,8 +79,13 @@ interface DownloadProgress {
   source: string;
 }
 
-const WHISPER_MODEL_IDS = ["auto", "small", "distil-fr-dec16", "distil-fr-dec16-q8_0"] as const;
-const LLM_MODEL_IDS = ["auto", "qwen3-0.6b", "qwen3-1.7b", "qwen3.5-4b"] as const;
+const WHISPER_MODEL_IDS = [
+  "auto",
+  "distil-fr-v0.2",
+  "distil-fr-dec16",
+  "distil-fr-dec16-q8_0",
+] as const;
+const LLM_MODEL_IDS = ["auto", "qwen3.5-0.8b", "qwen3.5-2b", "qwen3.5-4b"] as const;
 
 function isModelInstalled(
   modelsStatus: ModelsStatus | null,
@@ -95,6 +104,9 @@ function parseWhisperModel(value: string): WhisperModelId {
   if (value === "medium") {
     return "distil-fr-dec16";
   }
+  if (value === "small") {
+    return "distil-fr-v0.2";
+  }
   return WHISPER_MODEL_IDS.includes(value as WhisperModelId)
     ? (value as WhisperModelId)
     : "auto";
@@ -104,6 +116,12 @@ function parseLlmModel(value: string): LlmModelId {
   const normalized = value.trim().toLowerCase().replace(/_/g, "-");
   if (normalized === "qwen3-4b") {
     return "qwen3.5-4b";
+  }
+  if (normalized === "qwen3-0.6b") {
+    return "qwen3.5-0.8b";
+  }
+  if (normalized === "qwen3-1.7b") {
+    return "qwen3.5-2b";
   }
   return LLM_MODEL_IDS.includes(normalized as LlmModelId)
     ? (normalized as LlmModelId)

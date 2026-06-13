@@ -357,7 +357,7 @@ export function SettingsView() {
               onWhisperChange={(value) => {
                 if (
                   value === "auto" ||
-                  value === "small" ||
+                  value === "distil-fr-v0.2" ||
                   value === "distil-fr-dec16" ||
                   value === "distil-fr-dec16-q8_0"
                 ) {
@@ -367,8 +367,8 @@ export function SettingsView() {
               onLlmChange={(value) => {
                 if (
                   value === "auto" ||
-                  value === "qwen3-0.6b" ||
-                  value === "qwen3-1.7b" ||
+                  value === "qwen3.5-0.8b" ||
+                  value === "qwen3.5-2b" ||
                   value === "qwen3.5-4b"
                 ) {
                   void setLlmModel(value);

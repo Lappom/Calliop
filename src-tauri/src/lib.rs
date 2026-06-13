@@ -2869,6 +2869,13 @@ pub fn run() {
         }
     }
 
+    if initial_settings.whisper_model == "small" {
+        initial_settings.whisper_model = WhisperModel::DistilFrV02.as_setting_value().into();
+        if let Err(err) = store.save_settings(&initial_settings) {
+            eprintln!("failed to migrate whisper_model from small: {err}");
+        }
+    }
+
     if initial_settings.llm_model == "qwen3-4b" {
         initial_settings.llm_model = llm::LlmModel::Qwen3_5_4B.as_setting_value().into();
         if let Err(err) = store.save_settings(&initial_settings) {
@@ -2876,12 +2883,38 @@ pub fn run() {
         }
     }
 
+    if initial_settings.llm_model == "qwen3-0.6b" {
+        initial_settings.llm_model = llm::LlmModel::Qwen3_5_0_8B.as_setting_value().into();
+        if let Err(err) = store.save_settings(&initial_settings) {
+            eprintln!("failed to migrate llm_model from qwen3-0.6b: {err}");
+        }
+    }
+
+    if initial_settings.llm_model == "qwen3-1.7b" {
+        initial_settings.llm_model = llm::LlmModel::Qwen3_5_2B.as_setting_value().into();
+        if let Err(err) = store.save_settings(&initial_settings) {
+            eprintln!("failed to migrate llm_model from qwen3-1.7b: {err}");
+        }
+    }
+
     if let Err(err) = stt::remove_legacy_medium_model() {
         eprintln!("failed to remove legacy whisper medium model: {err}");
     }
 
+    if let Err(err) = stt::remove_legacy_small_model() {
+        eprintln!("failed to remove legacy whisper small model: {err}");
+    }
+
     if let Err(err) = llm::remove_legacy_qwen3_4b_model() {
         eprintln!("failed to remove legacy qwen3 4b model: {err}");
+    }
+
+    if let Err(err) = llm::remove_legacy_qwen3_0_6b_model() {
+        eprintln!("failed to remove legacy qwen3 0.6b model: {err}");
+    }
+
+    if let Err(err) = llm::remove_legacy_qwen3_1_7b_model() {
+        eprintln!("failed to remove legacy qwen3 1.7b model: {err}");
     }
 
     if !store.has_setting(KEY_AUTOSTART).unwrap_or(false) && !store.is_onboarding_done().unwrap_or(false)
@@ -3174,10 +3207,10 @@ mod integration_tests {
     fn loaded_whisper_identity_requires_matching_model() {
         use crate::stt::WhisperModel;
 
-        let loaded = Some(WhisperModel::Small);
+        let loaded = Some(WhisperModel::DistilFrV02);
         let expected = WhisperModel::DistilFrDec16;
         assert_ne!(loaded, Some(expected));
-        assert_eq!(loaded, Some(WhisperModel::Small));
+        assert_eq!(loaded, Some(WhisperModel::DistilFrV02));
     }
 
     #[test]

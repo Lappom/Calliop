@@ -1,7 +1,7 @@
 {
   "version": "1",
   "language": "fr",
-  "model": "small",
+  "model": "distil-fr-v0.2",
   "samples": [
     {
       "id": "fr-01",

@@ -185,14 +185,14 @@
       },
       "whisper": {
         "auto": "Automatique (recommandé)",
-        "small": "Small (~466 Mo)",
+        "distilFrV02": "Distil FR v0.2 Q5_0 (~538 Mo)",
         "distilFr": "Distil FR dec16 Q5_0 (~755 Mo)",
         "distilFrQ8": "Distil FR dec16 Q8_0 (~1,2 Go)"
       },
       "llm": {
         "auto": "Automatique (recommandé)",
-        "qwen06": "Qwen3 0.6B (~484 Mo)",
-        "qwen17": "Qwen3 1.7B (~1,1 Go)",
+        "qwen35_08": "Qwen3.5 0.8B (~533 Mo)",
+        "qwen35_2": "Qwen3.5 2B (~1,2 Go)",
         "qwen35_4": "Qwen3.5 4B (~2,7 Go)"
       },
       "manage": {
