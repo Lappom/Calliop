@@ -1476,7 +1476,11 @@ enum LlmCleanupOutcome {
         cleaned: String,
         engine: LlamaEngine,
     },
-    Failed,
+    ValidationFailed {
+        engine: LlamaEngine,
+    },
+    NotLoaded,
+    WorkerFailed,
 }
 
 struct LlmCleanupJob {
@@ -1530,7 +1534,30 @@ impl LlmCleanupJob {
                     llm_skip_reason: None,
                 }
             }
-            Ok(LlmCleanupOutcome::Failed) => {
+            Ok(LlmCleanupOutcome::ValidationFailed { engine }) => {
+                restore_llm_engine(&self.llm, &self.auto_edit, engine);
+                let _ = self.worker.join();
+                LlmCleanupWait::Completed {
+                    text: self.raw,
+                    llm_ms: self.start.elapsed().as_millis() as u64,
+                    invalidated: false,
+                    llm_status: LlmStatus::Failed,
+                    llm_skip_reason: Some("validation_failed".into()),
+                }
+            }
+            Ok(LlmCleanupOutcome::NotLoaded) => {
+                let _ = self.worker.join();
+                let invalidated =
+                    invalidate_llm_engine_from_cleanup(&self.llm, &self.llm_ready, self.worker_pid);
+                LlmCleanupWait::Completed {
+                    text: self.raw,
+                    llm_ms: self.start.elapsed().as_millis() as u64,
+                    invalidated,
+                    llm_status: LlmStatus::Skipped,
+                    llm_skip_reason: Some("not_loaded".into()),
+                }
+            }
+            Ok(LlmCleanupOutcome::WorkerFailed) => {
                 let _ = self.worker.join();
                 let invalidated =
                     invalidate_llm_engine_from_cleanup(&self.llm, &self.llm_ready, self.worker_pid);
@@ -1539,7 +1566,7 @@ impl LlmCleanupJob {
                     llm_ms: self.start.elapsed().as_millis() as u64,
                     invalidated,
                     llm_status: LlmStatus::Failed,
-                    llm_skip_reason: Some("validation_failed".into()),
+                    llm_skip_reason: Some("worker_error".into()),
                 }
             }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
@@ -1596,14 +1623,20 @@ fn start_llm_cleanup(
         let outcome = match engine {
             Some(mut engine) => match engine.cleanup(&raw_for_worker, tone) {
                 Ok(cleaned) => LlmCleanupOutcome::Success { cleaned, engine },
-                Err(err) => {
-                    eprintln!("llm cleanup failed, using raw transcript: {err}");
-                    LlmCleanupOutcome::Failed
+                Err(crate::llm::LlmError::Prompt(prompt_err)) => {
+                    eprintln!(
+                        "llm cleanup validation failed, using raw transcript: {prompt_err}"
+                    );
+                    LlmCleanupOutcome::ValidationFailed { engine }
+                }
+                Err(crate::llm::LlmError::Worker(msg)) => {
+                    eprintln!("llm cleanup worker error, using raw transcript: {msg}");
+                    LlmCleanupOutcome::WorkerFailed
                 }
             },
             None => {
                 eprintln!("llm cleanup failed: llm engine not loaded");
-                LlmCleanupOutcome::Failed
+                LlmCleanupOutcome::NotLoaded
             }
         };
         let _ = tx.send(outcome);

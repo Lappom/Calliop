@@ -89,7 +89,6 @@ impl ModelsReadyNotifier {
     pub fn reset_for_llm_reload(&self) {
         let mut state = self.state.lock();
         state.llm_loaded = false;
-        state.notified = false;
     }
 
     pub fn on_whisper_loaded(
@@ -195,6 +194,17 @@ mod tests {
             llm_loaded: true,
             llm_blocks_notify: true,
             ..Default::default()
+        };
+        assert!(!should_notify_models_ready(&state));
+    }
+
+    #[test]
+    fn reload_after_initial_notify_does_not_renotify() {
+        let state = ModelsReadyState {
+            whisper_loaded: true,
+            llm_loaded: false,
+            llm_blocks_notify: true,
+            notified: true,
         };
         assert!(!should_notify_models_ready(&state));
     }

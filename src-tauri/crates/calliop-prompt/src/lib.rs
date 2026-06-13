@@ -196,14 +196,19 @@ fn looks_like_list_line(line: &str) -> bool {
 
 pub fn validate_cleanup_output(raw: &str, cleaned: &str) -> Result<String, PromptError> {
     let mut cleaned = strip_thinking_blocks(cleaned.trim());
-    if cleaned.is_empty() {
-        return Err(PromptError::EmptyOutput);
-    }
 
     cleaned = strip_wrapping_quotes(&cleaned);
     cleaned = interpret_oral_punctuation(&cleaned);
     cleaned = polish_llm_output(&cleaned);
     cleaned = prefer_list_structure_over_comma_flattening(raw, &cleaned);
+
+    if cleaned.trim().is_empty() {
+        let fallback = post_process_transcript(raw);
+        if fallback.trim().is_empty() {
+            return Err(PromptError::EmptyOutput);
+        }
+        cleaned = fallback;
+    }
 
     let max_len = raw.len().saturating_mul(3).max(512);
     if cleaned.len() > max_len {
@@ -2078,7 +2083,23 @@ mod tests {
 
     #[test]
     fn rejects_empty_output() {
-        assert!(validate_cleanup_output("test", "   ").is_err());
+        assert!(validate_cleanup_output("", "   ").is_err());
+        assert!(validate_cleanup_output("   ", "   ").is_err());
+    }
+
+    #[test]
+    fn falls_back_when_model_returns_only_thinking_block() {
+        let raw = "euh bonjour";
+        let model_output = format!("{THINK_OPEN}planning only{THINK_CLOSE}");
+        let out = validate_cleanup_output(raw, &model_output).unwrap();
+        assert_eq!(out, post_process_transcript(raw));
+    }
+
+    #[test]
+    fn falls_back_when_model_returns_empty_quotes() {
+        let raw = "euh bonjour";
+        let out = validate_cleanup_output(raw, "\"\"").unwrap();
+        assert_eq!(out, post_process_transcript(raw));
     }
 
     #[test]
