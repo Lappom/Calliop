@@ -1962,9 +1962,7 @@ pub fn spawn_toggle(app: AppHandle, orchestrator: Arc<Mutex<PipelineOrchestrator
     std::thread::spawn(move || {
         let state = app.state::<crate::AppState>();
         let pipeline_state = state.pipeline.lock().state();
-        if pipeline_state == PipelineState::Idle
-            && !crate::whisper_is_live(state.inner())
-        {
+        if pipeline_state == PipelineState::Idle && !crate::whisper_is_live(state.inner()) {
             crate::request_deferred_dictation_start(&app);
             return;
         }
