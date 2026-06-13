@@ -1,8 +1,4 @@
-<p align="center">
-  <video src="docs/export-1781355100956.mp4" width="720" autoplay muted loop playsinline controls>
-    <a href="https://github.com/user-attachments/assets/b5f749a4-e760-472f-b525-285bb437cda7">Watch the demo</a>
-  </video>
-</p>
+https://github.com/user-attachments/assets/b5f749a4-e760-472f-b525-285bb437cda7
 
 <p align="center">
   <img src="public/app-icon.png" alt="Calliop" width="96" height="96" />
