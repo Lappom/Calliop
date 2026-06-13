@@ -7,11 +7,18 @@ import {
 } from "../../lib/motion/presets";
 import { useReducedMotion } from "../../lib/motion/useReducedMotion";
 import type { AppView } from "../../lib/views";
-import { getBottomNavItems, getNavSections, type NavItem } from "./navItems";
+import {
+  getBottomNavItems,
+  getNavSections,
+  type BottomNavItem,
+  type NavItem,
+} from "./navItems";
 
 interface SidebarProps {
   currentView: AppView;
   onNavigate: (view: AppView) => void;
+  settingsOpen: boolean;
+  onOpenSettings: () => void;
   open: boolean;
   onClose: () => void;
 }
@@ -115,7 +122,61 @@ function NavButton({
   );
 }
 
-export function Sidebar({ currentView, onNavigate, open, onClose }: SidebarProps) {
+function SettingsNavButton({
+  item,
+  active,
+  onOpenSettings,
+  onClose,
+}: {
+  item: BottomNavItem;
+  active: boolean;
+  onOpenSettings: () => void;
+  onClose: () => void;
+}) {
+  const Icon = item.icon;
+
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        onOpenSettings();
+        onClose();
+      }}
+      className={[
+        "group relative flex w-full items-center gap-3 rounded-md px-3 py-2",
+        "font-[family-name:var(--font-body)] text-sm font-medium tracking-wide",
+        "border border-transparent transition-colors duration-150",
+        active ? "text-ink" : "text-body hover:text-ink",
+      ].join(" ")}
+      aria-expanded={active}
+    >
+      {active && (
+        <>
+          <span className={activeBgClassName} aria-hidden />
+          <span className={activeAccentClassName} aria-hidden />
+        </>
+      )}
+      <Icon
+        {...iconProps}
+        className={[
+          "relative z-[1] shrink-0 transition-colors duration-150",
+          active ? "text-accent-blue" : "text-charcoal group-hover:text-ink",
+        ].join(" ")}
+        aria-hidden
+      />
+      <span className="relative z-[1]">{item.label}</span>
+    </button>
+  );
+}
+
+export function Sidebar({
+  currentView,
+  onNavigate,
+  settingsOpen,
+  onOpenSettings,
+  open,
+  onClose,
+}: SidebarProps) {
   const { t } = useTranslation();
   const reducedMotion = useReducedMotion();
   const layoutTransition = reducedMotion
@@ -206,12 +267,12 @@ export function Sidebar({ currentView, onNavigate, open, onClose }: SidebarProps
 
           <div className="relative shrink-0 flex flex-col gap-1 border-t border-hairline px-3 py-4">
             {bottomNavItems.map((item) => (
-              <NavButton
+              <SettingsNavButton
                 key={item.id}
                 item={item}
-                active={currentView === item.id}
-                animateIndicator={false}
-                {...navButtonProps}
+                active={settingsOpen}
+                onOpenSettings={onOpenSettings}
+                onClose={onClose}
               />
             ))}
           </div>

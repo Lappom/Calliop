@@ -116,6 +116,15 @@ body {
   line-height: 1.5;
 }
 
+.text-button-sm {
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.43;
+  letter-spacing: 0.35px;
+  font-feature-settings: "ss01", "ss03", "ss04";
+}
+
 .text-code-md {
   font-family: var(--font-mono);
   font-size: 13px;

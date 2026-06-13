@@ -99,6 +99,13 @@
     "subtitle": "Les réglages sont enregistrés localement sur cet appareil.",
     "appVersion": "v{{version}}",
     "appVersionAria": "Version de l'application {{version}}",
+    "modal": {
+      "aria": {
+        "close": "Fermer les paramètres",
+        "navigation": "Sections des paramètres",
+        "panel": "Contenu de la section des paramètres"
+      }
+    },
     "sections": {
       "general": {
         "label": "Général",

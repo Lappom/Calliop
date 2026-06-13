@@ -1,4 +1,6 @@
 import type { TFunction } from "i18next";
+import type { LucideIcon } from "lucide-react";
+import { Box, Download, Keyboard, Settings2, Wrench } from "lucide-react";
 
 export type SettingsSectionId =
   | "general"
@@ -11,32 +13,38 @@ export function getSettingsSections(t: TFunction): {
   id: SettingsSectionId;
   label: string;
   description: string;
+  icon: LucideIcon;
 }[] {
   return [
     {
       id: "general",
       label: t("settings.sections.general.label"),
       description: t("settings.sections.general.description"),
+      icon: Settings2,
     },
     {
       id: "models",
       label: t("settings.sections.models.label"),
       description: t("settings.sections.models.description"),
+      icon: Box,
     },
     {
       id: "shortcuts",
       label: t("settings.sections.shortcuts.label"),
       description: t("settings.sections.shortcuts.description"),
+      icon: Keyboard,
     },
     {
       id: "updates",
       label: t("settings.sections.updates.label"),
       description: t("settings.sections.updates.description"),
+      icon: Download,
     },
     {
       id: "advanced",
       label: t("settings.sections.advanced.label"),
       description: t("settings.sections.advanced.description"),
+      icon: Wrench,
     },
   ];
 }

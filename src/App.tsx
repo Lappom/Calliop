@@ -14,18 +14,27 @@ import { HistoryView } from "./components/history/HistoryView";
 import { InsightView } from "./components/insight/InsightView";
 import { MainView } from "./components/main/MainView";
 import { OnboardingView } from "./components/onboarding/OnboardingView";
-import { SettingsView } from "./components/settings/SettingsView";
+import { SettingsModal } from "./components/settings/SettingsModal";
+import type { SettingsSectionId } from "./components/settings/settingsUtils";
 import { SnippetsView } from "./components/snippets/SnippetsView";
 import { usePipelineState } from "./hooks/usePipelineState";
 import type { AppView } from "./lib/views";
-import { isAppView } from "./lib/views";
+import { isAppView, isSettingsNavigation } from "./lib/views";
 
 function App() {
   const { t } = useTranslation();
   const [currentView, setCurrentView] = useState<AppView>("main");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsSection, setSettingsSection] =
+    useState<SettingsSectionId>("general");
   const [onboardingChecked, setOnboardingChecked] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const pipeline = usePipelineState();
+
+  const openSettings = () => {
+    setSettingsSection("general");
+    setSettingsOpen(true);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -49,6 +58,11 @@ function App() {
   useEffect(() => {
     const unlisten = listen<{ view: string }>("navigate-view", (event) => {
       const view = event.payload.view;
+      if (isSettingsNavigation(view)) {
+        setSettingsSection("general");
+        setSettingsOpen(true);
+        return;
+      }
       if (isAppView(view)) {
         setCurrentView(view);
       }
@@ -94,7 +108,12 @@ function App() {
   return (
     <>
       <AppFrame>
-        <AppShell currentView={currentView} onNavigate={setCurrentView}>
+        <AppShell
+          currentView={currentView}
+          onNavigate={setCurrentView}
+          settingsOpen={settingsOpen}
+          onOpenSettings={openSettings}
+        >
           <PageTransition viewKey={currentView}>
             {currentView === "main" && <MainView {...pipeline} />}
             {currentView === "dictionary" && <DictionaryView />}
@@ -104,10 +123,15 @@ function App() {
             {currentView === "insight" && (
               <InsightView latencyMetrics={pipeline.latencyMetrics} />
             )}
-            {currentView === "settings" && <SettingsView />}
           </PageTransition>
         </AppShell>
       </AppFrame>
+      <SettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        activeSection={settingsSection}
+        onSectionChange={setSettingsSection}
+      />
       <ModelDownloadToasts />
       <LlmSkipToast />
       <UpdateToast />

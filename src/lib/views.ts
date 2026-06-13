@@ -6,8 +6,7 @@ export type AppView =
   | "snippets"
   | "style"
   | "history"
-  | "insight"
-  | "settings";
+  | "insight";
 
 export function isAppView(value: string): value is AppView {
   return (
@@ -16,9 +15,12 @@ export function isAppView(value: string): value is AppView {
     value === "snippets" ||
     value === "style" ||
     value === "history" ||
-    value === "insight" ||
-    value === "settings"
+    value === "insight"
   );
+}
+
+export function isSettingsNavigation(value: string): boolean {
+  return value === "settings";
 }
 
 const PRIMARY_VIEW_IDS: AppView[] = [
@@ -30,17 +32,8 @@ const PRIMARY_VIEW_IDS: AppView[] = [
   "style",
 ];
 
-const BOTTOM_VIEW_IDS: AppView[] = ["settings"];
-
 export function getPrimaryViews(t: TFunction): { id: AppView; label: string }[] {
   return PRIMARY_VIEW_IDS.map((id) => ({
-    id,
-    label: t(`nav.items.${id}`),
-  }));
-}
-
-export function getBottomViews(t: TFunction): { id: AppView; label: string }[] {
-  return BOTTOM_VIEW_IDS.map((id) => ({
     id,
     label: t(`nav.items.${id}`),
   }));

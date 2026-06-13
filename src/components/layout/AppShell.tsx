@@ -7,10 +7,18 @@ import { Sidebar } from "./Sidebar";
 interface AppShellProps {
   currentView: AppView;
   onNavigate: (view: AppView) => void;
+  settingsOpen: boolean;
+  onOpenSettings: () => void;
   children: ReactNode;
 }
 
-export function AppShell({ currentView, onNavigate, children }: AppShellProps) {
+export function AppShell({
+  currentView,
+  onNavigate,
+  settingsOpen,
+  onOpenSettings,
+  children,
+}: AppShellProps) {
   const { t } = useTranslation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -36,6 +44,8 @@ export function AppShell({ currentView, onNavigate, children }: AppShellProps) {
       <Sidebar
         currentView={currentView}
         onNavigate={onNavigate}
+        settingsOpen={settingsOpen}
+        onOpenSettings={onOpenSettings}
         open={sidebarOpen}
         onClose={closeSidebar}
       />

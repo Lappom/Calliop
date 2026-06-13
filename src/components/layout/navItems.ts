@@ -17,6 +17,12 @@ export interface NavItem {
   icon: LucideIcon;
 }
 
+export interface BottomNavItem {
+  id: "settings";
+  label: string;
+  icon: LucideIcon;
+}
+
 export interface NavSection {
   label?: string;
   items: NavItem[];
@@ -45,6 +51,6 @@ export function getNavSections(t: TFunction): NavSection[] {
   ];
 }
 
-export function getBottomNavItems(t: TFunction): NavItem[] {
+export function getBottomNavItems(t: TFunction): BottomNavItem[] {
   return [{ id: "settings", label: t("nav.items.settings"), icon: Settings }];
 }

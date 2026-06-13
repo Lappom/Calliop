@@ -99,6 +99,13 @@
     "subtitle": "Settings are saved locally on this device.",
     "appVersion": "v{{version}}",
     "appVersionAria": "Application version {{version}}",
+    "modal": {
+      "aria": {
+        "close": "Close settings",
+        "navigation": "Settings sections",
+        "panel": "Settings section content"
+      }
+    },
     "sections": {
       "general": {
         "label": "General",

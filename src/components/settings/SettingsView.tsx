@@ -1,13 +1,15 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { UiLanguageCode } from "../../i18n/locale";
 import { useAppVersion } from "../../hooks/useAppVersion";
 import { useSettings } from "../../hooks/useSettings";
+import { MOTION_DURATION, MOTION_EASE } from "../../lib/motion/presets";
+import { useReducedMotion } from "../../lib/motion/useReducedMotion";
 import { translateError } from "../../lib/translateError";
 import { ErrorToast } from "../layout/ErrorToast";
-import { Stagger } from "../motion/Stagger";
 import { Button } from "../ui/Button";
 import { Kbd } from "../ui/Kbd";
 import { Select } from "../ui/Select";
@@ -28,9 +30,19 @@ import {
   type SettingsSectionId,
 } from "./settingsUtils";
 
-export function SettingsView() {
+interface SettingsViewProps {
+  activeSection: SettingsSectionId;
+}
+
+const panelTransition = {
+  duration: MOTION_DURATION.fast,
+  ease: MOTION_EASE.enter,
+} as const;
+
+export function SettingsView({ activeSection }: SettingsViewProps) {
   const { t } = useTranslation();
   const appVersion = useAppVersion();
+  const reducedMotion = useReducedMotion();
   const [recordingHotkey, setRecordingHotkey] = useState(false);
   const [pendingHotkey, setPendingHotkey] = useState<string | null>(null);
   const [hotkeyCaptureError, setHotkeyCaptureError] = useState<string | null>(
@@ -216,7 +228,6 @@ export function SettingsView() {
           });
         }
 
-        // WebView2 fallback — required for simple combos when the native hook misses events.
         window.addEventListener("keydown", handleHotkeyCapture, true);
         window.addEventListener("keyup", handleHotkeyCaptureKeyUp, true);
         listening = true;
@@ -251,20 +262,14 @@ export function SettingsView() {
   const displayHotkey = pendingHotkey ?? settings.hotkey;
   const toastError = errorMessage ? translateError(errorMessage, t) : null;
 
-  return (
-    <>
-      <ErrorToast message={toastError} onDismiss={clearError} />
-      <Stagger className="flex w-full flex-col gap-12 pb-8" itemMotion="fade">
-      <header>
-        <h1 className="text-heading-md mb-2 text-ink">{t("settings.title")}</h1>
-        <p className="text-body-sm text-charcoal">{t("settings.subtitle")}</p>
-      </header>
-
+  const renderSection = () => {
+    switch (activeSection) {
+      case "general":
+        return (
           <SettingsSection
             id="general"
             title={sectionMeta.general.label}
             description={sectionMeta.general.description}
-            glow="blue"
           >
             <Select
               id="ui-language"
@@ -333,12 +338,14 @@ export function SettingsView() {
               }}
             />
           </SettingsSection>
+        );
 
+      case "models":
+        return (
           <SettingsSection
             id="models"
             title={sectionMeta.models.label}
             description={sectionMeta.models.description}
-            glow="green"
           >
             <ModelsSettingsPanel
               whisperModel={settings.whisperModel}
@@ -376,12 +383,14 @@ export function SettingsView() {
               }}
             />
           </SettingsSection>
+        );
 
+      case "shortcuts":
+        return (
           <SettingsSection
             id="shortcuts"
             title={sectionMeta.shortcuts.label}
             description={sectionMeta.shortcuts.description}
-            glow="orange"
           >
             <div className="flex flex-col gap-3">
               <TextInput
@@ -435,12 +444,14 @@ export function SettingsView() {
               </div>
             )}
           </SettingsSection>
+        );
 
+      case "updates":
+        return (
           <SettingsSection
             id="updates"
             title={sectionMeta.updates.label}
             description={sectionMeta.updates.description}
-            glow="blue"
           >
             <UpdatesSettingsPanel
               appVersion={appVersion}
@@ -451,12 +462,14 @@ export function SettingsView() {
               }}
             />
           </SettingsSection>
+        );
 
+      case "advanced":
+        return (
           <SettingsSection
             id="advanced"
             title={sectionMeta.advanced.label}
             description={sectionMeta.advanced.description}
-            glow="blue"
           >
             <SettingsToggleRow
               label={t("settings.autostart.label")}
@@ -527,34 +540,55 @@ export function SettingsView() {
               </p>
             )}
           </SettingsSection>
+        );
+    }
+  };
 
-          <footer className="flex flex-wrap items-center gap-4 border-t border-divider-soft pt-6">
-            <Button
-              variant="ghost"
-              disabled={!loaded || saving}
-              onClick={() => {
-                void resetSettings();
-              }}
+  return (
+    <>
+      <ErrorToast message={toastError} onDismiss={clearError} />
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="calliop-scroll min-h-0 flex-1 overflow-y-auto px-6 py-8 sm:px-8">
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.div
+              key={activeSection}
+              initial={reducedMotion ? false : { opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={reducedMotion ? undefined : { opacity: 0 }}
+              transition={panelTransition}
             >
-              {t("common.reset")}
-            </Button>
-            <div className="flex flex-1 justify-center">
-              {appVersion && (
-                <p
-                  className="text-caption text-ash tabular-nums"
-                  aria-label={t("settings.appVersionAria", {
-                    version: appVersion,
-                  })}
-                >
-                  {t("settings.appVersion", { version: appVersion })}
-                </p>
-              )}
-            </div>
-            <Button variant="primary" disabled>
-              {saving ? t("common.saving") : t("common.autoSave")}
-            </Button>
-          </footer>
-      </Stagger>
+              {renderSection()}
+            </motion.div>
+          </AnimatePresence>
+        </div>
+
+        <footer className="flex shrink-0 flex-wrap items-center gap-4 border-t border-hairline px-6 py-4 sm:px-8">
+          <Button
+            variant="ghost"
+            disabled={!loaded || saving}
+            onClick={() => {
+              void resetSettings();
+            }}
+          >
+            {t("common.reset")}
+          </Button>
+          <div className="flex flex-1 justify-center">
+            {appVersion && (
+              <p
+                className="text-caption text-ash tabular-nums"
+                aria-label={t("settings.appVersionAria", {
+                  version: appVersion,
+                })}
+              >
+                {t("settings.appVersion", { version: appVersion })}
+              </p>
+            )}
+          </div>
+          <Button variant="primary" disabled>
+            {saving ? t("common.saving") : t("common.autoSave")}
+          </Button>
+        </footer>
+      </div>
     </>
   );
 }
