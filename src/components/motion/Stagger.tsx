@@ -23,6 +23,7 @@ interface StaggerProps {
   /** fade = opacity only (nested in PageTransition); fadeUp = opacity + y */
   itemMotion?: StaggerItemMotion;
   staggerDelay?: number;
+  itemClassName?: string;
 }
 
 const itemVariantsByMotion: Record<StaggerItemMotion, typeof fadeUpVariants> = {
@@ -57,6 +58,7 @@ export function Stagger({
   className = "",
   itemMotion = "fadeUp",
   staggerDelay = MOTION_STAGGER.children,
+  itemClassName = "",
 }: StaggerProps) {
   const reducedMotion = useReducedMotion();
   const containerVariants = reducedMotion
@@ -81,6 +83,7 @@ export function Stagger({
         <motion.div
           key={isValidElement(child) && child.key != null ? child.key : index}
           variants={itemVariants}
+          className={itemClassName}
         >
           {child}
         </motion.div>

@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -13,6 +13,7 @@ import {
 } from "recharts";
 import type { DailyActivityEntry } from "../../../hooks/useInsights";
 import { useUiLocale } from "../../../i18n/useUiLocale";
+import { useReducedMotion } from "../../../lib/motion/useReducedMotion";
 import { ChartFrame } from "./ChartFrame";
 import { CHART_COLORS, formatShortDate } from "./chartTheme";
 import {
@@ -33,8 +34,20 @@ interface ActivityChartRow {
   dictationCount: number;
 }
 
+const CHART_ANIMATION_MS = 400;
+
 export function ActivityChart({ data }: ActivityChartProps) {
   const { t, intlLocale, formatNumber } = useUiLocale();
+  const reducedMotion = useReducedMotion();
+  const [animate, setAnimate] = useState(!reducedMotion);
+
+  useEffect(() => {
+    if (reducedMotion) {
+      setAnimate(false);
+      return;
+    }
+    setAnimate(true);
+  }, [data, reducedMotion]);
 
   const chartData = useMemo(
     (): ActivityChartRow[] =>
@@ -117,6 +130,9 @@ export function ActivityChart({ data }: ActivityChartProps) {
             maxBarSize={26}
             radius={[3, 3, 0, 0]}
             minPointSize={3}
+            isAnimationActive={animate}
+            animationDuration={CHART_ANIMATION_MS}
+            animationEasing="ease-out"
           >
             {chartData.map((entry) => (
               <Cell

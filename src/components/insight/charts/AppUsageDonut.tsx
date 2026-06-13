@@ -1,5 +1,8 @@
+import { useEffect, useState } from "react";
 import type { AppUsageEntry } from "../../../hooks/useInsights";
 import { useUiLocale } from "../../../i18n/useUiLocale";
+import { useReducedMotion } from "../../../lib/motion/useReducedMotion";
+import { AnimatedMetricValue } from "../AnimatedMetricValue";
 import { APP_SEGMENT_COLORS } from "./chartTheme";
 
 interface AppUsageDonutProps {
@@ -14,8 +17,20 @@ const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 
 export function AppUsageDonut({ data }: AppUsageDonutProps) {
   const { t, formatNumber } = useUiLocale();
+  const reducedMotion = useReducedMotion();
+  const [mounted, setMounted] = useState(reducedMotion);
   const totalWords = data.reduce((sum, entry) => sum + entry.wordCount, 0);
   let offset = 0;
+
+  useEffect(() => {
+    if (reducedMotion) {
+      setMounted(true);
+      return;
+    }
+    setMounted(false);
+    const frame = requestAnimationFrame(() => setMounted(true));
+    return () => cancelAnimationFrame(frame);
+  }, [data, reducedMotion]);
 
   const segments =
     totalWords > 0
@@ -61,16 +76,24 @@ export function AppUsageDonut({ data }: AppUsageDonutProps) {
               fill="none"
               stroke={segment.color}
               strokeWidth={STROKE}
-              strokeDasharray={segment.dashArray}
+              strokeDasharray={
+                mounted
+                  ? segment.dashArray
+                  : `0 ${CIRCUMFERENCE}`
+              }
               strokeDashoffset={segment.dashOffset}
               strokeLinecap="butt"
+              className="insight-gauge-arc"
               opacity={0.9}
             />
           ))}
         </svg>
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
-          <span className="text-heading-sm text-ink">
-            {formatNumber(totalWords)}
+          <span className="text-heading-sm font-[family-name:var(--font-mono)] tabular-nums text-ink">
+            <AnimatedMetricValue
+              value={totalWords}
+              format={(n) => formatNumber(Math.round(n))}
+            />
           </span>
           <span className="text-caption text-ash">
             {t("insight.charts.appUsage.centerWords")}
@@ -85,6 +108,10 @@ export function AppUsageDonut({ data }: AppUsageDonutProps) {
               ? Math.round((entry.wordCount / totalWords) * 100)
               : 0;
           const color = APP_SEGMENT_COLORS[index % APP_SEGMENT_COLORS.length];
+          const scale = mounted
+            ? Math.max(percent, entry.wordCount > 0 ? 4 : 0) / 100
+            : 0;
+
           return (
             <li key={entry.exeName} className="space-y-1.5">
               <div className="flex items-baseline justify-between gap-3">
@@ -103,9 +130,9 @@ export function AppUsageDonut({ data }: AppUsageDonutProps) {
               </div>
               <div className="h-1.5 overflow-hidden rounded-full border border-hairline bg-surface-deep">
                 <div
-                  className="h-full rounded-full"
+                  className="insight-bar-fill h-full rounded-full"
                   style={{
-                    width: `${Math.max(percent, entry.wordCount > 0 ? 4 : 0)}%`,
+                    transform: `scaleX(${scale})`,
                     backgroundColor: color,
                     opacity: 0.75,
                   }}

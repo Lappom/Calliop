@@ -11,6 +11,8 @@ interface InsightChartPanelProps {
   glow?: GlowColor;
   className?: string;
   footer?: ReactNode;
+  /** Bumps chart mount key to re-run enter animations on refresh. */
+  animateKey?: number | string;
 }
 
 export function InsightChartPanel({
@@ -22,12 +24,13 @@ export function InsightChartPanel({
   glow = "blue",
   className = "",
   footer,
+  animateKey,
 }: InsightChartPanelProps) {
   return (
     <div
       className={[
         glowSurfaceClasses(glow),
-        "flex h-full min-h-[280px] flex-col gap-4 rounded-lg border border-hairline-strong bg-surface-card p-4 sm:min-h-[360px] sm:p-6",
+        "insight-metric-hover flex h-full min-h-[280px] flex-col gap-4 rounded-lg border border-hairline-strong bg-surface-card p-4 sm:min-h-[360px] sm:p-6",
         className,
       ].join(" ")}
     >
@@ -38,7 +41,12 @@ export function InsightChartPanel({
       {empty ? (
         <p className="text-body-sm relative flex-1 text-charcoal">{emptyMessage}</p>
       ) : (
-        <div className="relative flex flex-1 flex-col justify-end">{children}</div>
+        <div
+          key={animateKey}
+          className="relative flex flex-1 flex-col justify-end"
+        >
+          {children}
+        </div>
       )}
       {footer && !empty && (
         <div className="relative shrink-0 border-t border-divider-soft pt-3">

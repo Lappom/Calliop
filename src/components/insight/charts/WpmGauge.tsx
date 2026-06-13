@@ -1,4 +1,7 @@
+import { useEffect, useState } from "react";
 import { useUiLocale } from "../../../i18n/useUiLocale";
+import { useReducedMotion } from "../../../lib/motion/useReducedMotion";
+import { AnimatedMetricValue } from "../AnimatedMetricValue";
 import { CHART_COLORS } from "./chartTheme";
 
 interface WpmGaugeProps {
@@ -22,11 +25,27 @@ export function WpmGauge({
   baselineWpm = 40,
 }: WpmGaugeProps) {
   const { t } = useUiLocale();
+  const reducedMotion = useReducedMotion();
   const clamped = Math.min(Math.max(percent, 0), 200);
-  const progress = (clamped / 200) * ARC_LENGTH;
+  const targetProgress = (clamped / 200) * ARC_LENGTH;
+  const [drawnProgress, setDrawnProgress] = useState(
+    reducedMotion ? targetProgress : 0,
+  );
   const arcStartX = CX - RADIUS;
   const arcEndX = CX + RADIUS;
   const roundedWpm = Math.round(averageWpm);
+
+  useEffect(() => {
+    if (reducedMotion) {
+      setDrawnProgress(targetProgress);
+      return;
+    }
+    setDrawnProgress(0);
+    const frame = requestAnimationFrame(() => {
+      setDrawnProgress(targetProgress);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [targetProgress, reducedMotion, percent, averageWpm]);
 
   return (
     <figure
@@ -56,14 +75,21 @@ export function WpmGauge({
           stroke={CHART_COLORS.green}
           strokeWidth={STROKE}
           strokeLinecap="round"
-          strokeDasharray={`${progress} ${ARC_LENGTH}`}
+          strokeDasharray={`${drawnProgress} ${ARC_LENGTH}`}
+          className="insight-gauge-arc"
           opacity={0.9}
         />
       </svg>
 
       <div className="flex flex-col items-center gap-1 text-center">
         <p className="text-heading-md m-0 leading-none text-ink">
-          {percent > 0 ? `${percent}%` : t("common.emDash")}
+          {percent > 0 ? (
+            <>
+              <AnimatedMetricValue value={percent} format={(n) => `${Math.round(n)}%`} />
+            </>
+          ) : (
+            t("common.emDash")
+          )}
         </p>
         <p className="text-caption m-0 text-charcoal">
           {t("insight.wpm.vsBaseline", { baseline: baselineWpm })}

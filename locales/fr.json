@@ -538,6 +538,13 @@
     "title": "Statistiques",
     "subtitle": "Activité, performances du pipeline et répartition par application — calculées localement depuis votre historique.",
     "refresh": "Actualiser les statistiques",
+    "tabs": {
+      "aria": "Sections des statistiques",
+      "overview": "Aperçu",
+      "activity": "Activité",
+      "performance": "Performance",
+      "global": "Global"
+    },
     "empty": {
       "title": "Pas encore de statistiques",
       "description": "Effectuez vos premières dictées pour voir l'activité, la latence du pipeline, la répartition par application et votre vitesse de parole."
@@ -545,7 +552,9 @@
     "sections": {
       "today": "Aujourd'hui",
       "global": "Global",
-      "weekSummary": "Synthèse — 7 derniers jours"
+      "weekSummary": "Synthèse — 7 derniers jours",
+      "activity": "Activité",
+      "performance": "Performance"
     },
     "metrics": {
       "lastLatency": {
@@ -611,7 +620,31 @@
         "empty": "Aucune donnée de contexte pour le moment.",
         "aria": "Répartition des mots dictés par application",
         "centerWords": "mots"
+      },
+      "heatmap": {
+        "title": "Activité par heure et application",
+        "description": "Volume de mots sur 7 jours — les cellules plus foncées indiquent plus de dictée à cette heure.",
+        "empty": "La heatmap se remplit au fil de vos dictées, à différentes heures et dans différentes apps.",
+        "aria": "Heatmap de l'activité de dictée par heure et application sur les sept derniers jours",
+        "cellTooltip": "{{app}} · {{hour}} · {{count}} mots",
+        "cellAria": "{{app}} à {{hour}} : {{count}} mots",
+        "cellEmpty": "{{app}} à {{hour}} : aucune activité"
       }
+    },
+    "streak": {
+      "label": "Série en cours",
+      "currentDetail_one": "{{count}} jour d'affilée — continuez !",
+      "currentDetail_other": "{{count}} jours d'affilée — continuez !",
+      "empty": "Dictez au moins une fois par jour pour démarrer une série.",
+      "best_one": "Record : {{count}} jour.",
+      "best_other": "Record : {{count}} jours.",
+      "bestEmpty": "Pas encore de record de série."
+    },
+    "timeSaved": {
+      "label": "Temps gagné estimé",
+      "detail": "vs la frappe des mêmes mots à {{baseline}} mots/min.",
+      "empty": "Le temps gagné s'estime dès que vous avez de l'audio de dictée.",
+      "method": "Temps de parole soustrait du temps de frappe équivalent (estimation locale)."
     },
     "wpm": {
       "title": "Vitesse vs frappe",

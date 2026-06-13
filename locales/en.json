@@ -538,6 +538,13 @@
     "title": "Statistics",
     "subtitle": "Activity, pipeline performance, and per-app breakdown — computed locally from your history.",
     "refresh": "Refresh statistics",
+    "tabs": {
+      "aria": "Statistics sections",
+      "overview": "Overview",
+      "activity": "Activity",
+      "performance": "Performance",
+      "global": "Overall"
+    },
     "empty": {
       "title": "No statistics yet",
       "description": "Complete your first dictations to see activity, pipeline latency, per-app breakdown, and speaking speed."
@@ -545,7 +552,9 @@
     "sections": {
       "today": "Today",
       "global": "Overall",
-      "weekSummary": "Summary — last 7 days"
+      "weekSummary": "Summary — last 7 days",
+      "activity": "Activity",
+      "performance": "Performance"
     },
     "metrics": {
       "lastLatency": {
@@ -611,7 +620,31 @@
         "empty": "No context data yet.",
         "aria": "Breakdown of dictated words by application",
         "centerWords": "words"
+      },
+      "heatmap": {
+        "title": "Activity by hour and app",
+        "description": "Word volume over the last 7 days — darker cells mean more dictation in that hour.",
+        "empty": "The heatmap fills in as you dictate across different hours and apps.",
+        "aria": "Heatmap of dictation activity by hour and application over the last seven days",
+        "cellTooltip": "{{app}} · {{hour}} · {{count}} words",
+        "cellAria": "{{app}} at {{hour}}: {{count}} words",
+        "cellEmpty": "{{app}} at {{hour}}: no activity"
       }
+    },
+    "streak": {
+      "label": "Current streak",
+      "currentDetail_one": "{{count}} day in a row — keep it going.",
+      "currentDetail_other": "{{count}} days in a row — keep it going.",
+      "empty": "Dictate at least once per day to start a streak.",
+      "best_one": "Personal best: {{count}} day.",
+      "best_other": "Personal best: {{count}} days.",
+      "bestEmpty": "No streak record yet."
+    },
+    "timeSaved": {
+      "label": "Estimated time saved",
+      "detail": "vs typing the same words at {{baseline}} words/min.",
+      "empty": "Time saved is estimated once you have dictation audio.",
+      "method": "Speaking time subtracted from equivalent typing time (local estimate)."
     },
     "wpm": {
       "title": "Speed vs typing",

@@ -30,6 +30,24 @@ export interface RecentLatencyEntry {
   created_at: string;
 }
 
+export interface StreakInfo {
+  currentStreak: number;
+  bestStreak: number;
+  activeToday: boolean;
+}
+
+export interface EstimatedTimeSaved {
+  minutesSaved: number;
+  baselineWpm: number;
+}
+
+export interface HourAppHeatmapCell {
+  hour: number;
+  exeName: string;
+  wordCount: number;
+  dictationCount: number;
+}
+
 export interface Insights {
   lastLatency: LatencySnapshot | null;
   wordsToday: number;
@@ -44,6 +62,9 @@ export interface Insights {
   appUsage: AppUsageEntry[];
   dailyActivity: DailyActivityEntry[];
   recentLatency: RecentLatencyEntry[];
+  streak: StreakInfo;
+  timeSaved: EstimatedTimeSaved;
+  hourAppHeatmap: HourAppHeatmapCell[];
 }
 
 interface DictionaryUpdatedPayload {

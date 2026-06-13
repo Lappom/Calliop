@@ -1,3 +1,4 @@
+use chrono::{Duration, Local, NaiveDate};
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
@@ -87,6 +88,35 @@ pub struct RecentLatencyEntry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StreakInfo {
+    #[serde(rename = "currentStreak")]
+    pub current_streak: i64,
+    #[serde(rename = "bestStreak")]
+    pub best_streak: i64,
+    #[serde(rename = "activeToday")]
+    pub active_today: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EstimatedTimeSaved {
+    #[serde(rename = "minutesSaved")]
+    pub minutes_saved: i64,
+    #[serde(rename = "baselineWpm")]
+    pub baseline_wpm: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HourAppHeatmapCell {
+    pub hour: i64,
+    #[serde(rename = "exeName")]
+    pub exe_name: String,
+    #[serde(rename = "wordCount")]
+    pub word_count: i64,
+    #[serde(rename = "dictationCount")]
+    pub dictation_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Insights {
     #[serde(rename = "lastLatency")]
     pub last_latency: Option<LatencySnapshot>,
@@ -114,6 +144,11 @@ pub struct Insights {
     pub daily_activity: Vec<DailyActivityEntry>,
     #[serde(rename = "recentLatency")]
     pub recent_latency: Vec<RecentLatencyEntry>,
+    pub streak: StreakInfo,
+    #[serde(rename = "timeSaved")]
+    pub time_saved: EstimatedTimeSaved,
+    #[serde(rename = "hourAppHeatmap")]
+    pub hour_app_heatmap: Vec<HourAppHeatmapCell>,
 }
 
 pub fn count_words(text: &str) -> usize {
@@ -138,6 +173,75 @@ pub fn wpm_vs_typing_percent(wpm: f64) -> i64 {
         return 0;
     }
     ((wpm / TYPING_SPEED_BASELINE_WPM) * 100.0).round() as i64
+}
+
+/// Minutes saved vs typing the same words at `TYPING_SPEED_BASELINE_WPM`.
+pub fn estimate_time_saved_minutes(total_words: i64, total_audio_ms: i64) -> i64 {
+    if total_words <= 0 || total_audio_ms <= 0 {
+        return 0;
+    }
+    let typing_minutes = total_words as f64 / TYPING_SPEED_BASELINE_WPM;
+    let speaking_minutes = total_audio_ms as f64 / 60_000.0;
+    (typing_minutes - speaking_minutes).max(0.0).round() as i64
+}
+
+pub fn compute_streak_info(active_days: &[String]) -> StreakInfo {
+    if active_days.is_empty() {
+        return StreakInfo {
+            current_streak: 0,
+            best_streak: 0,
+            active_today: false,
+        };
+    }
+
+    let parsed: Vec<NaiveDate> = active_days
+        .iter()
+        .filter_map(|day| NaiveDate::parse_from_str(day, "%Y-%m-%d").ok())
+        .collect();
+
+    if parsed.is_empty() {
+        return StreakInfo {
+            current_streak: 0,
+            best_streak: 0,
+            active_today: false,
+        };
+    }
+
+    let today = Local::now().date_naive();
+    let active_today = parsed.contains(&today);
+
+    let mut best = 0_i64;
+    let mut run = 1_i64;
+    for index in 1..parsed.len() {
+        if parsed[index].signed_duration_since(parsed[index - 1]).num_days() == 1 {
+            run += 1;
+        } else {
+            best = best.max(run);
+            run = 1;
+        }
+    }
+    best = best.max(run);
+
+    let last_active = *parsed.last().expect("parsed non-empty");
+    let days_since_last = today.signed_duration_since(last_active).num_days();
+    let current_streak = if days_since_last > 1 {
+        0
+    } else {
+        let mut count = 0_i64;
+        let mut cursor = last_active;
+        let active_set: std::collections::HashSet<NaiveDate> = parsed.into_iter().collect();
+        while active_set.contains(&cursor) {
+            count += 1;
+            cursor -= Duration::days(1);
+        }
+        count
+    };
+
+    StreakInfo {
+        current_streak,
+        best_streak: best,
+        active_today,
+    }
 }
 
 impl Store {
@@ -352,6 +456,18 @@ impl Store {
         let app_usage = app_rows.collect::<Result<Vec<_>, _>>()?;
         let daily_activity = fetch_daily_activity(&conn)?;
         let recent_latency = fetch_recent_latency(&conn)?;
+        let active_days = fetch_active_days(&conn)?;
+        let streak = compute_streak_info(&active_days);
+        let total_audio_ms: i64 = conn.query_row(
+            "SELECT COALESCE(SUM(audio_duration_ms), 0) FROM dictations",
+            [],
+            |row| row.get(0),
+        )?;
+        let time_saved = EstimatedTimeSaved {
+            minutes_saved: estimate_time_saved_minutes(total_words, total_audio_ms),
+            baseline_wpm: TYPING_SPEED_BASELINE_WPM,
+        };
+        let hour_app_heatmap = fetch_hour_app_heatmap(&conn)?;
 
         Ok(Insights {
             last_latency,
@@ -367,6 +483,9 @@ impl Store {
             app_usage,
             daily_activity,
             recent_latency,
+            streak,
+            time_saved,
+            hour_app_heatmap,
         })
     }
 }
@@ -393,6 +512,43 @@ fn fetch_daily_activity(
             date: row.get(0)?,
             word_count: row.get(1)?,
             dictation_count: row.get(2)?,
+        })
+    })?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(StoreError::from)
+}
+
+fn fetch_active_days(conn: &rusqlite::Connection) -> Result<Vec<String>, StoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT DISTINCT date(created_at, 'localtime') AS day
+         FROM dictations
+         ORDER BY day ASC",
+    )?;
+    let rows = stmt.query_map([], |row| row.get(0))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(StoreError::from)
+}
+
+fn fetch_hour_app_heatmap(
+    conn: &rusqlite::Connection,
+) -> Result<Vec<HourAppHeatmapCell>, StoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT CAST(strftime('%H', created_at, 'localtime') AS INTEGER) AS hour,
+                COALESCE(app_exe, 'autre') AS exe_name,
+                COUNT(*) AS dictation_count,
+                COALESCE(SUM(word_count), 0) AS word_count
+         FROM dictations
+         WHERE date(created_at, 'localtime') >= date('now', 'localtime', '-6 days')
+         GROUP BY hour, exe_name
+         HAVING word_count > 0
+         ORDER BY word_count DESC",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(HourAppHeatmapCell {
+            hour: row.get(0)?,
+            exe_name: row.get(1)?,
+            dictation_count: row.get(2)?,
+            word_count: row.get(3)?,
         })
     })?;
     rows.collect::<Result<Vec<_>, _>>()
@@ -545,6 +701,43 @@ mod tests {
     }
 
     #[test]
+    fn estimate_time_saved_minutes_compares_to_typing() {
+        // 80 words at 40 WPM = 2 min typing; 1 min speaking -> 1 min saved
+        assert_eq!(estimate_time_saved_minutes(80, 60_000), 1);
+        assert_eq!(estimate_time_saved_minutes(0, 60_000), 0);
+        assert_eq!(estimate_time_saved_minutes(40, 120_000), 0);
+    }
+
+    #[test]
+    fn compute_streak_info_counts_consecutive_days() {
+        let today = Local::now().date_naive();
+        let yesterday = today - Duration::days(1);
+        let days = vec![
+            (today - Duration::days(4)).to_string(),
+            (today - Duration::days(3)).to_string(),
+            (today - Duration::days(2)).to_string(),
+            yesterday.to_string(),
+            today.to_string(),
+        ];
+        let streak = compute_streak_info(&days);
+        assert_eq!(streak.current_streak, 5);
+        assert_eq!(streak.best_streak, 5);
+        assert!(streak.active_today);
+    }
+
+    #[test]
+    fn compute_streak_info_resets_when_gap() {
+        let today = Local::now().date_naive();
+        let days = vec![
+            (today - Duration::days(5)).to_string(),
+            (today - Duration::days(3)).to_string(),
+        ];
+        let streak = compute_streak_info(&days);
+        assert_eq!(streak.current_streak, 0);
+        assert_eq!(streak.best_streak, 1);
+    }
+
+    #[test]
     fn get_insights_aggregates_counts() {
         let store = test_store();
         store
@@ -580,5 +773,8 @@ mod tests {
         assert!(insights.last_latency.is_some());
         assert_eq!(insights.daily_activity.len(), 7);
         assert_eq!(insights.recent_latency.len(), 2);
+        assert!(insights.time_saved.minutes_saved >= 0);
+        assert_eq!(insights.streak.current_streak, 1);
+        assert!(!insights.hour_app_heatmap.is_empty());
     }
 }

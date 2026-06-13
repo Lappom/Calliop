@@ -290,6 +290,36 @@ body {
   }
 }
 
+.insight-metric-hover {
+  transition:
+    border-color var(--motion-fast) var(--ease-enter),
+    transform var(--motion-fast) var(--ease-enter);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .insight-metric-hover:hover {
+    border-color: var(--color-hairline-strong);
+    transform: translateY(-1px);
+  }
+}
+
+.insight-bar-fill {
+  transform-origin: left center;
+  transition: transform var(--motion-slow) var(--ease-enter);
+}
+
+.insight-gauge-arc {
+  transition:
+    stroke-dasharray var(--motion-slow) var(--ease-enter),
+    stroke-dashoffset var(--motion-slow) var(--ease-enter);
+}
+
+.insight-heatmap-cell {
+  transition:
+    background-color var(--motion-slow) var(--ease-enter),
+    opacity var(--motion-base) var(--ease-enter);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

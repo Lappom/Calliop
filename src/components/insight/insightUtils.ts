@@ -1,6 +1,7 @@
 import type { TFunction } from "i18next";
 import type {
   DailyActivityEntry,
+  HourAppHeatmapCell,
   Insights,
   LatencySnapshot,
 } from "../../hooks/useInsights";
@@ -116,4 +117,55 @@ export function formatAudioDuration(minutes: number, t: TFunction): string {
   return remainder > 0
     ? `${hours} ${t("common.hoursShort")} ${remainder} ${t("common.minutesShort")}`
     : `${hours} ${t("common.hoursShort")}`;
+}
+
+export function formatTimeSaved(minutes: number, t: TFunction): string {
+  if (minutes <= 0) {
+    return t("common.emDash");
+  }
+  if (minutes < 60) {
+    return `${minutes} ${t("common.minutesShort")}`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  return remainder > 0
+    ? `${hours} ${t("common.hoursShort")} ${remainder} ${t("common.minutesShort")}`
+    : `${hours} ${t("common.hoursShort")}`;
+}
+
+export interface HourAppHeatmapMatrix {
+  apps: string[];
+  lookup: Map<string, number>;
+  max: number;
+}
+
+const HEATMAP_APP_LIMIT = 6;
+
+export function buildHourAppHeatmap(
+  cells: HourAppHeatmapCell[],
+): HourAppHeatmapMatrix {
+  const appTotals = new Map<string, number>();
+  const lookup = new Map<string, number>();
+  let max = 0;
+
+  for (const cell of cells) {
+    appTotals.set(
+      cell.exeName,
+      (appTotals.get(cell.exeName) ?? 0) + cell.wordCount,
+    );
+    const key = `${cell.exeName}:${cell.hour}`;
+    lookup.set(key, cell.wordCount);
+    max = Math.max(max, cell.wordCount);
+  }
+
+  const apps = [...appTotals.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, HEATMAP_APP_LIMIT)
+    .map(([name]) => name);
+
+  return { apps, lookup, max };
+}
+
+export function hasHeatmapData(cells: HourAppHeatmapCell[]): boolean {
+  return cells.some((cell) => cell.wordCount > 0);
 }

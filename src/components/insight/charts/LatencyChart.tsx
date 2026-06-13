@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -11,6 +11,7 @@ import {
 } from "recharts";
 import type { RecentLatencyEntry } from "../../../hooks/useInsights";
 import { useUiLocale } from "../../../i18n/useUiLocale";
+import { useReducedMotion } from "../../../lib/motion/useReducedMotion";
 import { ChartFrame } from "./ChartFrame";
 import { CHART_COLORS, formatLatencyAxisTime } from "./chartTheme";
 import {
@@ -32,13 +33,17 @@ interface LatencyChartRow {
   totalMs: number;
 }
 
+const CHART_ANIMATION_MS = 400;
+
 function LatencyTooltip(props: TooltipContentProps) {
   const { active, payload, label } = props;
   if (!active || !payload?.length) {
     return null;
   }
 
-  const rows = payload.filter((item) => typeof item.value === "number" && item.value > 0);
+  const rows = payload.filter(
+    (item) => typeof item.value === "number" && item.value > 0,
+  );
 
   return (
     <div style={rechartsTooltipStyle}>
@@ -68,6 +73,16 @@ function LatencyTooltip(props: TooltipContentProps) {
 
 export function LatencyChart({ data }: LatencyChartProps) {
   const { t, intlLocale } = useUiLocale();
+  const reducedMotion = useReducedMotion();
+  const [animate, setAnimate] = useState(!reducedMotion);
+
+  useEffect(() => {
+    if (reducedMotion) {
+      setAnimate(false);
+      return;
+    }
+    setAnimate(true);
+  }, [data, reducedMotion]);
 
   const segments = useMemo(
     () => [
@@ -102,6 +117,12 @@ export function LatencyChart({ data }: LatencyChartProps) {
       })),
     [data, intlLocale],
   );
+
+  const barAnimation = {
+    isAnimationActive: animate,
+    animationDuration: CHART_ANIMATION_MS,
+    animationEasing: "ease-out" as const,
+  };
 
   const legend = (
     <ul className="m-0 flex list-none flex-wrap gap-4 p-0">
@@ -159,6 +180,7 @@ export function LatencyChart({ data }: LatencyChartProps) {
             fillOpacity={0.9}
             maxBarSize={28}
             radius={[0, 0, 3, 3]}
+            {...barAnimation}
           />
           <Bar
             dataKey="llmMs"
@@ -167,6 +189,7 @@ export function LatencyChart({ data }: LatencyChartProps) {
             fill={CHART_COLORS.orange}
             fillOpacity={0.9}
             maxBarSize={28}
+            {...barAnimation}
           />
           <Bar
             dataKey="injectMs"
@@ -176,6 +199,7 @@ export function LatencyChart({ data }: LatencyChartProps) {
             fillOpacity={0.9}
             maxBarSize={28}
             radius={[3, 3, 0, 0]}
+            {...barAnimation}
           />
         </BarChart>
       </ResponsiveContainer>

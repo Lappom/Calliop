@@ -17,8 +17,9 @@ pub use dictionary::{
     DictionarySource, DictionaryWord,
 };
 pub use history::{
-    count_words, dictation_wpm, wpm_vs_typing_percent, AppUsageEntry, DictationEntry, Insights,
-    LatencySnapshot, NewDictation, DEFAULT_LIST_LIMIT, TYPING_SPEED_BASELINE_WPM,
+    count_words, dictation_wpm, estimate_time_saved_minutes, wpm_vs_typing_percent,
+    AppUsageEntry, DictationEntry, EstimatedTimeSaved, HourAppHeatmapCell, Insights,
+    LatencySnapshot, NewDictation, StreakInfo, DEFAULT_LIST_LIMIT, TYPING_SPEED_BASELINE_WPM,
 };
 pub use settings::{
     detect_default_ui_language, AppSettings, InferenceBackend, KEY_AUTO_EDIT, KEY_AUTO_LEARN,
