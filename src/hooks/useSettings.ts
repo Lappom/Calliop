@@ -192,7 +192,7 @@ export function useSettings() {
   const [sttProgressModel, setSttProgressModel] = useState<string | null>(null);
   const [modelsStatus, setModelsStatus] = useState<ModelsStatus | null>(null);
   const [inferenceInfo, setInferenceInfo] = useState<InferenceInfo | null>(null);
-  const [autostartEnabled, setAutostartEnabled] = useState(false);
+  const [autostartEnabled, setAutostartEnabled] = useState(true);
   const settingsRef = useRef(settings);
   const llmReadyRef = useRef(llmReady);
   const llmProgressRef = useRef(llmProgress);

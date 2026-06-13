@@ -51,6 +51,13 @@ impl Store {
         }
     }
 
+    pub fn has_setting(&self, key: &str) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare("SELECT 1 FROM settings WHERE key = ?1 LIMIT 1")?;
+        let mut rows = stmt.query(params![key])?;
+        Ok(rows.next()?.is_some())
+    }
+
     pub fn get_bool(&self, key: &str, default: bool) -> Result<bool, StoreError> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare("SELECT value FROM settings WHERE key = ?1")?;

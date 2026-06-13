@@ -22,8 +22,8 @@ pub use history::{
 };
 pub use settings::{
     detect_default_ui_language, AppSettings, InferenceBackend, KEY_AUTO_EDIT, KEY_AUTO_LEARN,
-    KEY_HOTKEY, KEY_INFERENCE_BACKEND, KEY_LLM_MODEL, KEY_ONBOARDING_DONE, KEY_STT_LANGUAGE,
-    KEY_UI_LANGUAGE, KEY_WHISPER_MODEL,
+    KEY_AUTOSTART, KEY_HOTKEY, KEY_INFERENCE_BACKEND, KEY_LLM_MODEL, KEY_ONBOARDING_DONE,
+    KEY_STT_LANGUAGE, KEY_UI_LANGUAGE, KEY_WHISPER_MODEL,
 };
 pub use snippets::{
     is_valid_snippet_content, is_valid_trigger, normalize_trigger, Snippet, SnippetImport,

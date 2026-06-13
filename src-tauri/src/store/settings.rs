@@ -16,6 +16,7 @@ pub const KEY_HOTKEY: &str = "hotkey";
 pub const KEY_INFERENCE_BACKEND: &str = "inference_backend";
 pub const KEY_ONBOARDING_DONE: &str = "onboarding_done";
 pub const KEY_AUTO_UPDATE: &str = "auto_update";
+pub const KEY_AUTOSTART: &str = "autostart";
 pub const KEY_LOW_POWER_MODE: &str = "low_power_mode";
 pub const KEY_ADAPTIVE_PERF: &str = "adaptive_perf";
 pub const KEY_UI_LANGUAGE: &str = "ui_language";
@@ -264,6 +265,14 @@ impl Store {
         )?;
         Ok(())
     }
+
+    pub fn get_autostart(&self) -> Result<bool, StoreError> {
+        self.get_bool(KEY_AUTOSTART, true)
+    }
+
+    pub fn set_autostart(&self, enabled: bool) -> Result<(), StoreError> {
+        self.set_bool(KEY_AUTOSTART, enabled)
+    }
 }
 
 #[cfg(test)]
@@ -362,6 +371,35 @@ mod tests {
         let store = Store::from_connection(conn);
         let loaded = store.load_settings().expect("load");
         assert_eq!(loaded.input_device, DEFAULT_INPUT_DEVICE);
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn autostart_defaults_to_enabled_when_missing() {
+        let dir = std::env::temp_dir().join(format!(
+            "calliop-autostart-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::create_dir_all(&dir);
+        let db_file = dir.join("settings.db");
+        let conn = rusqlite::Connection::open(&db_file).unwrap();
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )",
+            [],
+        )
+        .unwrap();
+
+        let store = Store::from_connection(conn);
+        assert!(store.get_autostart().expect("load"));
+        store.set_autostart(false).expect("save");
+        assert!(!store.get_autostart().expect("reload"));
 
         let _ = std::fs::remove_dir_all(dir);
     }

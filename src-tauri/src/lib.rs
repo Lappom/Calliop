@@ -33,7 +33,7 @@ use store::{
     is_valid_snippet_content, is_valid_trigger, normalize_trigger, normalize_word,
     AppContextMatchType, AppContextRule, AppSettings, DictationEntry, DictionarySource,
     DictionaryWord, InferenceBackend, Insights, NewAppContextRule, Snippet, SnippetImport, Store,
-    DEFAULT_LIST_LIMIT,
+    DEFAULT_LIST_LIMIT, KEY_AUTOSTART,
 };
 use stt::{SttLanguage, WhisperModel, WhisperPromptCache, MAX_INITIAL_PROMPT_WORDS};
 use system::{resolve_perf_config, RuntimePerfConfig, SystemCapabilities};
@@ -1791,7 +1791,58 @@ fn get_insights(state: State<'_, AppState>) -> Result<Insights, String> {
 
 #[tauri::command]
 fn is_autostart_enabled(app: AppHandle) -> Result<bool, String> {
-    app.autolaunch().is_enabled().map_err(|e| e.to_string())
+    let state = app.state::<AppState>();
+    state.store.get_autostart().map_err(|e| e.to_string())
+}
+
+fn apply_autostart(app: &AppHandle, enabled: bool) -> Result<(), String> {
+    let autolaunch = app.autolaunch();
+    if enabled {
+        autolaunch.enable().map_err(|e| e.to_string())?;
+    } else {
+        autolaunch.disable().map_err(|e| e.to_string())?;
+    }
+    sync_tray_menus(app);
+    Ok(())
+}
+
+fn autostart_enabled_from_store(app: &AppHandle) -> bool {
+    app.try_state::<AppState>()
+        .and_then(|state| state.store.get_autostart().ok())
+        .unwrap_or(true)
+}
+
+fn bootstrap_autostart_setting(store: &Store, app: &AppHandle) {
+    if store.has_setting(KEY_AUTOSTART).unwrap_or(false) {
+        return;
+    }
+
+    let seed = if store.is_onboarding_done().unwrap_or(false) {
+        app.autolaunch().is_enabled().unwrap_or(false)
+    } else {
+        true
+    };
+
+    if let Err(err) = store.set_autostart(seed) {
+        eprintln!("failed to seed autostart setting: {err}");
+    }
+}
+
+fn sync_autostart_from_settings(app: &AppHandle) {
+    let Some(state) = app.try_state::<AppState>() else {
+        return;
+    };
+
+    bootstrap_autostart_setting(&state.store, app);
+
+    match state.store.get_autostart() {
+        Ok(enabled) => {
+            if let Err(err) = apply_autostart(app, enabled) {
+                eprintln!("failed to apply autostart setting: {err}");
+            }
+        }
+        Err(err) => eprintln!("failed to read autostart setting: {err}"),
+    }
 }
 
 #[tauri::command]
@@ -1908,14 +1959,12 @@ async fn prepare_onboarding_dictation(
 
 #[tauri::command]
 fn set_autostart_enabled(app: AppHandle, enabled: bool) -> Result<(), String> {
-    let autolaunch = app.autolaunch();
-    if enabled {
-        autolaunch.enable().map_err(|e| e.to_string())?;
-    } else {
-        autolaunch.disable().map_err(|e| e.to_string())?;
-    }
-    sync_tray_menus(&app);
-    Ok(())
+    let state = app.state::<AppState>();
+    state
+        .store
+        .set_autostart(enabled)
+        .map_err(|e| e.to_string())?;
+    apply_autostart(&app, enabled)
 }
 
 fn set_auto_edit_enabled(app: AppHandle, enabled: bool) -> Result<(), String> {
@@ -2332,7 +2381,7 @@ fn sync_tray_menus(app: &AppHandle) {
             .autostart_item
             .set_text(ui::locale::tr("tray.autostart", &ui_language));
 
-        let autostart_enabled = app.autolaunch().is_enabled().unwrap_or(false);
+        let autostart_enabled = autostart_enabled_from_store(app);
         let _ = handles.autostart_item.set_checked(autostart_enabled);
 
         let auto_edit_enabled = app
@@ -2414,7 +2463,7 @@ fn build_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         auto_edit_checked,
         None::<&str>,
     )?;
-    let autostart_checked = app.autolaunch().is_enabled().unwrap_or(false);
+    let autostart_checked = autostart_enabled_from_store(app);
     let autostart_item = CheckMenuItem::with_id(
         app,
         MENU_AUTOSTART,
@@ -2479,7 +2528,7 @@ fn build_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 let _ = set_auto_edit_enabled(app.clone(), !enabled);
             }
             MENU_AUTOSTART => {
-                let enabled = app.autolaunch().is_enabled().unwrap_or(false);
+                let enabled = autostart_enabled_from_store(&app);
                 let _ = set_autostart_enabled(app.clone(), !enabled);
             }
             MENU_QUIT => {
@@ -2819,6 +2868,13 @@ pub fn run() {
         eprintln!("failed to remove legacy qwen3 4b model: {err}");
     }
 
+    if !store.has_setting(KEY_AUTOSTART).unwrap_or(false) && !store.is_onboarding_done().unwrap_or(false)
+    {
+        if let Err(err) = store.set_autostart(true) {
+            eprintln!("failed to seed autostart default: {err}");
+        }
+    }
+
     pipeline.lock().set_auto_edit(initial_settings.auto_edit);
     pipeline.lock().set_auto_learn(initial_settings.auto_learn);
     pipeline
@@ -2926,6 +2982,7 @@ pub fn run() {
         })
         .setup(move |app| {
             let _modules = registered_modules();
+            sync_autostart_from_settings(app.handle());
             build_tray(app.handle()).map_err(|e| e.to_string())?;
             sync_tray_menus(app.handle());
             let _ = app_context::get_active_window();
