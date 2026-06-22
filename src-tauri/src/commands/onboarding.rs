@@ -1,4 +1,4 @@
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use crate::AppState;
 
@@ -8,9 +8,19 @@ pub fn is_onboarding_done(state: State<'_, AppState>) -> Result<bool, String> {
 }
 
 #[tauri::command]
-pub fn set_onboarding_done(state: State<'_, AppState>, done: bool) -> Result<(), String> {
+pub fn set_onboarding_done(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    done: bool,
+) -> Result<(), String> {
     state
         .store
         .set_onboarding_done(done)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    if done {
+        if let Err(err) = state.achievements.on_feature_change(&app) {
+            eprintln!("achievement evaluation failed: {err}");
+        }
+    }
+    Ok(())
 }

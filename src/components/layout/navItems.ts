@@ -8,6 +8,7 @@ import {
   Home,
   Palette,
   Settings,
+  Trophy,
 } from "lucide-react";
 import type { AppView } from "../../lib/views";
 
@@ -38,6 +39,7 @@ export function getNavSections(t: TFunction): NavSection[] {
       items: [
         { id: "history", label: t("nav.items.history"), icon: History },
         { id: "insight", label: t("nav.items.insight"), icon: BarChart3 },
+        { id: "achievements", label: t("nav.items.achievements"), icon: Trophy },
       ],
     },
     {

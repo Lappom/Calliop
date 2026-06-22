@@ -81,6 +81,10 @@ pub fn add_dictionary_word(
         },
     );
 
+    if let Err(err) = state.achievements.on_feature_change(&app) {
+        eprintln!("achievement evaluation failed: {err}");
+    }
+
     Ok(true)
 }
 

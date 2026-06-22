@@ -9,6 +9,7 @@
       "main": "Home",
       "history": "History",
       "insight": "Statistics",
+      "achievements": "Achievements",
       "dictionary": "Dictionary",
       "snippets": "Snippets",
       "style": "Style",
@@ -776,6 +777,256 @@
       "updateReady": {
         "title": "Calliop",
         "body": "Update {{version}} ready to install."
+      }
+    }
+  },
+  "achievements": {
+    "title": "Achievements",
+    "subtitle": "Collect badges as you dictate — some like to stay hidden.",
+    "collectionProgress": "Collection",
+    "unlockedCount": "{{count}} / {{total}} unlocked",
+    "overallProgress": "Overall progress",
+    "progressLabel": "{{current}} / {{target}}",
+    "unlockedOn": "Unlocked on {{date}}",
+    "lockedSecretTitle": "???",
+    "empty": "No achievements in this category.",
+    "toast": {
+      "unlocked": "Achievement unlocked!"
+    },
+    "celebration": {
+      "title": "Legendary achievement!",
+      "subtitle": "You just unlocked a rare badge.",
+      "dismiss": "Nice"
+    },
+    "categories": {
+      "all": "All",
+      "milestones": "Milestones",
+      "streaks": "Streaks",
+      "speed": "Speed",
+      "explorer": "Explorer",
+      "learner": "Learning",
+      "secrets": "Secrets"
+    },
+    "tiers": {
+      "common": "Common",
+      "rare": "Rare",
+      "legendary": "Legendary"
+    },
+    "items": {
+      "first_breath": {
+        "title": "First breath",
+        "description": "Your first dictation is in the books. The keyboard is nervous."
+      },
+      "getting_warm": {
+        "title": "Vocal warm-up",
+        "description": "Five dictations. The vocal cords are online."
+      },
+      "regular": {
+        "title": "Mic regular",
+        "description": "Fifty dictations. The hotkey is part of you now."
+      },
+      "century_club": {
+        "title": "Century club",
+        "description": "One hundred dictations. Imaginary membership card incoming."
+      },
+      "dictation_machine": {
+        "title": "Dictation machine",
+        "description": "Five hundred dictations. You should bill by the word."
+      },
+      "ghost_writer": {
+        "title": "Ghost writer",
+        "description": "One thousand dictations. Your fingers forgot where the keyboard is."
+      },
+      "word_nibbler": {
+        "title": "Hundred words, zero cramps",
+        "description": "One hundred words dictated total. Your wrists thank you."
+      },
+      "word_feast": {
+        "title": "Word feast",
+        "description": "One thousand words. Just an appetizer, really."
+      },
+      "word_tsunami": {
+        "title": "Lexical tsunami",
+        "description": "Ten thousand words. The dictionary is watching."
+      },
+      "word_legend": {
+        "title": "Verb legend",
+        "description": "One hundred thousand words. Someone should dedicate a paragraph to you."
+      },
+      "streak_3": {
+        "title": "Three days, same energy",
+        "description": "A three-day streak. Consistency looks good on you."
+      },
+      "streak_7": {
+        "title": "Week without silence",
+        "description": "Seven days in a row. The mic is your coworker."
+      },
+      "streak_14": {
+        "title": "Two weeks of flow",
+        "description": "Fourteen consecutive days. Impressive even for a podcast."
+      },
+      "streak_30": {
+        "title": "Month of voice",
+        "description": "Thirty days straight. You're a force of nature."
+      },
+      "faster_than_fingers": {
+        "title": "Faster than your fingers",
+        "description": "A dictation over 80 WPM. The keyboard is jealous."
+      },
+      "lightning_round": {
+        "title": "Lightning round",
+        "description": "Full pipeline under 800 ms. Blink and you miss it."
+      },
+      "sonic_boom": {
+        "title": "Sonic boom",
+        "description": "Over 120 WPM. Supersonic."
+      },
+      "speed_saver": {
+        "title": "Time bank",
+        "description": "One hour saved vs typing. Spend it wisely."
+      },
+      "dev_mode": {
+        "title": "Dev mode",
+        "description": "Dictated in your code editor. Commits can't wait."
+      },
+      "slack_attack": {
+        "title": "Slack attack",
+        "description": "You dictated on Slack. Colleagues didn't see it coming."
+      },
+      "browser_bard": {
+        "title": "Browser bard",
+        "description": "Dictated in the browser. The internet is your notebook."
+      },
+      "first_snippet": {
+        "title": "First shortcut",
+        "description": "One snippet created. Smart laziness begins."
+      },
+      "snippet_collector": {
+        "title": "Collector",
+        "description": "Ten snippets. More macros than patience."
+      },
+      "stylist": {
+        "title": "Stylist",
+        "description": "One per-app tone rule. You dictate with character."
+      },
+      "graduate": {
+        "title": "Calliop graduate",
+        "description": "Onboarding complete. Welcome to the club."
+      },
+      "word_hoarder": {
+        "title": "Dictionary hoarder",
+        "description": "First manual dictionary word. Control is yours."
+      },
+      "explorer_apps": {
+        "title": "App tourist",
+        "description": "Dictated in five different apps. Text nomad."
+      },
+      "autocorrect": {
+        "title": "Autocorrect",
+        "description": "Calliop learned its first correction. It's really listening."
+      },
+      "learned_ten": {
+        "title": "Keen student",
+        "description": "Ten learned corrections. The machine adapts to you."
+      },
+      "learned_fifty": {
+        "title": "Home tutor",
+        "description": "Fifty learned corrections. You're training your AI."
+      },
+      "professor": {
+        "title": "Professor",
+        "description": "Twenty manual dictionary words. You teach the vocabulary."
+      },
+      "time_saved_10": {
+        "title": "Ten minutes back",
+        "description": "Ten minutes saved vs typing. Extra coffee time."
+      },
+      "active_week": {
+        "title": "Active week",
+        "description": "Seven distinct days with at least one dictation."
+      },
+      "wpm_sixty": {
+        "title": "Sixty per hour",
+        "description": "Sixty WPM average. Solid cruising speed."
+      },
+      "first_week": {
+        "title": "First week",
+        "description": "Seven dictation days on the board. You're rolling."
+      },
+      "night_owl": {
+        "title": "Dictating owl",
+        "description": "Dictated between midnight and 5 AM. The keyboard sleeps, not you.",
+        "hint": "Owls dictate too."
+      },
+      "early_bird": {
+        "title": "Early vocal bird",
+        "description": "Dictated before 7 AM. The sun wasn't ready.",
+        "hint": "Before the keyboard wakes up."
+      },
+      "meta_calliop": {
+        "title": "Meta",
+        "description": "You dictated \"Calliop\". Inception complete.",
+        "hint": "Meta."
+      },
+      "triple_no": {
+        "title": "Three times no",
+        "description": "Three cancellations in a row. Indecision is a sport.",
+        "hint": "Three times no."
+      },
+      "polyglot_day": {
+        "title": "Polyglot of the day",
+        "description": "FR and EN the same day. Two languages, one voice.",
+        "hint": "Polyglot of the day."
+      },
+      "brick_layer": {
+        "title": "Brick layer",
+        "description": "Over 500 words in one dictation. Was that a wall or an email?",
+        "hint": "Brick."
+      },
+      "plan_b": {
+        "title": "Plan B",
+        "description": "Clipboard paste saved the day. Ctrl+V to the rescue.",
+        "hint": "Plan B."
+      },
+      "weekend_warrior": {
+        "title": "Weekend warrior",
+        "description": "Dictated on Saturday or Sunday. Work can wait… or not.",
+        "hint": "Weekends count too."
+      },
+      "same_spot": {
+        "title": "Same spot every time",
+        "description": "Fifty dictations in the same app. Creature of habit.",
+        "hint": "You always come back here."
+      },
+      "long_winded": {
+        "title": "Long-winded",
+        "description": "Over two minutes of audio at once. Podcast episode vibes.",
+        "hint": "Endless length."
+      },
+      "raw_mode": {
+        "title": "Raw mode",
+        "description": "Dictation without LLM cleanup while auto-edit is on. Wild.",
+        "hint": "No safety net."
+      },
+      "night_shift": {
+        "title": "Night shift",
+        "description": "Dictated between 10 PM and midnight. Spotlights are off.",
+        "hint": "Night shift."
+      },
+      "three_word_poem": {
+        "title": "Failed haiku",
+        "description": "Exactly three words. Short, intense, mysterious.",
+        "hint": "Three words, not one more."
+      },
+      "essay_mode": {
+        "title": "Essay mode",
+        "description": "Two hundred words in one dictation. You had an outline, right?",
+        "hint": "Essay mode."
+      },
+      "power_day": {
+        "title": "Power day",
+        "description": "Twenty dictations in one day. The mic needs a break.",
+        "hint": "Power day."
       }
     }
   }

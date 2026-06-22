@@ -36,6 +36,11 @@ pub fn module_name() -> &'static str {
 }
 
 #[cfg(test)]
+pub fn init_test_schema(conn: &rusqlite::Connection) -> Result<(), StoreError> {
+    db::init_schema(conn)
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

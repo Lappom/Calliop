@@ -50,6 +50,9 @@ pub fn add_app_context_rule(
     if inserted {
         refresh_app_context_rules_state(&state)?;
         emit_app_context_updated(&app);
+        if let Err(err) = state.achievements.on_feature_change(&app) {
+            eprintln!("achievement evaluation failed: {err}");
+        }
     }
 
     Ok(inserted)

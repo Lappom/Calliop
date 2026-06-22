@@ -19,6 +19,7 @@ use crate::inject::{InjectError, InjectOutcome, TextInjector};
 use crate::llm::LlamaEngine;
 use crate::observe::CorrectionHandler;
 use crate::store::{AppContextRule, NewDictation, Snippet, Store};
+use crate::achievements::{AchievementEngine, DictationEvent};
 use crate::stt::{SttError, SttLanguage, WhisperEngine};
 
 use super::corrections::{apply_corrections, CorrectionRule};
@@ -710,6 +711,7 @@ pub struct PipelineOrchestrator {
     session_detected_language: Arc<RwLock<Option<SttLanguage>>>,
     pending_detection: Arc<Mutex<Option<SttLanguage>>>,
     history_store: Option<Arc<Store>>,
+    achievement_engine: Option<Arc<AchievementEngine>>,
     vad_chunk_size: usize,
     input_device: String,
 }
@@ -744,6 +746,7 @@ impl PipelineOrchestrator {
             session_detected_language: Arc::new(RwLock::new(None)),
             pending_detection: Arc::new(Mutex::new(None)),
             history_store: None,
+            achievement_engine: None,
             vad_chunk_size: crate::system::DEFAULT_VAD_CHUNK_SIZE,
             input_device: crate::audio::DEFAULT_INPUT_DEVICE_ID.into(),
         })
@@ -759,6 +762,17 @@ impl PipelineOrchestrator {
 
     pub fn set_history_store(&mut self, store: Arc<Store>) {
         self.history_store = Some(store);
+    }
+
+    pub fn set_achievement_engine(&mut self, engine: Arc<AchievementEngine>) {
+        self.achievement_engine = Some(engine);
+    }
+
+    fn session_language_code(&self) -> String {
+        if let Some(lang) = *self.session_detected_language.read() {
+            return lang.as_setting_value();
+        }
+        self.session_stt_language.read().as_setting_value()
     }
 
     pub fn set_dictionary_prompt(&mut self, prompt: Option<String>) {
@@ -804,6 +818,15 @@ impl PipelineOrchestrator {
         match self.state {
             PipelineState::Recording => {
                 self.request_cancel();
+                let _ = app.emit(
+                    "dictation-cancelled",
+                    serde_json::json!({ "during": "recording" }),
+                );
+                if let Some(engine) = &self.achievement_engine {
+                    if let Err(err) = engine.on_cancel(app) {
+                        eprintln!("achievement cancel evaluation failed: {err}");
+                    }
+                }
                 self.abort_session(app);
                 self.finish_cancelled(app);
                 true
@@ -814,6 +837,11 @@ impl PipelineOrchestrator {
                     "dictation-cancelled",
                     serde_json::json!({ "during": "transcribing" }),
                 );
+                if let Some(engine) = &self.achievement_engine {
+                    if let Err(err) = engine.on_cancel(app) {
+                        eprintln!("achievement cancel evaluation failed: {err}");
+                    }
+                }
                 true
             }
             PipelineState::Injecting | PipelineState::Idle => false,
@@ -1363,12 +1391,16 @@ impl PipelineOrchestrator {
                     },
                 );
             }
-            if inject_outcome.is_some_and(|o| o.succeeded()) {
+            if inject_outcome.as_ref().is_some_and(|o| o.succeeded()) {
                 self.maybe_spawn_correction_watcher(app, text_to_inject);
             }
         }
         let inject_ms = inject_start.elapsed().as_millis() as u64;
         let total_ms = stop_instant.elapsed().as_millis() as u64;
+        let inject_fallback = matches!(
+            inject_outcome.as_ref(),
+            Some(InjectOutcome::CopiedToClipboardFallback)
+        );
 
         let _ = app.emit(
             "latency-metrics",
@@ -1418,6 +1450,24 @@ impl PipelineOrchestrator {
                     eprintln!("failed to persist dictation history: {err}");
                 } else {
                     let _ = app.emit("history-updated", ());
+                    if let Some(engine) = &self.achievement_engine {
+                        let word_count = crate::store::count_words(text_to_inject) as u64;
+                        let llm_skipped = matches!(llm_status, LlmStatus::Skipped | LlmStatus::Failed)
+                            && self.auto_edit.load(Ordering::SeqCst);
+                        let event = DictationEvent {
+                            text: text_to_inject.to_string(),
+                            word_count,
+                            audio_duration_ms,
+                            total_ms,
+                            app_exe: active_window.as_ref().map(|w| w.exe_name.clone()),
+                            inject_fallback,
+                            llm_skipped,
+                            stt_language: self.session_language_code(),
+                        };
+                        if let Err(err) = engine.on_dictation(app, &event) {
+                            eprintln!("achievement evaluation failed: {err}");
+                        }
+                    }
                 }
             }
         }

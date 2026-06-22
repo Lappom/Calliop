@@ -12,6 +12,8 @@ import { StyleView } from "./components/style/StyleView";
 import { DictionaryView } from "./components/dictionary/DictionaryView";
 import { HistoryView } from "./components/history/HistoryView";
 import { InsightView } from "./components/insight/InsightView";
+import { AchievementsView } from "./components/achievements/AchievementsView";
+import { AchievementUnlockQueue } from "./components/achievements/AchievementUnlockQueue";
 import { MainView } from "./components/main/MainView";
 import { OnboardingView } from "./components/onboarding/OnboardingView";
 import { SettingsModal } from "./components/settings/SettingsModal";
@@ -83,6 +85,7 @@ function App() {
         <ModelDownloadToasts />
         <LlmSkipToast />
         <UpdateToast />
+        <AchievementUnlockQueue />
       </>
     );
   }
@@ -101,6 +104,7 @@ function App() {
         <ModelDownloadToasts />
         <LlmSkipToast />
         <UpdateToast />
+        <AchievementUnlockQueue />
       </>
     );
   }
@@ -123,6 +127,7 @@ function App() {
             {currentView === "insight" && (
               <InsightView latencyMetrics={pipeline.latencyMetrics} />
             )}
+            {currentView === "achievements" && <AchievementsView />}
           </PageTransition>
         </AppShell>
       </AppFrame>
@@ -135,6 +140,7 @@ function App() {
       <ModelDownloadToasts />
       <LlmSkipToast />
       <UpdateToast />
+      <AchievementUnlockQueue />
     </>
   );
 }

@@ -6,7 +6,8 @@ export type AppView =
   | "snippets"
   | "style"
   | "history"
-  | "insight";
+  | "insight"
+  | "achievements";
 
 export function isAppView(value: string): value is AppView {
   return (
@@ -15,7 +16,8 @@ export function isAppView(value: string): value is AppView {
     value === "snippets" ||
     value === "style" ||
     value === "history" ||
-    value === "insight"
+    value === "insight" ||
+    value === "achievements"
   );
 }
 
@@ -27,6 +29,7 @@ const PRIMARY_VIEW_IDS: AppView[] = [
   "main",
   "history",
   "insight",
+  "achievements",
   "dictionary",
   "snippets",
   "style",

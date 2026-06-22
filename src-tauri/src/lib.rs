@@ -1,3 +1,4 @@
+pub mod achievements;
 pub mod app_context;
 pub mod audio;
 pub mod dictionary_notify;
@@ -114,6 +115,7 @@ pub(crate) struct AppState {
     pub(crate) whisper_engine: Arc<Mutex<Option<stt::WhisperEngine>>>,
     pub(crate) llm_engine: Arc<Mutex<Option<llm::LlamaEngine>>>,
     pub(crate) store: Arc<Store>,
+    pub(crate) achievements: Arc<achievements::AchievementEngine>,
     pub(crate) prompt_cache: Mutex<WhisperPromptCache>,
     pub(crate) dictionary_notifier: Arc<DictionaryNotifier>,
     pub(crate) models_ready_notifier: Arc<ModelsReadyNotifier>,
@@ -751,6 +753,9 @@ pub(crate) fn apply_learned_correction(
     }
 
     state.dictionary_notifier.queue_added(app, added.clone());
+    if let Err(err) = state.achievements.on_learned_correction(app) {
+        eprintln!("achievement evaluation failed: {err}");
+    }
     Ok(added)
 }
 
@@ -1977,6 +1982,10 @@ pub fn run() {
         eprintln!("failed to load dictionary correction rules cache: {err}");
     }
     pipeline.lock().set_history_store(Arc::clone(&store));
+    let achievements = Arc::new(achievements::AchievementEngine::new(Arc::clone(&store)));
+    pipeline
+        .lock()
+        .set_achievement_engine(Arc::clone(&achievements));
 
     let whisper_engine = Arc::new(Mutex::new(None));
     let llm_engine = Arc::new(Mutex::new(None));
@@ -2016,6 +2025,7 @@ pub fn run() {
             whisper_engine: whisper_engine.clone(),
             llm_engine: llm_engine.clone(),
             store,
+            achievements,
             prompt_cache,
             dictionary_notifier,
             models_ready_notifier: Arc::new(ModelsReadyNotifier::new()),
@@ -2048,6 +2058,13 @@ pub fn run() {
             build_tray(app.handle()).map_err(|e| e.to_string())?;
             sync_tray_menus(app.handle());
             let _ = app_context::get_active_window();
+
+            {
+                let state = app.state::<AppState>();
+                if let Err(err) = state.achievements.retroactive_scan(app.handle()) {
+                    eprintln!("achievement retroactive scan failed: {err}");
+                }
+            }
 
             let preload_whisper = initial_perf.preload_whisper;
             let preload_llm = initial_perf.preload_llm && initial_settings.auto_edit;
@@ -2175,7 +2192,9 @@ pub fn run() {
             commands::count_search_dictations,
             commands::copy_dictation,
             commands::reinject_dictation,
-            commands::get_insights
+            commands::get_insights,
+            commands::get_achievements,
+            commands::mark_achievements_seen
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")

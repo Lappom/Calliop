@@ -1,5 +1,6 @@
 import { LayoutGroup, motion } from "motion/react";
 import { useMemo } from "react";
+import { useAchievements } from "../../hooks/useAchievements";
 import { useTranslation } from "react-i18next";
 import {
   LAYOUT_TRANSITION,
@@ -78,6 +79,7 @@ function NavButton({
   onClose,
   layoutTransition,
   animateIndicator,
+  badge,
 }: {
   item: NavItem;
   active: boolean;
@@ -85,6 +87,7 @@ function NavButton({
   onClose: () => void;
   layoutTransition: typeof LAYOUT_TRANSITION | typeof LAYOUT_TRANSITION_REDUCED;
   animateIndicator: boolean;
+  badge?: number;
 }) {
   const Icon = item.icon;
 
@@ -117,7 +120,12 @@ function NavButton({
         ].join(" ")}
         aria-hidden
       />
-      <span className="relative z-[1]">{item.label}</span>
+      <span className="relative z-[1] flex-1 text-left">{item.label}</span>
+      {badge != null && badge > 0 && (
+        <span className="relative z-[1] inline-flex min-w-5 items-center justify-center rounded-full bg-accent-orange px-1.5 py-0.5 text-[10px] font-medium text-on-light">
+          {badge > 9 ? "9+" : badge}
+        </span>
+      )}
     </button>
   );
 }
@@ -184,6 +192,8 @@ export function Sidebar({
     : LAYOUT_TRANSITION;
   const navSections = useMemo(() => getNavSections(t), [t]);
   const bottomNavItems = useMemo(() => getBottomNavItems(t), [t]);
+  const { summary } = useAchievements();
+  const unseenAchievements = summary?.unseenCount ?? 0;
 
   const navButtonProps = {
     onNavigate,
@@ -257,6 +267,9 @@ export function Sidebar({
                       item={item}
                       active={currentView === item.id}
                       animateIndicator
+                      badge={
+                        item.id === "achievements" ? unseenAchievements : undefined
+                      }
                       {...navButtonProps}
                     />
                   ))}

@@ -184,6 +184,7 @@ pub(crate) fn init_schema(conn: &Connection) -> Result<(), StoreError> {
             INSERT INTO dictations_fts(rowid, text) VALUES (new.id, new.text);
         END;",
     )?;
+    crate::achievements::migrate_achievement_tables(conn)?;
     Ok(())
 }
 

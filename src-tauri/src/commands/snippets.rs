@@ -49,6 +49,9 @@ pub fn add_snippet(
             return Err(err);
         }
         emit_snippets_updated(&app);
+        if let Err(err) = state.achievements.on_feature_change(&app) {
+            eprintln!("achievement evaluation failed: {err}");
+        }
     }
 
     Ok(inserted)

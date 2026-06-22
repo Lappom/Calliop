@@ -1,3 +1,4 @@
+mod achievements;
 mod app_context;
 mod audio;
 mod dictionary;
@@ -9,6 +10,7 @@ mod settings;
 mod snippets;
 mod update;
 
+pub use achievements::*;
 pub use app_context::*;
 pub use audio::*;
 pub use dictionary::*;
