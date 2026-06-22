@@ -2,7 +2,10 @@
 
 mod injector;
 
-pub use injector::{InjectError, SavedClipboard, TextInjector};
+pub use injector::{
+    InjectConfig, InjectError, InjectOutcome, InjectionStrategy, SavedClipboard, TextInjector,
+    DEFAULT_PASTE_DELAY_MS,
+};
 
 pub fn module_name() -> &'static str {
     "inject"

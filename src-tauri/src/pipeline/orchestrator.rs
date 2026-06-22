@@ -14,8 +14,8 @@ use calliop_prompt::{
 };
 
 use crate::app_context::{get_active_window, resolve_tone, ActiveWindow};
-use crate::audio::{AudioCapture, SpeechSegment, VadSegmenter, TARGET_SAMPLE_RATE};
-use crate::inject::{InjectError, TextInjector};
+use crate::audio::{AudioCapture, SpeechSegment, VadSegmenter, AUDIO_BAND_COUNT, TARGET_SAMPLE_RATE};
+use crate::inject::{InjectError, InjectOutcome, TextInjector};
 use crate::llm::LlamaEngine;
 use crate::observe::CorrectionHandler;
 use crate::store::{AppContextRule, NewDictation, Snippet, Store};
@@ -76,6 +76,11 @@ fn prepare_partial_transcript(
 /// Maximum time to wait for LLM cleanup before inject or worker kill.
 const LLM_CLEANUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
 const LLM_CLEANUP_TIMEOUT_MAX: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// Bounded channel capacities for streaming dictation workers.
+const AUDIO_CHUNK_CHANNEL_CAPACITY: usize = 64;
+const AUDIO_LEVEL_CHANNEL_CAPACITY: usize = 8;
+const SEGMENT_CHANNEL_CAPACITY: usize = 32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -173,7 +178,12 @@ pub struct DictationBusyEvent {
 #[derive(Debug, Clone, Serialize)]
 pub struct AudioLevelEvent {
     pub level: f32,
-    pub bands: Vec<f32>,
+    pub bands: [f32; AUDIO_BAND_COUNT],
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct InjectFallbackEvent {
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -957,8 +967,10 @@ impl PipelineOrchestrator {
 
         let vad = VadSegmenter::with_chunk_size(self.vad_chunk_size)?;
 
-        let (chunk_tx, chunk_rx) = std::sync::mpsc::channel::<Vec<f32>>();
-        let (level_tx, level_rx) = std::sync::mpsc::channel();
+        let (chunk_tx, chunk_rx) =
+            std::sync::mpsc::sync_channel::<Vec<f32>>(AUDIO_CHUNK_CHANNEL_CAPACITY);
+        let (level_tx, level_rx) =
+            std::sync::mpsc::sync_channel(AUDIO_LEVEL_CHANNEL_CAPACITY);
         self.audio.start_with_streaming(
             Some(chunk_tx),
             Some(level_tx),
@@ -986,7 +998,8 @@ impl PipelineOrchestrator {
         let auto_edit = Arc::clone(&self.auto_edit);
         let correction_rules = Arc::clone(&self.correction_rules);
         let session_tone_arc = Arc::clone(&self.session_tone);
-        let (segment_tx, segment_rx) = std::sync::mpsc::channel::<PendingSegment>();
+        let (segment_tx, segment_rx) =
+            std::sync::mpsc::sync_channel::<PendingSegment>(SEGMENT_CHANNEL_CAPACITY);
 
         let stt_context = StreamingSttContext {
             whisper,
@@ -1024,7 +1037,7 @@ impl PipelineOrchestrator {
                     "audio-level",
                     AudioLevelEvent {
                         level: sample.level,
-                        bands: sample.bands.to_vec(),
+                        bands: sample.bands,
                     },
                 );
                 if level_stop.load(Ordering::SeqCst) {
@@ -1055,15 +1068,7 @@ impl PipelineOrchestrator {
         Ok(())
     }
 
-    fn finish_dictation(&mut self, app: &AppHandle) -> Result<(), PipelineError> {
-        let stop_instant = Instant::now();
-
-        let samples = self.audio.stop()?;
-        let audio_duration_ms =
-            (samples.len() as u64).saturating_mul(1_000) / u64::from(TARGET_SAMPLE_RATE);
-
-        self.set_state(app, PipelineState::Transcribing, None);
-
+    fn stop_streaming_workers(&mut self) {
         if let Some(session) = self.streaming.take() {
             session.stop_flag.store(true, Ordering::SeqCst);
             if let Some(worker) = session.vad_worker {
@@ -1076,14 +1081,14 @@ impl PipelineOrchestrator {
                 let _ = listener.join();
             }
         }
+    }
 
-        if self.check_cancelled(app) {
-            return Ok(());
-        }
-
+    fn collect_segments_with_fallback(
+        &mut self,
+        samples: &[f32],
+    ) -> Result<(Vec<SegmentTranscript>, u64), PipelineError> {
         let streaming_stt_ms = self.streaming_stt_ms.load(Ordering::SeqCst);
-
-        let mut transcripts = self.segment_transcripts.lock().clone();
+        let mut transcripts = std::mem::take(&mut *self.segment_transcripts.lock());
         let failed_segments = self.failed_segments.lock().drain(..).collect::<Vec<_>>();
 
         let mut fallback_stt_ms = 0_u64;
@@ -1105,12 +1110,11 @@ impl PipelineOrchestrator {
                     }
                 }
 
-                // Fallback: if VAD produced no segments, transcribe the full buffer.
                 if transcripts.is_empty() && !samples.is_empty() {
                     let fallback_start = Instant::now();
                     let fallback_language = *self.session_stt_language.read();
                     let result = engine.transcribe_with_language(
-                        &samples,
+                        samples,
                         prompt.as_deref(),
                         fallback_language,
                     )?;
@@ -1128,35 +1132,36 @@ impl PipelineOrchestrator {
             }
         }
 
-        let stt_ms = streaming_stt_ms + fallback_stt_ms;
+        Ok((transcripts, streaming_stt_ms + fallback_stt_ms))
+    }
+
+    fn resolve_final_text(
+        &mut self,
+        app: &AppHandle,
+        transcripts: &[SegmentTranscript],
+    ) -> (
+        String,
+        u64,
+        bool,
+        LlmStatus,
+        Option<String>,
+        u64,
+    ) {
         let rules = self.correction_rules.read().clone();
         let raw = {
-            let joined = join_transcript_segments_with_pauses(&transcripts)
+            let joined = join_transcript_segments_with_pauses(transcripts)
                 .trim()
                 .to_string();
             apply_corrections(&joined, &rules)
         };
-        let stt_wait_ms = stop_instant.elapsed().as_millis() as u64;
 
-        if self.check_cancelled(app) {
-            return Ok(());
-        }
-
-        if stt_wait_ms > audio_duration_ms.saturating_mul(2).max(500) {
-            eprintln!(
-                "stt_wait_ms ({stt_wait_ms}) exceeds 2x audio duration ({audio_duration_ms}) — check segment backlog"
-            );
-        }
-
-        // Tone and target app captured at recording start (before LLM wait/inject).
-        let (active_tone, active_window) = self.resolve_active_context();
-
+        let (active_tone, _) = self.resolve_active_context();
         let auto_edit = self.auto_edit.load(Ordering::SeqCst);
         let snippets = self.snippets.read().clone();
         let snippet_ctx = build_snippet_variable_context(self.history_store.as_deref());
         let snippet_fallback = prepare_display_transcript(&raw, &snippets, &snippet_ctx);
         let llm_input = if !raw.is_empty() && auto_edit {
-            build_llm_ready_text(&transcripts, &rules, &snippets)
+            build_llm_ready_text(transcripts, &rules, &snippets)
         } else {
             None
         };
@@ -1171,10 +1176,6 @@ impl PipelineOrchestrator {
 
         if !raw.is_empty() && auto_edit && self.llm.lock().is_none() && pipelined.is_none() {
             wait_for_llm_engine(&self.llm, LLM_CLEANUP_TIMEOUT, &self.cancel_requested);
-        }
-
-        if self.check_cancelled(app) {
-            return Ok(());
         }
 
         let mut llm_blocked_ms = 0_u64;
@@ -1241,7 +1242,7 @@ impl PipelineOrchestrator {
                                 Arc::clone(&self.llm),
                                 Arc::clone(&self.llm_ready),
                                 Arc::clone(&self.auto_edit),
-                                &transcripts,
+                                transcripts,
                                 &rules,
                                 &snippets,
                                 active_tone,
@@ -1292,15 +1293,48 @@ impl PipelineOrchestrator {
             crate::spawn_llm_recovery_if_needed(app.clone());
         }
 
-        if self.check_cancelled(app) {
-            return Ok(());
-        }
+        (
+            text_to_inject,
+            llm_ms,
+            llm_invalidated,
+            llm_status,
+            llm_skip_reason,
+            llm_blocked_ms,
+        )
+    }
 
+    fn inject_and_record(
+        &mut self,
+        app: &AppHandle,
+        text_to_inject: &str,
+        audio_duration_ms: u64,
+        stt_ms: u64,
+        stt_wait_ms: u64,
+        llm_ms: u64,
+        llm_blocked_ms: u64,
+        llm_status: LlmStatus,
+        llm_skip_reason: Option<String>,
+        stop_instant: Instant,
+    ) -> Result<(), PipelineError> {
         self.set_state(app, PipelineState::Injecting, None);
         let inject_start = Instant::now();
+        let mut inject_outcome = None;
         if !text_to_inject.is_empty() {
-            self.injector.inject(&text_to_inject)?;
-            self.maybe_spawn_correction_watcher(app, &text_to_inject);
+            inject_outcome = Some(self.injector.inject_resilient(text_to_inject)?);
+            if matches!(
+                inject_outcome,
+                Some(InjectOutcome::CopiedToClipboardFallback)
+            ) {
+                let _ = app.emit(
+                    "inject-fallback",
+                    InjectFallbackEvent {
+                        reason: "paste_failed_copied_to_clipboard".into(),
+                    },
+                );
+            }
+            if inject_outcome.is_some_and(|o| o.succeeded()) {
+                self.maybe_spawn_correction_watcher(app, text_to_inject);
+            }
         }
         let inject_ms = inject_start.elapsed().as_millis() as u64;
         let total_ms = stop_instant.elapsed().as_millis() as u64;
@@ -1331,10 +1365,11 @@ impl PipelineOrchestrator {
             );
         }
 
+        let (_, active_window) = self.resolve_active_context();
         if !text_to_inject.is_empty() {
             if let Some(store) = &self.history_store {
                 let entry = NewDictation {
-                    text: text_to_inject.clone(),
+                    text: text_to_inject.to_string(),
                     audio_duration_ms,
                     stt_ms,
                     llm_ms,
@@ -1350,6 +1385,57 @@ impl PipelineOrchestrator {
                 }
             }
         }
+
+        let _ = inject_outcome;
+        Ok(())
+    }
+
+    fn finish_dictation(&mut self, app: &AppHandle) -> Result<(), PipelineError> {
+        let stop_instant = Instant::now();
+
+        let samples = self.audio.stop()?;
+        let audio_duration_ms =
+            (samples.len() as u64).saturating_mul(1_000) / u64::from(TARGET_SAMPLE_RATE);
+
+        self.set_state(app, PipelineState::Transcribing, None);
+        self.stop_streaming_workers();
+
+        if self.check_cancelled(app) {
+            return Ok(());
+        }
+
+        let (transcripts, stt_ms) = self.collect_segments_with_fallback(&samples)?;
+        let stt_wait_ms = stop_instant.elapsed().as_millis() as u64;
+
+        if self.check_cancelled(app) {
+            return Ok(());
+        }
+
+        if stt_wait_ms > audio_duration_ms.saturating_mul(2).max(500) {
+            eprintln!(
+                "stt_wait_ms ({stt_wait_ms}) exceeds 2x audio duration ({audio_duration_ms}) — check segment backlog"
+            );
+        }
+
+        let (text_to_inject, llm_ms, _llm_invalidated, llm_status, llm_skip_reason, llm_blocked_ms) =
+            self.resolve_final_text(app, &transcripts);
+
+        if self.check_cancelled(app) {
+            return Ok(());
+        }
+
+        self.inject_and_record(
+            app,
+            &text_to_inject,
+            audio_duration_ms,
+            stt_ms,
+            stt_wait_ms,
+            llm_ms,
+            llm_blocked_ms,
+            llm_status,
+            llm_skip_reason,
+            stop_instant,
+        )?;
 
         hide_overlay(app);
         *self.session_active_window.write() = None;
@@ -1694,50 +1780,96 @@ struct StreamingSttContext {
     session_tone: Arc<RwLock<ToneProfile>>,
 }
 
+fn enqueue_streaming_segments(
+    segments: Vec<SpeechSegment>,
+    segment_index: &mut u32,
+    segment_tx: &std::sync::mpsc::SyncSender<PendingSegment>,
+    stop_flag: &AtomicBool,
+) {
+    let draining = stop_flag.load(Ordering::SeqCst);
+    for segment in segments {
+        let pending = PendingSegment {
+            segment,
+            index: *segment_index,
+        };
+        if draining {
+            match segment_tx.send(pending) {
+                Ok(()) => *segment_index += 1,
+                Err(_) => return,
+            }
+            continue;
+        }
+
+        let mut pending = pending;
+        loop {
+            match segment_tx.try_send(pending) {
+                Ok(()) => {
+                    *segment_index += 1;
+                    break;
+                }
+                Err(std::sync::mpsc::TrySendError::Full(p)) => {
+                    pending = p;
+                    thread::sleep(std::time::Duration::from_millis(1));
+                }
+                Err(std::sync::mpsc::TrySendError::Disconnected(_)) => return,
+            }
+        }
+    }
+}
+
 fn streaming_worker(
     chunk_rx: std::sync::mpsc::Receiver<Vec<f32>>,
     stop_flag: Arc<AtomicBool>,
     mut vad: VadSegmenter,
-    segment_tx: std::sync::mpsc::Sender<PendingSegment>,
+    segment_tx: std::sync::mpsc::SyncSender<PendingSegment>,
 ) {
     let mut segment_index = 0_u32;
+    const POLL: std::time::Duration = std::time::Duration::from_millis(50);
 
-    let enqueue_segments = |segments: Vec<SpeechSegment>, index: &mut u32| {
-        for segment in segments {
-            let _ = segment_tx.send(PendingSegment {
-                segment,
-                index: *index,
-            });
-            *index += 1;
-        }
-    };
-
-    while let Ok(chunk) = chunk_rx.recv() {
+    let process_chunk = |chunk: Vec<f32>,
+                         vad: &mut VadSegmenter,
+                         segment_index: &mut u32,
+                         segment_tx: &std::sync::mpsc::SyncSender<PendingSegment>,
+                         stop_flag: &AtomicBool| {
         let segments = match vad.push(&chunk) {
             Ok(segments) => segments,
             Err(err) => {
                 eprintln!("VAD error: {err}");
-                continue;
+                return;
             }
         };
-        enqueue_segments(segments, &mut segment_index);
+        enqueue_streaming_segments(segments, segment_index, segment_tx, stop_flag);
+    };
+
+    loop {
         if stop_flag.load(Ordering::SeqCst) {
             while let Ok(chunk) = chunk_rx.try_recv() {
-                let segments = match vad.push(&chunk) {
-                    Ok(segments) => segments,
-                    Err(err) => {
-                        eprintln!("VAD error: {err}");
-                        continue;
-                    }
-                };
-                enqueue_segments(segments, &mut segment_index);
+                process_chunk(
+                    chunk,
+                    &mut vad,
+                    &mut segment_index,
+                    &segment_tx,
+                    &stop_flag,
+                );
             }
             break;
+        }
+
+        match chunk_rx.recv_timeout(POLL) {
+            Ok(chunk) => process_chunk(
+                chunk,
+                &mut vad,
+                &mut segment_index,
+                &segment_tx,
+                &stop_flag,
+            ),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
         }
     }
 
     if let Ok(segments) = vad.flush() {
-        enqueue_segments(segments, &mut segment_index);
+        enqueue_streaming_segments(segments, &mut segment_index, &segment_tx, &stop_flag);
     }
 }
 

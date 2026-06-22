@@ -15,26 +15,25 @@ pub mod system_notify;
 pub mod ui;
 pub mod update;
 pub mod user_error;
+mod commands;
 
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use calliop_prompt::ToneProfile;
-use dictionary_notify::{DictionaryNotifier, DictionaryUpdatedPayload};
-use inject::TextInjector;
+use dictionary_notify::DictionaryNotifier;
 use parking_lot::Mutex;
 use pipeline::{
-    expand_snippet_variables, spawn_start, spawn_stop, spawn_toggle, CorrectionRule,
-    PipelineOrchestrator, PipelineState, PipelineStateEvent, SnippetVariableContext,
+    request_dictation, DictationIntent, CorrectionRule,
+    PipelineOrchestrator, PipelineState, PipelineStateEvent,
 };
 use serde::{Deserialize, Serialize};
 use store::{
-    extract_correction_words, is_valid_app_context_pattern, is_valid_dictionary_word,
-    is_valid_snippet_content, is_valid_trigger, normalize_trigger, normalize_word,
-    AppContextMatchType, AppContextRule, AppSettings, DictationEntry, DictionarySource,
-    DictionaryWord, InferenceBackend, Insights, NewAppContextRule, Snippet, SnippetImport, Store,
-    DEFAULT_LIST_LIMIT, KEY_AUTOSTART,
+    extract_correction_words,
+    AppContextMatchType, AppContextRule, AppSettings, DictionarySource,
+    DictionaryWord, Snippet, Store,
+    KEY_AUTOSTART,
 };
 use stt::{SttLanguage, WhisperModel, WhisperPromptCache, MAX_INITIAL_PROMPT_WORDS};
 use system::{resolve_perf_config, RuntimePerfConfig, SystemCapabilities};
@@ -42,7 +41,7 @@ use system_notify::{notify_update_ready, ModelsReadyNotifier};
 use tauri::{
     menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Manager, RunEvent, State, Theme, WindowEvent,
+    AppHandle, Emitter, Manager, RunEvent, Theme, WindowEvent,
 };
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
@@ -105,45 +104,45 @@ struct NavigateViewPayload {
     view: String,
 }
 
-struct MicProbeState {
-    capture: Mutex<Option<audio::AudioCapture>>,
-    level_task: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
+pub(crate) struct MicProbeState {
+    pub(crate) capture: Mutex<Option<audio::AudioCapture>>,
+    pub(crate) level_task: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
 }
 
-struct AppState {
-    pipeline: Arc<Mutex<PipelineOrchestrator>>,
-    whisper_engine: Arc<Mutex<Option<stt::WhisperEngine>>>,
-    llm_engine: Arc<Mutex<Option<llm::LlamaEngine>>>,
-    store: Arc<Store>,
-    prompt_cache: Mutex<WhisperPromptCache>,
-    dictionary_notifier: Arc<DictionaryNotifier>,
-    models_ready_notifier: Arc<ModelsReadyNotifier>,
-    capabilities: SystemCapabilities,
-    perf_config: Mutex<RuntimePerfConfig>,
-    last_activity: Mutex<Instant>,
-    model_ready: AtomicBool,
-    model_init: Arc<tokio::sync::Mutex<()>>,
-    llm_ready: Arc<AtomicBool>,
-    llm_init: Arc<tokio::sync::Mutex<()>>,
-    hotkey_press: Mutex<HotkeyPressState>,
-    deferred_llm_on_boot: AtomicBool,
-    current_hotkey: Mutex<hotkey::HotkeyBinding>,
-    hotkey_suspend_depth: AtomicU32,
-    whisper_settings_change_depth: AtomicU32,
-    loaded_whisper: Mutex<Option<WhisperModel>>,
-    loaded_llm: Mutex<Option<llm::LlmModel>>,
-    mic_probe: MicProbeState,
-    pending_update: update::PendingUpdateStore,
-    update_check_in_progress: AtomicBool,
+pub(crate) struct AppState {
+    pub(crate) pipeline: Arc<Mutex<PipelineOrchestrator>>,
+    pub(crate) whisper_engine: Arc<Mutex<Option<stt::WhisperEngine>>>,
+    pub(crate) llm_engine: Arc<Mutex<Option<llm::LlamaEngine>>>,
+    pub(crate) store: Arc<Store>,
+    pub(crate) prompt_cache: Mutex<WhisperPromptCache>,
+    pub(crate) dictionary_notifier: Arc<DictionaryNotifier>,
+    pub(crate) models_ready_notifier: Arc<ModelsReadyNotifier>,
+    pub(crate) capabilities: SystemCapabilities,
+    pub(crate) perf_config: Mutex<RuntimePerfConfig>,
+    pub(crate) last_activity: Mutex<Instant>,
+    pub(crate) model_ready: AtomicBool,
+    pub(crate) model_init: Arc<tokio::sync::Mutex<()>>,
+    pub(crate) llm_ready: Arc<AtomicBool>,
+    pub(crate) llm_init: Arc<tokio::sync::Mutex<()>>,
+    pub(crate) hotkey_press: Mutex<HotkeyPressState>,
+    pub(crate) deferred_llm_on_boot: AtomicBool,
+    pub(crate) current_hotkey: Mutex<hotkey::HotkeyBinding>,
+    pub(crate) hotkey_suspend_depth: AtomicU32,
+    pub(crate) whisper_settings_change_depth: AtomicU32,
+    pub(crate) loaded_whisper: Mutex<Option<WhisperModel>>,
+    pub(crate) loaded_llm: Mutex<Option<llm::LlmModel>>,
+    pub(crate) mic_probe: MicProbeState,
+    pub(crate) pending_update: update::PendingUpdateStore,
+    pub(crate) update_check_in_progress: AtomicBool,
 }
 
 /// Held while `set_settings` downloads or reloads the active Whisper model.
-struct WhisperSettingsChangeGuard<'a> {
+pub(crate) struct WhisperSettingsChangeGuard<'a> {
     depth: &'a AtomicU32,
 }
 
 impl<'a> WhisperSettingsChangeGuard<'a> {
-    fn new(state: &'a AppState) -> Self {
+    pub(crate) fn new(state: &'a AppState) -> Self {
         Self::acquire(&state.whisper_settings_change_depth)
     }
 
@@ -163,11 +162,11 @@ fn is_dictation_blocked_by_settings(state: &AppState) -> bool {
     state.whisper_settings_change_depth.load(Ordering::SeqCst) > 0
 }
 
-fn is_dictation_start_blocked_by_settings(state: &AppState, pipeline_state: PipelineState) -> bool {
+pub(crate) fn is_dictation_start_blocked_by_settings(state: &AppState, pipeline_state: PipelineState) -> bool {
     pipeline_state == PipelineState::Idle && is_dictation_blocked_by_settings(state)
 }
 
-fn notify_dictation_blocked_by_settings(app: &AppHandle, state: &AppState) {
+pub(crate) fn notify_dictation_blocked_by_settings(app: &AppHandle, state: &AppState) {
     clear_deferred_hotkey_start(state);
     let _ = app.emit(
         "dictation-blocked",
@@ -177,17 +176,17 @@ fn notify_dictation_blocked_by_settings(app: &AppHandle, state: &AppState) {
     );
 }
 
-fn llm_engine_is_live(state: &AppState) -> bool {
+pub(crate) fn llm_engine_is_live(state: &AppState) -> bool {
     state.llm_ready.load(Ordering::SeqCst) && state.llm_engine.lock().is_some()
 }
 
-fn shutdown_llm_engine(state: &AppState) {
+pub(crate) fn shutdown_llm_engine(state: &AppState) {
     state.llm_ready.store(false, Ordering::SeqCst);
     *state.llm_engine.lock() = None;
     *state.loaded_llm.lock() = None;
 }
 
-fn refresh_perf_config(state: &AppState, settings: &AppSettings, start_minimized: bool) {
+pub(crate) fn refresh_perf_config(state: &AppState, settings: &AppSettings, start_minimized: bool) {
     let perf = resolve_perf_config(settings, &state.capabilities, start_minimized);
     state
         .pipeline
@@ -263,7 +262,7 @@ pub(crate) fn spawn_llm_recovery_if_needed(app: AppHandle) {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct SettingsPayload {
+pub(crate) struct SettingsPayload {
     auto_edit: bool,
     auto_learn: bool,
     auto_update: bool,
@@ -279,7 +278,7 @@ struct SettingsPayload {
 }
 
 #[derive(Debug, Clone, Serialize)]
-struct ModelStatusEntry {
+pub(crate) struct ModelStatusEntry {
     id: String,
     label: String,
     installed: bool,
@@ -288,12 +287,12 @@ struct ModelStatusEntry {
 }
 
 #[derive(Debug, Clone, Serialize)]
-struct ModelsStatusPayload {
+pub(crate) struct ModelsStatusPayload {
     whisper: Vec<ModelStatusEntry>,
     llm: Vec<ModelStatusEntry>,
 }
 
-fn settings_to_payload(settings: &AppSettings) -> SettingsPayload {
+pub(crate) fn settings_to_payload(settings: &AppSettings) -> SettingsPayload {
     SettingsPayload {
         auto_edit: settings.auto_edit,
         auto_learn: settings.auto_learn,
@@ -317,7 +316,7 @@ fn current_ui_language(app: &AppHandle) -> String {
         .unwrap_or_else(ui::locale::default_ui_language)
 }
 
-fn parse_ui_language(value: &str) -> String {
+pub(crate) fn parse_ui_language(value: &str) -> String {
     if value.trim() == "en" {
         "en".into()
     } else {
@@ -329,7 +328,7 @@ fn file_size_bytes(path: &std::path::Path) -> Option<u64> {
     std::fs::metadata(path).ok().map(|meta| meta.len())
 }
 
-fn build_models_status(state: &AppState, settings: &AppSettings) -> ModelsStatusPayload {
+pub(crate) fn build_models_status(state: &AppState, settings: &AppSettings) -> ModelsStatusPayload {
     let active_whisper =
         system::resolve_whisper_model(settings.whisper_model(), &state.capabilities);
     let active_llm = system::resolve_llm_model(settings.llm_model(), &state.capabilities);
@@ -378,7 +377,7 @@ pub(crate) fn whisper_is_live(state: &AppState) -> bool {
 }
 
 /// Returns true when a previously live Whisper engine was invalidated.
-fn invalidate_whisper_engine(state: &AppState, force: bool) -> bool {
+pub(crate) fn invalidate_whisper_engine(state: &AppState, force: bool) -> bool {
     if !force && state.pipeline.lock().state() != PipelineState::Idle {
         return false;
     }
@@ -390,7 +389,7 @@ fn invalidate_whisper_engine(state: &AppState, force: bool) -> bool {
     was_live
 }
 
-fn emit_model_unready_if_needed(app: &AppHandle, was_live: bool) {
+pub(crate) fn emit_model_unready_if_needed(app: &AppHandle, was_live: bool) {
     if was_live {
         let _ = app.emit("model-unready", ());
     }
@@ -426,14 +425,14 @@ fn llm_engine_matches(state: &AppState, expected: llm::LlmModel) -> bool {
     llm_engine_is_live(state) && *state.loaded_llm.lock() == Some(expected)
 }
 
-fn llm_engine_stale(state: &AppState, expected: llm::LlmModel) -> bool {
+pub(crate) fn llm_engine_stale(state: &AppState, expected: llm::LlmModel) -> bool {
     match *state.loaded_llm.lock() {
         Some(loaded) => loaded != expected,
         None => llm_engine_is_live(state),
     }
 }
 
-async fn ensure_whisper_model_file(app: &AppHandle, model: WhisperModel) -> Result<(), String> {
+pub(crate) async fn ensure_whisper_model_file(app: &AppHandle, model: WhisperModel) -> Result<(), String> {
     if !model.is_concrete() {
         return Ok(());
     }
@@ -447,7 +446,7 @@ async fn ensure_whisper_model_file(app: &AppHandle, model: WhisperModel) -> Resu
     Ok(())
 }
 
-async fn ensure_llm_model_file(app: &AppHandle, model: llm::LlmModel) -> Result<(), String> {
+pub(crate) async fn ensure_llm_model_file(app: &AppHandle, model: llm::LlmModel) -> Result<(), String> {
     if !model.is_concrete() {
         return Ok(());
     }
@@ -461,13 +460,13 @@ async fn ensure_llm_model_file(app: &AppHandle, model: llm::LlmModel) -> Result<
     Ok(())
 }
 
-struct SettingsRollbackContext {
+pub(crate) struct SettingsRollbackContext {
     hotkey_changed: bool,
     stt_language_changed: bool,
     whisper_invalidated: bool,
 }
 
-async fn rollback_settings(
+pub(crate) async fn rollback_settings(
     app: &AppHandle,
     state: &AppState,
     previous: &AppSettings,
@@ -531,7 +530,7 @@ fn unregister_current_hotkey(app: &AppHandle, state: &AppState) -> Result<(), St
     Ok(())
 }
 
-fn suspend_global_hotkey(app: &AppHandle, state: &AppState) -> Result<(), String> {
+pub(crate) fn suspend_global_hotkey(app: &AppHandle, state: &AppState) -> Result<(), String> {
     let prev = state.hotkey_suspend_depth.fetch_add(1, Ordering::SeqCst);
     if prev == 0 {
         unregister_current_hotkey(app, state)?;
@@ -544,7 +543,7 @@ fn suspend_global_hotkey(app: &AppHandle, state: &AppState) -> Result<(), String
     Ok(())
 }
 
-fn resume_global_hotkey(app: &AppHandle, state: &AppState) -> Result<(), String> {
+pub(crate) fn resume_global_hotkey(app: &AppHandle, state: &AppState) -> Result<(), String> {
     let mut current = state.hotkey_suspend_depth.load(Ordering::SeqCst);
     loop {
         if current == 0 {
@@ -600,11 +599,11 @@ fn ensure_dictation_hotkey_registered(app: &AppHandle, state: &AppState) -> Resu
     register_hotkey_from_settings(app, state)
 }
 
-fn is_mic_probe_active(state: &AppState) -> bool {
+pub(crate) fn is_mic_probe_active(state: &AppState) -> bool {
     state.mic_probe.capture.lock().is_some()
 }
 
-fn register_hotkey_binding(app: &AppHandle, binding: hotkey::HotkeyBinding) -> Result<(), String> {
+pub(crate) fn register_hotkey_binding(app: &AppHandle, binding: hotkey::HotkeyBinding) -> Result<(), String> {
     let state = app.state::<AppState>();
     unregister_current_hotkey(app, state.inner())?;
 
@@ -626,12 +625,12 @@ fn register_hotkey_binding(app: &AppHandle, binding: hotkey::HotkeyBinding) -> R
     *state.current_hotkey.lock() = binding;
     Ok(())
 }
-fn parse_stt_language(value: &str) -> Result<SttLanguage, String> {
+pub(crate) fn parse_stt_language(value: &str) -> Result<SttLanguage, String> {
     SttLanguage::parse(value).ok_or_else(|| user_error_string(UserError::UnsupportedSttLanguage))
 }
 
 #[derive(Debug, Clone, Serialize)]
-struct DictionaryWordPayload {
+pub(crate) struct DictionaryWordPayload {
     id: i64,
     word: String,
     source: String,
@@ -639,7 +638,7 @@ struct DictionaryWordPayload {
     created_at: String,
 }
 
-fn dictionary_word_to_payload(word: DictionaryWord) -> DictionaryWordPayload {
+pub(crate) fn dictionary_word_to_payload(word: DictionaryWord) -> DictionaryWordPayload {
     DictionaryWordPayload {
         id: word.id,
         word: word.word,
@@ -653,14 +652,14 @@ fn dictionary_word_to_payload(word: DictionaryWord) -> DictionaryWordPayload {
 }
 
 #[derive(Debug, Clone, Serialize)]
-struct SnippetPayload {
+pub(crate) struct SnippetPayload {
     id: i64,
     trigger: String,
     content: String,
     created_at: String,
 }
 
-fn snippet_to_payload(snippet: Snippet) -> SnippetPayload {
+pub(crate) fn snippet_to_payload(snippet: Snippet) -> SnippetPayload {
     SnippetPayload {
         id: snippet.id,
         trigger: snippet.trigger,
@@ -698,7 +697,7 @@ fn refresh_whisper_prompt_with_cache(
     Ok(())
 }
 
-fn refresh_whisper_prompt_full(state: &AppState) -> Result<(), String> {
+pub(crate) fn refresh_whisper_prompt_full(state: &AppState) -> Result<(), String> {
     refresh_whisper_prompt_with_cache(&state.store, &state.pipeline, &state.prompt_cache)
 }
 
@@ -709,11 +708,11 @@ fn ensure_pipeline_snippets_loaded(store: &Store, pipeline: &Arc<Mutex<PipelineO
     }
 }
 
-fn refresh_whisper_prompt_state(state: &AppState) -> Result<(), String> {
+pub(crate) fn refresh_whisper_prompt_state(state: &AppState) -> Result<(), String> {
     refresh_whisper_prompt_full(state)
 }
 
-fn apply_dictionary_additions(state: &AppState, added: &[String]) -> Result<(), String> {
+pub(crate) fn apply_dictionary_additions(state: &AppState, added: &[String]) -> Result<(), String> {
     let changed = {
         let mut cache = state.prompt_cache.lock();
         cache.apply_additions(added)
@@ -755,11 +754,11 @@ pub(crate) fn apply_learned_correction(
     Ok(added)
 }
 
-fn emit_snippets_updated(app: &AppHandle) {
+pub(crate) fn emit_snippets_updated(app: &AppHandle) {
     let _ = app.emit("snippets-updated", ());
 }
 
-fn emit_app_context_updated(app: &AppHandle) {
+pub(crate) fn emit_app_context_updated(app: &AppHandle) {
     let _ = app.emit("app-context-updated", ());
 }
 
@@ -772,7 +771,7 @@ fn refresh_app_context_rules(
     Ok(())
 }
 
-fn refresh_correction_rules(
+pub(crate) fn refresh_correction_rules(
     store: &Store,
     pipeline: &Arc<Mutex<PipelineOrchestrator>>,
 ) -> Result<(), String> {
@@ -786,12 +785,12 @@ fn refresh_correction_rules(
     Ok(())
 }
 
-fn refresh_app_context_rules_state(state: &AppState) -> Result<(), String> {
+pub(crate) fn refresh_app_context_rules_state(state: &AppState) -> Result<(), String> {
     refresh_app_context_rules(&state.store, &state.pipeline)
 }
 
 #[derive(Debug, Clone, Serialize)]
-struct AppContextRulePayload {
+pub(crate) struct AppContextRulePayload {
     id: i64,
     pattern: String,
     #[serde(rename = "matchType")]
@@ -801,7 +800,7 @@ struct AppContextRulePayload {
     created_at: String,
 }
 
-fn app_context_rule_to_payload(rule: AppContextRule) -> AppContextRulePayload {
+pub(crate) fn app_context_rule_to_payload(rule: AppContextRule) -> AppContextRulePayload {
     AppContextRulePayload {
         id: rule.id,
         pattern: rule.pattern,
@@ -814,11 +813,11 @@ fn app_context_rule_to_payload(rule: AppContextRule) -> AppContextRulePayload {
     }
 }
 
-fn parse_match_type(value: &str) -> Result<AppContextMatchType, String> {
+pub(crate) fn parse_match_type(value: &str) -> Result<AppContextMatchType, String> {
     AppContextMatchType::parse(value).ok_or_else(|| user_error_string(UserError::InvalidMatchType))
 }
 
-fn parse_tone_profile(value: &str) -> Result<ToneProfile, String> {
+pub(crate) fn parse_tone_profile(value: &str) -> Result<ToneProfile, String> {
     ToneProfile::parse(value).ok_or_else(|| user_error_string(UserError::InvalidTone))
 }
 
@@ -834,447 +833,7 @@ const MENU_AUTO_EDIT: &str = "auto_edit";
 const MENU_AUTOSTART: &str = "autostart";
 const MENU_QUIT: &str = "quit";
 
-#[tauri::command]
-fn get_pipeline_state(state: State<'_, AppState>) -> String {
-    state.pipeline.lock().state().as_str().to_string()
-}
-
-#[tauri::command]
-fn is_model_ready(state: State<'_, AppState>) -> bool {
-    whisper_is_live(state.inner())
-}
-
-#[tauri::command]
-async fn toggle_dictation(app: AppHandle) -> Result<(), String> {
-    let state = app.state::<AppState>();
-    if is_mic_probe_active(&state) {
-        return Err(user_error_string(UserError::MicProbeActiveBeforeDictation));
-    }
-    let pipeline_state = state.pipeline.lock().state();
-    if is_dictation_start_blocked_by_settings(&state, pipeline_state) {
-        notify_dictation_blocked_by_settings(&app, &state);
-        return Ok(());
-    }
-    ensure_model_then_toggle(app).await;
-    Ok(())
-}
-
-#[tauri::command]
-fn get_settings(state: State<'_, AppState>) -> Result<SettingsPayload, String> {
-    let settings = state.store.load_settings().map_err(|e| e.to_string())?;
-    Ok(settings_to_payload(&settings))
-}
-
-#[tauri::command]
-fn get_models_status(state: State<'_, AppState>) -> Result<ModelsStatusPayload, String> {
-    let settings = state.store.load_settings().map_err(|e| e.to_string())?;
-    Ok(build_models_status(&state, &settings))
-}
-
-#[tauri::command]
-fn get_inference_info(state: State<'_, AppState>) -> Result<inference::InferenceInfo, String> {
-    let settings = state.store.load_settings().map_err(|e| e.to_string())?;
-    Ok(inference::get_inference_info(
-        &settings,
-        &state.capabilities,
-    ))
-}
-
-#[tauri::command]
-fn is_onboarding_done(state: State<'_, AppState>) -> Result<bool, String> {
-    state.store.is_onboarding_done().map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn set_onboarding_done(state: State<'_, AppState>, done: bool) -> Result<(), String> {
-    state
-        .store
-        .set_onboarding_done(done)
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-async fn delete_model(
-    state: State<'_, AppState>,
-    kind: String,
-    model_id: String,
-) -> Result<(), String> {
-    let settings = state.store.load_settings().map_err(|e| e.to_string())?;
-    let effective_whisper =
-        system::resolve_whisper_model(settings.whisper_model(), &state.capabilities);
-    let effective_llm = system::resolve_llm_model(settings.llm_model(), &state.capabilities);
-    let path = match kind.as_str() {
-        "whisper" => {
-            let model = WhisperModel::parse(&model_id)
-                .ok_or_else(|| user_error_string(UserError::UnknownWhisperModel))?;
-            if !model.is_concrete() {
-                return Err(user_error_string(UserError::CannotDeleteAutoWhisperModel));
-            }
-            if model == effective_whisper {
-                return Err(user_error_string(UserError::CannotDeleteActiveWhisperModel));
-            }
-            model.path()
-        }
-        "llm" => {
-            let model = llm::LlmModel::parse(&model_id)
-                .ok_or_else(|| user_error_string(UserError::UnknownLlmModel))?;
-            if !model.is_concrete() {
-                return Err(user_error_string(UserError::CannotDeleteAutoLlmModel));
-            }
-            if model == effective_llm {
-                return Err(user_error_string(UserError::CannotDeleteActiveLlmModel));
-            }
-            model.path()
-        }
-        _ => return Err(user_error_string(UserError::InvalidModelKind)),
-    };
-
-    if path.exists() {
-        std::fs::remove_file(&path).map_err(|e| e.to_string())?;
-    }
-    Ok(())
-}
-
-#[tauri::command]
-async fn reinstall_model(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    kind: String,
-    model_id: String,
-) -> Result<(), String> {
-    let settings = state.store.load_settings().map_err(|e| e.to_string())?;
-    let effective_whisper =
-        system::resolve_whisper_model(settings.whisper_model(), &state.capabilities);
-    let effective_llm = system::resolve_llm_model(settings.llm_model(), &state.capabilities);
-
-    match kind.as_str() {
-        "whisper" => {
-            let model = WhisperModel::parse(&model_id)
-                .ok_or_else(|| user_error_string(UserError::UnknownWhisperModel))?;
-            if !model.is_concrete() {
-                return Err(user_error_string(UserError::CannotDeleteAutoWhisperModel));
-            }
-            let reload_engine = model == effective_whisper;
-            if reload_engine {
-                let was_live = invalidate_whisper_engine(&state, true);
-                emit_model_unready_if_needed(&app, was_live);
-            }
-            let path = model.path();
-            if path.exists() {
-                std::fs::remove_file(&path).map_err(|e| e.to_string())?;
-            }
-            ensure_whisper_model_file(&app, model).await?;
-            if reload_engine {
-                ensure_model_inner(&app, &state).await?;
-            }
-        }
-        "llm" => {
-            let model = llm::LlmModel::parse(&model_id)
-                .ok_or_else(|| user_error_string(UserError::UnknownLlmModel))?;
-            if !model.is_concrete() {
-                return Err(user_error_string(UserError::CannotDeleteAutoLlmModel));
-            }
-            let reload_engine = model == effective_llm && settings.auto_edit;
-            if model == effective_llm {
-                shutdown_llm_engine(&state);
-                let _ = app.emit("llm-unready", ());
-            }
-            let path = model.path();
-            if path.exists() {
-                std::fs::remove_file(&path).map_err(|e| e.to_string())?;
-            }
-            ensure_llm_model_file(&app, model).await?;
-            if reload_engine {
-                ensure_llm_model_inner(&app, &state).await?;
-            }
-        }
-        _ => return Err(user_error_string(UserError::InvalidModelKind)),
-    }
-    Ok(())
-}
-
-#[tauri::command]
-async fn set_hotkey(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    hotkey: String,
-) -> Result<(), String> {
-    let binding = hotkey::parse_hotkey_setting(&hotkey).map_err(|e| e.to_string())?;
-    let previous = state.store.load_settings().map_err(|e| e.to_string())?;
-    let previous_hotkey = previous.hotkey.clone();
-    let capture_active = state.hotkey_suspend_depth.load(Ordering::SeqCst) > 0;
-
-    if !capture_active {
-        register_hotkey_binding(&app, binding)?;
-    }
-
-    let mut next = previous.clone();
-    next.hotkey = hotkey::format_hotkey_setting(binding);
-    if let Err(err) = state.store.save_settings(&next).map_err(|e| e.to_string()) {
-        if !capture_active {
-            let rollback =
-                hotkey::parse_hotkey_setting(&previous_hotkey).map_err(|e| e.to_string())?;
-            let _ = register_hotkey_binding(&app, rollback);
-        }
-        return Err(err);
-    }
-
-    Ok(())
-}
-
-#[tauri::command]
-fn set_hotkey_capture_active(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    active: bool,
-) -> Result<bool, String> {
-    if active {
-        suspend_global_hotkey(&app, &state)?;
-        hotkey::start_hotkey_capture(&app)
-    } else {
-        hotkey::stop_hotkey_capture()?;
-        resume_global_hotkey(&app, &state)?;
-        Ok(false)
-    }
-}
-
-#[tauri::command]
-fn get_stt_language(state: State<'_, AppState>) -> Result<String, String> {
-    Ok(state
-        .pipeline
-        .lock()
-        .effective_stt_language()
-        .as_setting_value())
-}
-
-#[tauri::command]
-fn cycle_dictation_language(app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
-    let language = state
-        .pipeline
-        .lock()
-        .cycle_session_language(&app)
-        .map_err(|e| e.to_string())?;
-    Ok(language.as_setting_value())
-}
-
-#[tauri::command]
-async fn set_settings(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    settings: SettingsPayload,
-) -> Result<(), String> {
-    let previous = state.store.load_settings().map_err(|e| e.to_string())?;
-    let stt_language = parse_stt_language(&settings.stt_language)?;
-    let whisper_model = WhisperModel::parse(&settings.whisper_model)
-        .ok_or_else(|| user_error_string(UserError::UnknownWhisperModel))?;
-    let llm_model = llm::LlmModel::parse(&settings.llm_model)
-        .ok_or_else(|| user_error_string(UserError::UnknownLlmModel))?;
-    let inference_backend = InferenceBackend::parse(&settings.inference_backend)
-        .ok_or_else(|| user_error_string(UserError::InvalidInferenceBackend))?;
-
-    let prev_stt = previous.stt_language.clone();
-    let next_stt = settings.stt_language.clone();
-    let app_for_notify = app.clone();
-    let stt_language_changed = prev_stt != next_stt;
-    let ui_language_changed = previous.ui_language != parse_ui_language(&settings.ui_language);
-    let whisper_changed = previous.whisper_model() != whisper_model;
-    let llm_setting_changed =
-        previous.llm_model.trim().to_lowercase() != llm_model.as_setting_value();
-    let llm_changed = previous.llm_model() != llm_model || llm_setting_changed;
-    let inference_changed = previous.inference_backend() != inference_backend;
-    let low_power_changed = previous.low_power_mode != settings.low_power_mode;
-    let adaptive_changed = previous.adaptive_perf != settings.adaptive_perf;
-    let input_device_changed = previous.input_device != settings.input_device;
-
-    let prev_effective_whisper =
-        system::resolve_whisper_model(previous.whisper_model(), &state.capabilities);
-    let next_effective_whisper = system::resolve_whisper_model(whisper_model, &state.capabilities);
-    let prev_effective_llm = system::resolve_llm_model(previous.llm_model(), &state.capabilities);
-    let next_effective_llm = system::resolve_llm_model(llm_model, &state.capabilities);
-    let whisper_effective_changed = prev_effective_whisper != next_effective_whisper;
-    let llm_effective_changed = prev_effective_llm != next_effective_llm;
-
-    let binding = hotkey::parse_hotkey_setting(&settings.hotkey).map_err(|e| e.to_string())?;
-    let next_hotkey = hotkey::format_hotkey_setting(binding);
-    let hotkey_changed = previous.hotkey != next_hotkey;
-
-    let next_settings = AppSettings {
-        auto_edit: settings.auto_edit,
-        auto_learn: settings.auto_learn,
-        auto_update: settings.auto_update,
-        stt_language: next_stt,
-        whisper_model: whisper_model.as_setting_value().into(),
-        llm_model: llm_model.as_setting_value().into(),
-        hotkey: next_hotkey,
-        inference_backend: inference_backend.as_setting_value().into(),
-        low_power_mode: settings.low_power_mode,
-        adaptive_perf: settings.adaptive_perf,
-        ui_language: parse_ui_language(&settings.ui_language),
-        input_device: settings.input_device.clone(),
-    };
-
-    let mut rollback_ctx = SettingsRollbackContext {
-        hotkey_changed,
-        stt_language_changed,
-        whisper_invalidated: false,
-    };
-
-    state.pipeline.lock().set_auto_learn(settings.auto_learn);
-    state.pipeline.lock().set_default_stt_language(stt_language);
-    if input_device_changed {
-        state
-            .pipeline
-            .lock()
-            .set_input_device(next_settings.input_device.clone());
-    }
-
-    if let Err(err) = state
-        .store
-        .save_settings(&next_settings)
-        .map_err(|e| e.to_string())
-    {
-        state
-            .pipeline
-            .lock()
-            .set_default_stt_language(previous.stt_language_mode());
-        state.pipeline.lock().set_auto_learn(previous.auto_learn);
-        return Err(err);
-    }
-
-    if hotkey_changed {
-        if let Err(err) = register_hotkey_binding(&app, binding) {
-            if let Err(rollback_err) =
-                rollback_settings(&app, &state, &previous, rollback_ctx).await
-            {
-                eprintln!("settings rollback failed: {rollback_err}");
-            }
-            return Err(err);
-        }
-    }
-
-    refresh_perf_config(&state, &next_settings, should_start_minimized());
-
-    if low_power_changed && settings.low_power_mode {
-        shutdown_llm_engine(&state);
-        let _ = app.emit("llm-unready", ());
-        state
-            .deferred_llm_on_boot
-            .store(settings.auto_edit, Ordering::SeqCst);
-    }
-
-    let need_whisper_file = whisper_changed
-        || whisper_effective_changed
-        || (adaptive_changed && settings.adaptive_perf);
-
-    let whisper_reload_needed = whisper_changed
-        || inference_changed
-        || whisper_effective_changed
-        || (adaptive_changed && settings.adaptive_perf);
-
-    let whisper_settings_busy = need_whisper_file || whisper_reload_needed;
-    let _whisper_settings_guard =
-        whisper_settings_busy.then(|| WhisperSettingsChangeGuard::new(&state));
-
-    let need_llm_file =
-        llm_changed || llm_effective_changed || (adaptive_changed && settings.adaptive_perf);
-
-    let llm_engine_out_of_sync = llm_engine_stale(&state, next_effective_llm);
-    let llm_reload_needed = llm_changed
-        || inference_changed
-        || llm_effective_changed
-        || low_power_changed
-        || (adaptive_changed && settings.adaptive_perf)
-        || llm_engine_out_of_sync;
-    let llm_lazy_load = state.perf_config.lock().llm_lazy_load;
-    let llm_model_preference_changed = llm_changed || llm_effective_changed;
-    let will_load_llm_engine = settings.auto_edit
-        && (!llm_lazy_load || llm_model_preference_changed)
-        && (llm_reload_needed || !llm_engine_is_live(&state));
-
-    if need_whisper_file {
-        if let Err(err) = ensure_whisper_model_file(&app, next_effective_whisper).await {
-            if let Err(rollback_err) =
-                rollback_settings(&app, &state, &previous, rollback_ctx).await
-            {
-                eprintln!("settings rollback failed: {rollback_err}");
-            }
-            return Err(err);
-        }
-    }
-
-    if need_llm_file && !will_load_llm_engine {
-        if let Err(err) = ensure_llm_model_file(&app, next_effective_llm).await {
-            if let Err(rollback_err) =
-                rollback_settings(&app, &state, &previous, rollback_ctx).await
-            {
-                eprintln!("settings rollback failed: {rollback_err}");
-            }
-            return Err(err);
-        }
-    }
-
-    if whisper_reload_needed {
-        if state.pipeline.lock().state() != PipelineState::Idle {
-            if let Err(rollback_err) =
-                rollback_settings(&app, &state, &previous, rollback_ctx).await
-            {
-                eprintln!("settings rollback failed: {rollback_err}");
-            }
-            return Err(user_error_string(UserError::PipelineBusy));
-        }
-        let was_live = invalidate_whisper_engine(&state, true);
-        emit_model_unready_if_needed(&app, was_live);
-        rollback_ctx.whisper_invalidated = true;
-        if let Err(err) = ensure_model_inner(&app, &state).await {
-            if let Err(rollback_err) =
-                rollback_settings(&app, &state, &previous, rollback_ctx).await
-            {
-                eprintln!("settings rollback failed: {rollback_err}");
-            }
-            return Err(err);
-        }
-    }
-
-    if settings.auto_edit {
-        state.pipeline.lock().set_auto_edit(true);
-        if llm_reload_needed || !llm_engine_is_live(&state) {
-            shutdown_llm_engine(&state);
-            let _ = app.emit("llm-unready", ());
-            if !llm_lazy_load || llm_model_preference_changed || llm_engine_out_of_sync {
-                if let Err(err) = ensure_llm_model_inner(&app, &state).await {
-                    // Preference is already persisted; keep it and surface the load error.
-                    eprintln!("llm reload after settings change failed: {err}");
-                    if err == user_error_string(UserError::LlmModelCorrupt) {
-                        return Err(err);
-                    }
-                    return Err(user_error_string(UserError::LlmEngineLoadFailed));
-                }
-            } else {
-                state.deferred_llm_on_boot.store(true, Ordering::SeqCst);
-            }
-        }
-    } else {
-        state.pipeline.lock().set_auto_edit(false);
-        shutdown_llm_engine(&state);
-        let _ = app.emit("llm-unready", ());
-    }
-
-    if stt_language_changed {
-        state
-            .pipeline
-            .lock()
-            .notify_stt_language_changed(&app_for_notify);
-    }
-
-    if ui_language_changed {
-        let _ = app.emit("ui-language-changed", next_settings.ui_language.clone());
-    }
-
-    sync_tray_menus(&app);
-    Ok(())
-}
-
-async fn ensure_llm_model_inner(app: &AppHandle, state: &AppState) -> Result<(), String> {
+pub(crate) async fn ensure_llm_model_inner(app: &AppHandle, state: &AppState) -> Result<(), String> {
     if !state.pipeline.lock().auto_edit_enabled() {
         return Ok(());
     }
@@ -1358,506 +917,34 @@ async fn ensure_llm_model_inner(app: &AppHandle, state: &AppState) -> Result<(),
     Ok(())
 }
 
-#[tauri::command]
-async fn ensure_llm_model(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    ensure_llm_model_inner(&app, &state).await
-}
 
-#[tauri::command]
-fn list_dictionary_words(state: State<'_, AppState>) -> Result<Vec<DictionaryWordPayload>, String> {
-    state
-        .store
-        .list_words()
-        .map(|words| words.into_iter().map(dictionary_word_to_payload).collect())
-        .map_err(|e| e.to_string())
-}
 
-#[tauri::command]
-fn add_dictionary_word(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    word: String,
-    misspelling: Option<String>,
-) -> Result<bool, String> {
-    let normalized = normalize_word(&word);
-    if normalized.is_empty() {
-        return Err(user_error_string(UserError::DictionaryWordEmpty));
-    }
-    if !is_valid_dictionary_word(&normalized) {
-        return Err(user_error_string(UserError::DictionaryWordInvalid));
-    }
 
-    let normalized_misspelling = misspelling
-        .as_deref()
-        .map(normalize_word)
-        .filter(|value| !value.is_empty());
-    if let Some(ref incorrect) = normalized_misspelling {
-        if !is_valid_dictionary_word(incorrect) {
-            return Err(user_error_string(UserError::DictionaryMisspellingInvalid));
-        }
-        if normalized.eq_ignore_ascii_case(incorrect) {
-            return Err(user_error_string(UserError::DictionaryMisspellingSame));
-        }
-    }
 
-    let inserted_id = state
-        .store
-        .add_word(
-            &normalized,
-            DictionarySource::Manual,
-            normalized_misspelling.as_deref(),
-        )
-        .map_err(|e| e.to_string())?;
 
-    let Some(inserted_id) = inserted_id else {
-        if normalized_misspelling.is_some() {
-            return Err(user_error_string(UserError::DictionaryMisspellingExists));
-        }
-        return Err(user_error_string(UserError::DictionaryWordExists));
-    };
 
-    if let Err(err) = apply_dictionary_additions(&state, std::slice::from_ref(&normalized)) {
-        let _ = state.store.remove_word(inserted_id);
-        return Err(err);
-    }
-    if let Err(err) = refresh_correction_rules(&state.store, &state.pipeline) {
-        let _ = state.store.remove_word(inserted_id);
-        return Err(err);
-    }
 
-    state.dictionary_notifier.emit_immediate(
-        &app,
-        DictionaryUpdatedPayload {
-            added: vec![normalized],
-            removed: vec![],
-            source: Some("manual".into()),
-        },
-    );
 
-    Ok(true)
-}
 
-#[tauri::command]
-fn update_dictionary_word(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    id: i64,
-    word: String,
-) -> Result<bool, String> {
-    let normalized = normalize_word(&word);
-    if normalized.is_empty() {
-        return Err(user_error_string(UserError::DictionaryWordEmpty));
-    }
-    if !is_valid_dictionary_word(&normalized) {
-        return Err(user_error_string(UserError::DictionaryWordInvalid));
-    }
 
-    let previous = state
-        .store
-        .get_word_by_id(id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| user_error_string(UserError::DictionaryWordNotFound))?;
 
-    if previous.word == normalized {
-        return Ok(true);
-    }
 
-    let updated = state
-        .store
-        .update_word(id, &normalized)
-        .map_err(|e| e.to_string())?;
 
-    if updated {
-        if let Err(err) = refresh_whisper_prompt_full(&state) {
-            let _ = state.store.update_word(id, &previous.word);
-            return Err(err);
-        }
-        state.dictionary_notifier.emit_immediate(
-            &app,
-            DictionaryUpdatedPayload {
-                added: vec![normalized.clone()],
-                removed: vec![previous.word],
-                source: Some("manual".into()),
-            },
-        );
-    }
 
-    Ok(updated)
-}
 
-#[tauri::command]
-fn remove_dictionary_word(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    id: i64,
-) -> Result<(), String> {
-    let entry = state
-        .store
-        .get_word_by_id(id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| user_error_string(UserError::DictionaryWordNotFound))?;
 
-    let removed = state.store.remove_word(id).map_err(|e| e.to_string())?;
-    if !removed {
-        return Err(user_error_string(UserError::DictionaryWordNotFound));
-    }
 
-    if let Err(err) = refresh_whisper_prompt_full(&state) {
-        let _ = state
-            .store
-            .add_word(&entry.word, entry.source, entry.misspelling.as_deref());
-        return Err(err);
-    }
 
-    if let Err(err) = refresh_correction_rules(&state.store, &state.pipeline) {
-        let _ = state
-            .store
-            .add_word(&entry.word, entry.source, entry.misspelling.as_deref());
-        return Err(err);
-    }
 
-    state.dictionary_notifier.emit_immediate(
-        &app,
-        DictionaryUpdatedPayload {
-            added: vec![],
-            removed: vec![entry.word],
-            source: None,
-        },
-    );
-    Ok(())
-}
 
-#[tauri::command]
-fn learn_from_correction(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    original: String,
-    corrected: String,
-) -> Result<Vec<String>, String> {
-    apply_learned_correction(&app, &state, &original, &corrected)
-}
 
-#[tauri::command]
-fn list_snippets(state: State<'_, AppState>) -> Result<Vec<SnippetPayload>, String> {
-    state
-        .store
-        .list_snippets()
-        .map(|snippets| snippets.into_iter().map(snippet_to_payload).collect())
-        .map_err(|e| e.to_string())
-}
 
-#[tauri::command]
-fn add_snippet(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    trigger: String,
-    content: String,
-) -> Result<bool, String> {
-    let normalized_trigger = normalize_trigger(&trigger);
-    if normalized_trigger.is_empty() {
-        return Err(user_error_string(UserError::SnippetTriggerEmpty));
-    }
-    if !is_valid_trigger(&normalized_trigger) {
-        return Err(user_error_string(UserError::SnippetTriggerTooShort));
-    }
-    if !is_valid_snippet_content(&content) {
-        return Err(user_error_string(UserError::SnippetContentEmpty));
-    }
 
-    let inserted = state
-        .store
-        .add_snippet(&normalized_trigger, &content)
-        .map_err(|e| e.to_string())?;
 
-    if inserted {
-        if let Err(err) = refresh_whisper_prompt_state(&state) {
-            let _ = state.store.remove_snippet_by_trigger(&normalized_trigger);
-            return Err(err);
-        }
-        emit_snippets_updated(&app);
-    }
 
-    Ok(inserted)
-}
 
-#[tauri::command]
-fn update_snippet(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    id: i64,
-    trigger: String,
-    content: String,
-) -> Result<bool, String> {
-    let normalized_trigger = normalize_trigger(&trigger);
-    if normalized_trigger.is_empty() {
-        return Err(user_error_string(UserError::SnippetTriggerEmpty));
-    }
-    if !is_valid_trigger(&normalized_trigger) {
-        return Err(user_error_string(UserError::SnippetTriggerTooShort));
-    }
-    if !is_valid_snippet_content(&content) {
-        return Err(user_error_string(UserError::SnippetContentEmpty));
-    }
 
-    let previous = state
-        .store
-        .get_snippet_by_id(id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| user_error_string(UserError::SnippetNotFound))?;
-
-    let updated = state
-        .store
-        .update_snippet(id, &normalized_trigger, &content)
-        .map_err(|e| e.to_string())?;
-
-    if updated {
-        if let Err(err) = refresh_whisper_prompt_state(&state) {
-            let _ = state
-                .store
-                .update_snippet(id, &previous.trigger, &previous.content);
-            return Err(err);
-        }
-        emit_snippets_updated(&app);
-    }
-
-    Ok(updated)
-}
-
-#[tauri::command]
-fn remove_snippet(app: AppHandle, state: State<'_, AppState>, id: i64) -> Result<(), String> {
-    let entry = state
-        .store
-        .get_snippet_by_id(id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| user_error_string(UserError::SnippetNotFound))?;
-
-    let removed = state.store.remove_snippet(id).map_err(|e| e.to_string())?;
-    if !removed {
-        return Err(user_error_string(UserError::SnippetNotFound));
-    }
-
-    if let Err(err) = refresh_whisper_prompt_state(&state) {
-        let _ = state.store.add_snippet(&entry.trigger, &entry.content);
-        return Err(err);
-    }
-
-    emit_snippets_updated(&app);
-    Ok(())
-}
-
-#[tauri::command]
-fn import_snippets(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    json: String,
-) -> Result<usize, String> {
-    let entries: Vec<SnippetImport> = serde_json::from_str(&json)
-        .map_err(|_| user_error_string(UserError::InvalidSnippetJson))?;
-    if entries.is_empty() {
-        return Err(user_error_string(UserError::SnippetImportEmpty));
-    }
-
-    let previous = state
-        .store
-        .export_snippet_imports()
-        .map_err(|e| e.to_string())?;
-
-    let count = state
-        .store
-        .import_snippets(&entries)
-        .map_err(|e| e.to_string())?;
-    if count == 0 {
-        return Err(user_error_string(UserError::SnippetImportNoValid));
-    }
-
-    if let Err(err) = refresh_whisper_prompt_state(&state) {
-        let _ = state.store.replace_all_snippets(&previous);
-        return Err(err);
-    }
-    emit_snippets_updated(&app);
-    Ok(count)
-}
-
-#[tauri::command]
-fn export_snippets(state: State<'_, AppState>) -> Result<String, String> {
-    let entries = state
-        .store
-        .export_snippet_imports()
-        .map_err(|e| e.to_string())?;
-    serde_json::to_string_pretty(&entries).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn get_snippet_user_name(state: State<'_, AppState>) -> Result<String, String> {
-    state
-        .store
-        .get_snippet_user_name()
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn set_snippet_user_name(state: State<'_, AppState>, name: String) -> Result<(), String> {
-    state
-        .store
-        .set_snippet_user_name(&name)
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn preview_snippet_expansion(
-    state: State<'_, AppState>,
-    content: String,
-) -> Result<String, String> {
-    let user_name = state
-        .store
-        .get_snippet_user_name()
-        .map_err(|e| e.to_string())?;
-    let clipboard = TextInjector::read_clipboard_text().ok().flatten();
-    let ctx = SnippetVariableContext::from_user_name(user_name).with_clipboard(clipboard);
-    Ok(expand_snippet_variables(&content, &ctx))
-}
-
-#[tauri::command]
-fn get_active_window() -> Option<app_context::ActiveWindow> {
-    app_context::get_active_window()
-}
-
-#[tauri::command]
-fn list_app_context_rules(
-    state: State<'_, AppState>,
-) -> Result<Vec<AppContextRulePayload>, String> {
-    state
-        .store
-        .list_app_context_rules()
-        .map(|rules| rules.into_iter().map(app_context_rule_to_payload).collect())
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn add_app_context_rule(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    pattern: String,
-    match_type: String,
-    tone: String,
-) -> Result<bool, String> {
-    let match_type = parse_match_type(&match_type)?;
-    let tone = parse_tone_profile(&tone)?;
-    if !is_valid_app_context_pattern(&pattern, match_type) {
-        return Err(user_error_string(UserError::AppContextPatternTooShort));
-    }
-
-    let inserted = state
-        .store
-        .add_app_context_rule(&NewAppContextRule {
-            pattern,
-            match_type,
-            tone,
-        })
-        .map_err(|e| e.to_string())?;
-
-    if inserted {
-        refresh_app_context_rules_state(&state)?;
-        emit_app_context_updated(&app);
-    }
-
-    Ok(inserted)
-}
-
-#[tauri::command]
-fn remove_app_context_rule(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    id: i64,
-) -> Result<(), String> {
-    let removed = state
-        .store
-        .remove_app_context_rule(id)
-        .map_err(|e| e.to_string())?;
-    if !removed {
-        return Err(user_error_string(UserError::AppContextRuleNotFound));
-    }
-
-    refresh_app_context_rules_state(&state)?;
-    emit_app_context_updated(&app);
-    Ok(())
-}
-
-#[tauri::command]
-fn list_dictations(
-    state: State<'_, AppState>,
-    limit: Option<usize>,
-    offset: Option<usize>,
-) -> Result<Vec<DictationEntry>, String> {
-    let limit = limit.unwrap_or(DEFAULT_LIST_LIMIT).clamp(1, 200);
-    let offset = offset.unwrap_or(0);
-    state
-        .store
-        .list_dictations(limit, offset)
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn search_dictations(
-    state: State<'_, AppState>,
-    query: String,
-    limit: Option<usize>,
-    offset: Option<usize>,
-) -> Result<Vec<DictationEntry>, String> {
-    let limit = limit.unwrap_or(DEFAULT_LIST_LIMIT).clamp(1, 200);
-    let offset = offset.unwrap_or(0);
-    state
-        .store
-        .search_dictations(&query, limit, offset)
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn count_dictations(state: State<'_, AppState>) -> Result<i64, String> {
-    state.store.count_dictations().map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn count_search_dictations(state: State<'_, AppState>, query: String) -> Result<i64, String> {
-    state
-        .store
-        .count_search_dictations(&query)
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn copy_dictation(state: State<'_, AppState>, id: i64) -> Result<(), String> {
-    let entry = state
-        .store
-        .get_dictation(id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| user_error_string(UserError::DictationNotFound))?;
-    TextInjector::copy_to_clipboard(&entry.text).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn reinject_dictation(state: State<'_, AppState>, id: i64) -> Result<(), String> {
-    let entry = state
-        .store
-        .get_dictation(id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| user_error_string(UserError::DictationNotFound))?;
-    let injector = TextInjector::new().map_err(|e| e.to_string())?;
-    injector.inject(&entry.text).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn get_insights(state: State<'_, AppState>) -> Result<Insights, String> {
-    state.store.get_insights().map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn is_autostart_enabled(app: AppHandle) -> Result<bool, String> {
-    let state = app.state::<AppState>();
-    state.store.get_autostart().map_err(|e| e.to_string())
-}
-
-fn apply_autostart(app: &AppHandle, enabled: bool) -> Result<(), String> {
+pub(crate) fn apply_autostart(app: &AppHandle, enabled: bool) -> Result<(), String> {
     let autolaunch = app.autolaunch();
     if enabled {
         autolaunch.enable().map_err(|e| e.to_string())?;
@@ -1907,54 +994,9 @@ fn sync_autostart_from_settings(app: &AppHandle) {
     }
 }
 
-#[tauri::command]
-fn list_input_devices() -> Result<Vec<audio::InputDeviceInfo>, String> {
-    audio::list_input_devices().map_err(|e| e.to_string())
-}
 
-#[tauri::command]
-async fn start_mic_probe(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    if state.mic_probe.capture.lock().is_some() {
-        return Err(user_error_string(UserError::MicProbeAlreadyActive));
-    }
-    if state.pipeline.lock().state() != PipelineState::Idle {
-        return Err(user_error_string(UserError::DictationActiveMicProbe));
-    }
-    suspend_global_hotkey(&app, &state)?;
 
-    let input_device = state
-        .store
-        .load_settings()
-        .map_err(|e| e.to_string())?
-        .input_device;
-
-    let mut capture = audio::AudioCapture::new().map_err(|e| e.to_string())?;
-    let (level_tx, level_rx) = std::sync::mpsc::channel::<audio::AudioLevelSample>();
-    if let Err(err) = capture.start_with_streaming(None, Some(level_tx), Some(&input_device)) {
-        let _ = resume_global_hotkey(&app, &state);
-        return Err(err.to_string());
-    }
-
-    let app_clone = app.clone();
-    let level_task = tauri::async_runtime::spawn(async move {
-        while let Ok(sample) = level_rx.recv() {
-            let _ = app_clone.emit(
-                "audio-level",
-                pipeline::AudioLevelEvent {
-                    level: sample.level,
-                    bands: sample.bands.to_vec(),
-                },
-            );
-        }
-    });
-
-    let mut capture_slot = state.mic_probe.capture.lock();
-    *state.mic_probe.level_task.lock() = Some(level_task);
-    *capture_slot = Some(capture);
-    Ok(())
-}
-
-fn stop_mic_probe_inner(app: &AppHandle, state: &AppState) -> Result<(), String> {
+pub(crate) fn stop_mic_probe_inner(app: &AppHandle, state: &AppState) -> Result<(), String> {
     let mut capture_slot = state.mic_probe.capture.lock();
     let was_active = capture_slot.is_some();
     if let Some(mut capture) = capture_slot.take() {
@@ -1971,12 +1013,8 @@ fn stop_mic_probe_inner(app: &AppHandle, state: &AppState) -> Result<(), String>
     Ok(())
 }
 
-#[tauri::command]
-async fn stop_mic_probe(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    stop_mic_probe_inner(&app, &state)
-}
 
-async fn wait_for_pipeline_idle_timeout(
+pub(crate) async fn wait_for_pipeline_idle_timeout(
     pipeline: &Arc<Mutex<PipelineOrchestrator>>,
     timeout: Duration,
 ) -> bool {
@@ -1990,44 +1028,7 @@ async fn wait_for_pipeline_idle_timeout(
     pipeline.lock().state() == PipelineState::Idle
 }
 
-#[tauri::command]
-async fn prepare_onboarding_dictation(
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    stop_mic_probe_inner(&app, &state)?;
 
-    while state.hotkey_suspend_depth.load(Ordering::SeqCst) > 0 {
-        resume_global_hotkey(&app, &state)?;
-    }
-
-    let pipeline = state.pipeline.clone();
-    if pipeline.lock().state() != PipelineState::Idle {
-        spawn_stop(app.clone(), Arc::clone(&pipeline));
-        if !wait_for_pipeline_idle_timeout(&pipeline, Duration::from_secs(2)).await {
-            return Err("Dictation is still active. Stop recording before continuing.".to_string());
-        }
-    }
-
-    if state.hotkey_suspend_depth.load(Ordering::SeqCst) > 0 {
-        eprintln!(
-            "prepare_onboarding_dictation: hotkey_suspend_depth still {} after cleanup",
-            state.hotkey_suspend_depth.load(Ordering::SeqCst)
-        );
-    }
-
-    Ok(())
-}
-
-#[tauri::command]
-fn set_autostart_enabled(app: AppHandle, enabled: bool) -> Result<(), String> {
-    let state = app.state::<AppState>();
-    state
-        .store
-        .set_autostart(enabled)
-        .map_err(|e| e.to_string())?;
-    apply_autostart(&app, enabled)
-}
 
 fn set_auto_edit_enabled(app: AppHandle, enabled: bool) -> Result<(), String> {
     let state = app.state::<AppState>();
@@ -2089,7 +1090,7 @@ fn cycle_stt_language_from_tray(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-async fn ensure_model_inner(app: &AppHandle, state: &AppState) -> Result<(), String> {
+pub(crate) async fn ensure_model_inner(app: &AppHandle, state: &AppState) -> Result<(), String> {
     let expected = state.perf_config.lock().whisper;
     if whisper_engine_matches(state, expected) {
         let _ = app.emit("model-ready", ());
@@ -2172,10 +1173,6 @@ async fn ensure_model_inner(app: &AppHandle, state: &AppState) -> Result<(), Str
     Ok(())
 }
 
-#[tauri::command]
-async fn ensure_model(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    ensure_model_inner(&app, &state).await
-}
 
 fn spawn_deferred_llm_if_needed(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
@@ -2214,7 +1211,7 @@ async fn ensure_model_then_start(app: AppHandle) {
     let should_start = take_deferred_hotkey_start(state.inner());
     let pipeline = state.pipeline.clone();
     if should_start && pipeline.lock().state() == PipelineState::Idle {
-        spawn_start(app, pipeline);
+        request_dictation(app, pipeline, DictationIntent::Start);
     }
 }
 
@@ -2236,7 +1233,7 @@ fn take_deferred_hotkey_start(state: &AppState) -> bool {
     should_start
 }
 
-async fn ensure_model_then_toggle(app: AppHandle) {
+pub(crate) async fn ensure_model_then_toggle(app: AppHandle) {
     let state = app.state::<AppState>();
     if is_mic_probe_active(&state) {
         return;
@@ -2262,7 +1259,7 @@ async fn ensure_model_then_toggle(app: AppHandle) {
     }
 
     let pipeline = app.state::<AppState>().pipeline.clone();
-    spawn_toggle(app, pipeline);
+    request_dictation(app, pipeline, DictationIntent::Toggle);
 }
 
 #[cfg(windows)]
@@ -2270,104 +1267,161 @@ pub(crate) fn dispatch_dictation_hotkey(app: &AppHandle, shortcut_state: Shortcu
     handle_hotkey(app, shortcut_state);
 }
 
+fn hotkey_press_snapshot(press: &HotkeyPressState) -> hotkey::HotkeyPressSnapshot {
+    hotkey::HotkeyPressSnapshot {
+        press_start: press.press_start,
+        was_idle_on_press: press.was_idle_on_press,
+        shortcut_down: press.shortcut_down,
+        deferred_start_pending: press.deferred_start_pending,
+        deferred_toggle_intent: press.deferred_toggle_intent,
+        busy_cancel_on_release: press.busy_cancel_on_release,
+    }
+}
+
 fn handle_hotkey(app: &AppHandle, shortcut_state: ShortcutState) {
     let state = app.state::<AppState>();
-    if is_mic_probe_active(&state) {
-        return;
-    }
-    if state.hotkey_suspend_depth.load(Ordering::SeqCst) > 0 {
-        return;
-    }
+    let event = match shortcut_state {
+        ShortcutState::Pressed => hotkey::HotkeyEvent::Pressed,
+        ShortcutState::Released => hotkey::HotkeyEvent::Released,
+    };
 
-    match shortcut_state {
-        ShortcutState::Pressed => {
-            let mut press = state.hotkey_press.lock();
-            if press.shortcut_down {
-                // Key repeat while holding — keep original press_start / was_idle for PTT.
+    let suspended = state.hotkey_suspend_depth.load(Ordering::SeqCst) > 0;
+    let pipeline_state = state.pipeline.lock().state();
+    let ctx = hotkey::HotkeyDecisionContext {
+        pipeline_state,
+        whisper_live: whisper_is_live(&state),
+        dictation_blocked: is_dictation_blocked_by_settings(&state),
+        mic_probe_active: is_mic_probe_active(&state),
+        hotkey_suspended: suspended,
+    };
+
+    let mut press = state.hotkey_press.lock();
+    let snapshot = hotkey_press_snapshot(&press);
+    let action = hotkey::decide_action(&ctx, &snapshot, event);
+
+    match event {
+        hotkey::HotkeyEvent::Pressed => {
+            if matches!(action, hotkey::HotkeyAction::Ignore) {
                 return;
             }
-            press.shortcut_down = true;
+            if press.shortcut_down {
+                return;
+            }
 
-            let current = state.pipeline.lock().state();
-            press.press_start = Some(Instant::now());
-            press.was_idle_on_press = current == PipelineState::Idle;
-
-            match current {
-                PipelineState::Idle => {
-                    if is_dictation_blocked_by_settings(&state) {
-                        press.shortcut_down = false;
-                        press.press_start = None;
-                        drop(press);
-                        notify_dictation_blocked_by_settings(app, &state);
-                        return;
-                    }
+            match action {
+                hotkey::HotkeyAction::NotifyBlocked => {
+                    notify_dictation_blocked_by_settings(app, &state);
+                    return;
+                }
+                hotkey::HotkeyAction::StartRecording => {
+                    press.shortcut_down = true;
+                    press.press_start = Some(Instant::now());
+                    press.was_idle_on_press = pipeline_state == PipelineState::Idle;
                     if whisper_is_live(&state) {
                         press.deferred_start_pending = false;
                         press.deferred_toggle_intent = false;
-                        spawn_start(app.clone(), state.pipeline.clone());
+                        let pipeline = state.pipeline.clone();
+                        drop(press);
+                        request_dictation(app.clone(), pipeline, DictationIntent::Start);
                     } else {
                         press.deferred_start_pending = true;
                         press.deferred_toggle_intent = false;
                         let app_clone = app.clone();
+                        drop(press);
                         tauri::async_runtime::spawn(async move {
                             ensure_model_then_start(app_clone).await;
                         });
                     }
                 }
-                // Distinct second tap (after release) toggles off.
-                PipelineState::Recording => {
-                    spawn_stop(app.clone(), state.pipeline.clone());
-                }
-                PipelineState::Transcribing => {
-                    press.busy_cancel_on_release = true;
+                hotkey::HotkeyAction::StopRecording => {
+                    press.shortcut_down = true;
+                    press.press_start = Some(Instant::now());
+                    press.was_idle_on_press = pipeline_state == PipelineState::Idle;
+                    let pipeline = state.pipeline.clone();
                     drop(press);
-                    pipeline::emit_dictation_busy(app, PipelineState::Transcribing, true);
+                    request_dictation(app.clone(), pipeline, DictationIntent::Stop);
                 }
-                PipelineState::Injecting => {
-                    press.busy_cancel_on_release = false;
+                hotkey::HotkeyAction::EmitBusy { cancelable } => {
+                    press.shortcut_down = true;
+                    press.press_start = Some(Instant::now());
+                    press.was_idle_on_press = pipeline_state == PipelineState::Idle;
+                    press.busy_cancel_on_release = cancelable;
+                    let busy_state = pipeline_state;
                     drop(press);
-                    pipeline::emit_dictation_busy(app, PipelineState::Injecting, false);
+                    pipeline::emit_dictation_busy(app, busy_state, cancelable);
                 }
+                _ => {}
             }
         }
-        ShortcutState::Released => {
-            let mut press = state.hotkey_press.lock();
-            if !press.shortcut_down {
-                return;
-            }
-            press.shortcut_down = false;
-
-            let cancel_busy = press.busy_cancel_on_release;
-            press.busy_cancel_on_release = false;
-
-            let Some(start) = press.press_start.take() else {
-                if cancel_busy && state.pipeline.lock().state() == PipelineState::Transcribing {
-                    pipeline::spawn_cancel(app.clone(), state.pipeline.clone());
+        hotkey::HotkeyEvent::Released => {
+            match action {
+                hotkey::HotkeyAction::ResetPressState => {
+                    press.shortcut_down = false;
+                    press.press_start = None;
+                    press.busy_cancel_on_release = false;
                 }
-                return;
-            };
-            let was_idle = press.was_idle_on_press;
-            let duration = start.elapsed();
-
-            if press.deferred_start_pending {
-                press.deferred_toggle_intent = hotkey::is_toggle_tap(was_idle, duration);
-            }
-
-            if cancel_busy && state.pipeline.lock().state() == PipelineState::Transcribing {
-                pipeline::spawn_cancel(app.clone(), state.pipeline.clone());
-                return;
-            }
-
-            if state.pipeline.lock().state() == PipelineState::Recording
-                && hotkey::should_stop_ptt_on_release(was_idle, duration)
-            {
-                spawn_stop(app.clone(), state.pipeline.clone());
+                hotkey::HotkeyAction::Ignore => {
+                    if !press.shortcut_down {
+                        return;
+                    }
+                    let cancel_busy = press.busy_cancel_on_release;
+                    let had_start = press.press_start.take().is_some();
+                    press.shortcut_down = false;
+                    press.busy_cancel_on_release = false;
+                    if !had_start
+                        && cancel_busy
+                        && pipeline_state == PipelineState::Transcribing
+                    {
+                        let pipeline = state.pipeline.clone();
+                        drop(press);
+                        pipeline::request_dictation(
+                            app.clone(),
+                            pipeline,
+                            DictationIntent::Cancel,
+                        );
+                    }
+                }
+                hotkey::HotkeyAction::CaptureDeferredToggleIntent { duration } => {
+                    if !press.shortcut_down {
+                        return;
+                    }
+                    press.shortcut_down = false;
+                    press.busy_cancel_on_release = false;
+                    press.press_start.take();
+                    if press.deferred_start_pending {
+                        press.deferred_toggle_intent =
+                            hotkey::is_toggle_tap(press.was_idle_on_press, duration);
+                    }
+                }
+                hotkey::HotkeyAction::CancelTranscribing => {
+                    press.shortcut_down = false;
+                    press.busy_cancel_on_release = false;
+                    press.press_start.take();
+                    let pipeline = state.pipeline.clone();
+                    drop(press);
+                    pipeline::request_dictation(app.clone(), pipeline, DictationIntent::Cancel);
+                }
+                hotkey::HotkeyAction::StopRecording => {
+                    press.shortcut_down = false;
+                    press.busy_cancel_on_release = false;
+                    press.press_start.take();
+                    let pipeline = state.pipeline.clone();
+                    drop(press);
+                    request_dictation(app.clone(), pipeline, DictationIntent::Stop);
+                }
+                _ => {
+                    if press.shortcut_down {
+                        press.shortcut_down = false;
+                        press.busy_cancel_on_release = false;
+                        press.press_start.take();
+                    }
+                }
             }
         }
     }
 }
 
-fn should_start_minimized() -> bool {
+pub(crate) fn should_start_minimized() -> bool {
     std::env::args().any(|arg| arg == "--minimized")
 }
 
@@ -2412,7 +1466,7 @@ fn tray_language_menu_text(app: &AppHandle) -> String {
     ui::locale::tr_with_vars("tray.dictationLanguage", &ui_language, &[("label", label)])
 }
 
-fn sync_tray_menus(app: &AppHandle) {
+pub(crate) fn sync_tray_menus(app: &AppHandle) {
     if let Some(handles) = app.try_state::<TrayHandles>() {
         let ui_language = current_ui_language(app);
         let _ = handles
@@ -2594,7 +1648,7 @@ fn build_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             }
             MENU_AUTOSTART => {
                 let enabled = autostart_enabled_from_store(app);
-                let _ = set_autostart_enabled(app.clone(), !enabled);
+                let _ = commands::set_autostart_enabled(app.clone(), !enabled);
             }
             MENU_QUIT => {
                 app.exit(0);
@@ -2630,7 +1684,7 @@ fn build_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn fetch_available_update(
+pub(crate) async fn fetch_available_update(
     app: &AppHandle,
     ignore_dismissed: bool,
 ) -> Result<Option<tauri_plugin_updater::Update>, String> {
@@ -2700,7 +1754,7 @@ async fn download_and_store_update(
     Ok(())
 }
 
-async fn run_update_download(
+pub(crate) async fn run_update_download(
     app: AppHandle,
     store: Arc<Store>,
     update: tauri_plugin_updater::Update,
@@ -2767,54 +1821,6 @@ fn spawn_update_check_if_enabled(app: AppHandle, store: Arc<Store>) {
     });
 }
 
-#[tauri::command]
-async fn check_for_updates(
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<update::UpdateCheckResult, String> {
-    if cfg!(debug_assertions) {
-        return Ok(update::UpdateCheckResult::UnavailableInDev);
-    }
-
-    if let Some(version) = state
-        .pending_update
-        .lock()
-        .as_ref()
-        .map(|pending| pending.version.clone())
-    {
-        return Ok(update::UpdateCheckResult::Ready { version });
-    }
-
-    if state.update_check_in_progress.swap(true, Ordering::SeqCst) {
-        return Err("Une vérification de mise à jour est déjà en cours.".into());
-    }
-
-    let update = match fetch_available_update(&app, true).await {
-        Ok(Some(update)) => update,
-        Ok(None) => {
-            state
-                .update_check_in_progress
-                .store(false, Ordering::SeqCst);
-            return Ok(update::UpdateCheckResult::UpToDate);
-        }
-        Err(err) => {
-            state
-                .update_check_in_progress
-                .store(false, Ordering::SeqCst);
-            return Err(err);
-        }
-    };
-
-    let version = update.version.clone();
-    let store = Arc::clone(&state.store);
-    let app_for_download = app.clone();
-
-    tauri::async_runtime::spawn(async move {
-        run_update_download(app_for_download, store, update).await;
-    });
-
-    Ok(update::UpdateCheckResult::Downloading { version })
-}
 
 async fn wait_before_app_update_download(app: &AppHandle, settings: &AppSettings) {
     let preload_whisper = app.state::<AppState>().perf_config.lock().preload_whisper;
@@ -2842,7 +1848,7 @@ async fn wait_before_app_update_download(app: &AppHandle, settings: &AppSettings
     }
 }
 
-async fn wait_for_pipeline_idle(pipeline: &Arc<Mutex<PipelineOrchestrator>>) {
+pub(crate) async fn wait_for_pipeline_idle(pipeline: &Arc<Mutex<PipelineOrchestrator>>) {
     loop {
         if pipeline.lock().state() == PipelineState::Idle {
             return;
@@ -2851,46 +1857,8 @@ async fn wait_for_pipeline_idle(pipeline: &Arc<Mutex<PipelineOrchestrator>>) {
     }
 }
 
-#[tauri::command]
-fn get_pending_update_version(state: State<'_, AppState>) -> Option<String> {
-    state
-        .pending_update
-        .lock()
-        .as_ref()
-        .map(|pending| pending.version.clone())
-}
 
-#[tauri::command]
-async fn install_pending_update(state: State<'_, AppState>) -> Result<(), String> {
-    let pending = state.pending_update.lock().take();
-    let Some(pending) = pending else {
-        return Err("Aucune mise à jour en attente.".into());
-    };
 
-    wait_for_pipeline_idle(&state.pipeline).await;
-
-    let bytes = update::read_pending_update_bytes(&pending.bytes_path)?;
-    update::mark_show_after_update();
-    update::clear_dismissed_update_version();
-    let result = pending.update.install(&bytes);
-    pending.clear();
-    result.map_err(|err| format!("Échec de l'installation : {err}"))
-}
-
-#[tauri::command]
-fn dismiss_pending_update(state: State<'_, AppState>) -> Result<(), String> {
-    let dismissed_version = state.pending_update.lock().take().map(|pending| {
-        let version = pending.version.clone();
-        pending.clear();
-        version
-    });
-    if let Some(version) = dismissed_version {
-        update::mark_update_dismissed(&version);
-    } else {
-        update::clear_pending_update_files();
-    }
-    Ok(())
-}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -3130,7 +2098,7 @@ pub fn run() {
                 let app_handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     let state = app_handle.state::<AppState>();
-                    if let Err(err) = ensure_model(app_handle.clone(), state).await {
+                    if let Err(err) = commands::ensure_model(app_handle.clone(), state).await {
                         eprintln!("model initialization failed: {err}");
                         let _ = app_handle.emit("model-init-error", err);
                     }
@@ -3141,7 +2109,7 @@ pub fn run() {
                 let app_handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     let state = app_handle.state::<AppState>();
-                    if let Err(err) = ensure_llm_model(app_handle.clone(), state).await {
+                    if let Err(err) = commands::ensure_llm_model(app_handle.clone(), state).await {
                         eprintln!("llm model initialization failed: {err}");
                     }
                 });
@@ -3156,58 +2124,58 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            get_pipeline_state,
-            is_model_ready,
-            toggle_dictation,
-            ensure_model,
-            ensure_llm_model,
-            get_settings,
-            set_settings,
-            get_models_status,
-            delete_model,
-            reinstall_model,
-            get_inference_info,
-            set_hotkey,
-            set_hotkey_capture_active,
-            is_onboarding_done,
-            set_onboarding_done,
-            list_input_devices,
-            start_mic_probe,
-            stop_mic_probe,
-            prepare_onboarding_dictation,
-            get_stt_language,
-            cycle_dictation_language,
-            is_autostart_enabled,
-            set_autostart_enabled,
-            get_pending_update_version,
-            check_for_updates,
-            install_pending_update,
-            dismiss_pending_update,
-            list_dictionary_words,
-            add_dictionary_word,
-            update_dictionary_word,
-            remove_dictionary_word,
-            learn_from_correction,
-            list_snippets,
-            add_snippet,
-            update_snippet,
-            remove_snippet,
-            import_snippets,
-            export_snippets,
-            get_snippet_user_name,
-            set_snippet_user_name,
-            preview_snippet_expansion,
-            get_active_window,
-            list_app_context_rules,
-            add_app_context_rule,
-            remove_app_context_rule,
-            list_dictations,
-            search_dictations,
-            count_dictations,
-            count_search_dictations,
-            copy_dictation,
-            reinject_dictation,
-            get_insights
+            commands::get_pipeline_state,
+            commands::is_model_ready,
+            commands::toggle_dictation,
+            commands::ensure_model,
+            commands::ensure_llm_model,
+            commands::get_settings,
+            commands::set_settings,
+            commands::get_models_status,
+            commands::delete_model,
+            commands::reinstall_model,
+            commands::get_inference_info,
+            commands::set_hotkey,
+            commands::set_hotkey_capture_active,
+            commands::is_onboarding_done,
+            commands::set_onboarding_done,
+            commands::list_input_devices,
+            commands::start_mic_probe,
+            commands::stop_mic_probe,
+            commands::prepare_onboarding_dictation,
+            commands::get_stt_language,
+            commands::cycle_dictation_language,
+            commands::is_autostart_enabled,
+            commands::set_autostart_enabled,
+            commands::get_pending_update_version,
+            commands::check_for_updates,
+            commands::install_pending_update,
+            commands::dismiss_pending_update,
+            commands::list_dictionary_words,
+            commands::add_dictionary_word,
+            commands::update_dictionary_word,
+            commands::remove_dictionary_word,
+            commands::learn_from_correction,
+            commands::list_snippets,
+            commands::add_snippet,
+            commands::update_snippet,
+            commands::remove_snippet,
+            commands::import_snippets,
+            commands::export_snippets,
+            commands::get_snippet_user_name,
+            commands::set_snippet_user_name,
+            commands::preview_snippet_expansion,
+            commands::get_active_window,
+            commands::list_app_context_rules,
+            commands::add_app_context_rule,
+            commands::remove_app_context_rule,
+            commands::list_dictations,
+            commands::search_dictations,
+            commands::count_dictations,
+            commands::count_search_dictations,
+            commands::copy_dictation,
+            commands::reinject_dictation,
+            commands::get_insights
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")

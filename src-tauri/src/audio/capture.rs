@@ -8,9 +8,11 @@ use thiserror::Error;
 
 pub const TARGET_SAMPLE_RATE: u32 = 16_000;
 pub const AUDIO_BAND_COUNT: usize = 14;
+/// Max spooled 16 kHz samples while the chunk channel is backlogged (~10 s).
+const CHUNK_SPOOL_MAX_SAMPLES: usize = TARGET_SAMPLE_RATE as usize * 10;
 
-pub type AudioChunkSender = std::sync::mpsc::Sender<Vec<f32>>;
-pub type AudioLevelSender = std::sync::mpsc::Sender<AudioLevelSample>;
+pub type AudioChunkSender = std::sync::mpsc::SyncSender<Vec<f32>>;
+pub type AudioLevelSender = std::sync::mpsc::SyncSender<AudioLevelSample>;
 
 #[derive(Debug, Clone, Copy)]
 pub struct AudioLevelSample {
@@ -92,6 +94,14 @@ impl ResampleStreamState {
     }
 }
 
+fn trim_chunk_spool(spool: &mut Vec<f32>) {
+    if spool.len() <= CHUNK_SPOOL_MAX_SAMPLES {
+        return;
+    }
+    let excess = spool.len() - CHUNK_SPOOL_MAX_SAMPLES;
+    spool.drain(..excess);
+}
+
 struct StreamingSidecar {
     resample_state: Mutex<ResampleStreamState>,
     accumulated_16k: Mutex<Vec<f32>>,
@@ -99,6 +109,8 @@ struct StreamingSidecar {
     level_tx: Option<AudioLevelSender>,
     last_level_emit: Mutex<Instant>,
     convert_scratch: Mutex<Vec<f32>>,
+    /// Audio deltas that could not be sent because the chunk channel was full.
+    chunk_spool: Mutex<Vec<f32>>,
     /// When true, stop returns the accumulated 16 kHz stream instead of resampling raw PCM.
     streaming_capture: bool,
 }
@@ -165,14 +177,44 @@ impl StreamingSidecar {
         if let Some(level_tx) = &self.level_tx {
             let mut last = self.last_level_emit.lock().expect("level lock");
             if last.elapsed() >= Duration::from_millis(50) {
-                let _ = level_tx.send(compute_audio_level(&delta));
-                *last = Instant::now();
+                if level_tx.try_send(compute_audio_level(&delta)).is_ok() {
+                    *last = Instant::now();
+                }
             }
         }
 
-        if let Some(tx) = &self.chunk_tx {
-            let _ = tx.send(delta);
+        self.enqueue_chunk(delta);
+    }
+
+    fn enqueue_chunk(&self, delta: Vec<f32>) {
+        if delta.is_empty() {
+            return;
         }
+        let Some(tx) = &self.chunk_tx else {
+            return;
+        };
+
+        let mut spool = self.chunk_spool.lock().expect("chunk spool lock");
+        spool.extend_from_slice(&delta);
+        trim_chunk_spool(&mut spool);
+        match tx.try_send(std::mem::take(&mut *spool)) {
+            Ok(()) => {}
+            Err(std::sync::mpsc::TrySendError::Full(payload)) => *spool = payload,
+            Err(std::sync::mpsc::TrySendError::Disconnected(payload)) => *spool = payload,
+        }
+    }
+
+    fn drain_chunk_spool(&self) {
+        let Some(tx) = &self.chunk_tx else {
+            return;
+        };
+        let mut spool = self.chunk_spool.lock().expect("chunk spool lock");
+        if spool.is_empty() {
+            return;
+        }
+        let payload = std::mem::take(&mut *spool);
+        drop(spool);
+        let _ = tx.send(payload);
     }
 
     fn flush(&self) {
@@ -186,6 +228,7 @@ impl StreamingSidecar {
         if !delta.is_empty() {
             self.emit_delta(delta);
         }
+        self.drain_chunk_spool();
     }
 
     fn take_accumulated(&self) -> Vec<f32> {
@@ -355,6 +398,7 @@ fn start_session(
         level_tx,
         last_level_emit: Mutex::new(Instant::now() - Duration::from_millis(100)),
         convert_scratch: Mutex::new(Vec::new()),
+        chunk_spool: Mutex::new(Vec::new()),
         streaming_capture,
     });
 
@@ -726,7 +770,7 @@ mod tests {
 
     #[test]
     fn streaming_sidecar_accumulates_16k_deltas() {
-        let (chunk_tx, _chunk_rx) = std::sync::mpsc::channel::<Vec<f32>>();
+        let (chunk_tx, _chunk_rx) = std::sync::mpsc::sync_channel::<Vec<f32>>(64);
         let sidecar = StreamingSidecar {
             resample_state: Mutex::new(ResampleStreamState::new(16_000, 1)),
             accumulated_16k: Mutex::new(Vec::new()),
@@ -734,6 +778,7 @@ mod tests {
             level_tx: None,
             last_level_emit: Mutex::new(Instant::now()),
             convert_scratch: Mutex::new(Vec::new()),
+            chunk_spool: Mutex::new(Vec::new()),
             streaming_capture: true,
         };
 
@@ -744,5 +789,47 @@ mod tests {
         let accumulated = sidecar.take_accumulated();
         assert_eq!(accumulated.len(), samples.len());
         assert!((accumulated[10] - samples[10]).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn streaming_sidecar_spools_when_chunk_channel_full() {
+        let (chunk_tx, chunk_rx) = std::sync::mpsc::sync_channel::<Vec<f32>>(1);
+        chunk_tx.try_send(vec![0.0; 8]).expect("prefill channel");
+
+        let sidecar = StreamingSidecar {
+            resample_state: Mutex::new(ResampleStreamState::new(16_000, 1)),
+            accumulated_16k: Mutex::new(Vec::new()),
+            chunk_tx: Some(chunk_tx),
+            level_tx: None,
+            last_level_emit: Mutex::new(Instant::now()),
+            convert_scratch: Mutex::new(Vec::new()),
+            chunk_spool: Mutex::new(Vec::new()),
+            streaming_capture: true,
+        };
+
+        let samples: Vec<f32> = (0..160).map(|i| i as f32 / 160.0).collect();
+        sidecar.push_f32(&samples, None);
+
+        assert!(
+            !sidecar.chunk_spool.lock().expect("spool lock").is_empty(),
+            "expected spool to retain unsent audio"
+        );
+
+        let _ = chunk_rx.recv().expect("prefilled chunk");
+        sidecar.drain_chunk_spool();
+
+        let spooled = chunk_rx.recv().expect("spooled chunk");
+        assert_eq!(spooled.len(), samples.len());
+        assert!((spooled[10] - samples[10]).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn chunk_spool_trim_drops_oldest_samples() {
+        let mut spool: Vec<f32> = (0..CHUNK_SPOOL_MAX_SAMPLES + 500)
+            .map(|i| i as f32)
+            .collect();
+        trim_chunk_spool(&mut spool);
+        assert_eq!(spool.len(), CHUNK_SPOOL_MAX_SAMPLES);
+        assert!((spool[0] - 500.0).abs() < f32::EPSILON);
     }
 }

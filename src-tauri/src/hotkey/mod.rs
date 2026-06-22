@@ -1,5 +1,6 @@
 //! Global hotkey registration and handling (Phase 1+).
 
+mod action;
 mod capture;
 #[cfg(windows)]
 mod capture_win;
@@ -9,6 +10,9 @@ mod dictation_hook_win;
 mod modifiers;
 mod shortcut;
 
+pub use action::{
+    decide_action, HotkeyAction, HotkeyDecisionContext, HotkeyEvent, HotkeyPressSnapshot,
+};
 pub use capture::{start as start_hotkey_capture, stop as stop_hotkey_capture};
 pub use shortcut::{
     default_shortcut, format_hotkey_setting, format_shortcut, is_toggle_tap,
