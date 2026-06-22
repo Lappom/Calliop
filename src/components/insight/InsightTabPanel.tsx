@@ -10,12 +10,11 @@ interface InsightTabPanelProps {
 }
 
 const panelVariants = {
-  initial: { opacity: 0, y: 6 },
+  initial: { opacity: 0 },
   animate: {
     opacity: 1,
-    y: 0,
     transition: {
-      duration: MOTION_DURATION.base,
+      duration: MOTION_DURATION.fast,
       ease: MOTION_EASE.enter,
     },
   },

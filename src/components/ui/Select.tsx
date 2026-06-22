@@ -274,7 +274,9 @@ export function Select<T extends string>({
         className={[
           "flex h-10 w-full items-center justify-between gap-3 rounded-md border px-3.5",
           "font-[family-name:var(--font-ui)] text-sm leading-[1.43] text-ink",
-          "transition-[border-color,background-color] duration-150",
+          "transition-[transform,border-color,background-color] duration-150",
+          "motion-reduce:transition-none",
+          "active:scale-[0.97] motion-reduce:active:scale-100 disabled:active:scale-100",
           open
             ? "border-ink bg-surface-elevated"
             : "border-hairline-strong bg-surface-card hover:border-ink/30",
@@ -292,7 +294,7 @@ export function Select<T extends string>({
         <ChevronDown
           size={16}
           className={[
-            "shrink-0 text-charcoal transition-transform duration-150",
+            "shrink-0 text-charcoal transition-transform duration-150 motion-reduce:transition-none",
             open ? "rotate-180 text-ink" : "",
           ].join(" ")}
           aria-hidden

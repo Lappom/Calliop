@@ -1,4 +1,6 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import { IconButton } from "../ui/IconButton";
+import { Popover } from "../ui/Popover";
 import type { ToolbarMenuOption } from "../ui/toolbarMenu";
 
 export function SnippetListToolbarButton<T extends string = string>({
@@ -22,27 +24,31 @@ export function SnippetListToolbarButton<T extends string = string>({
   activeMenuValue?: T;
   onMenuSelect?: (value: T) => void;
 }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+
   const button = (
-    <button
-      type="button"
-      aria-label={label}
+    <IconButton
+      label={label}
+      size="md"
+      active={active || menuOpen}
+      disabled={disabled}
       aria-pressed={active}
       aria-haspopup={menuOptions ? "menu" : undefined}
-      disabled={disabled}
-      onClick={onClick}
-      className={[
-        "inline-flex size-9 items-center justify-center rounded-md border",
-        "transition-[transform,background-color,border-color,color] duration-150",
-        "ease-[cubic-bezier(0.22,1,0.36,1)]",
-        "active:scale-[0.97] disabled:active:scale-100",
-        "disabled:cursor-not-allowed disabled:opacity-40",
-        active
-          ? "border-hairline-strong bg-surface-elevated text-ink"
-          : "border-transparent text-charcoal hover:border-hairline-strong hover:bg-surface-elevated hover:text-ink",
-      ].join(" ")}
+      aria-expanded={menuOptions ? menuOpen : undefined}
+      data-popover-trigger=""
+      onClick={() => {
+        if (menuOptions && menuOptions.length > 0) {
+          setMenuOpen((current) => {
+            if (!current) onClick();
+            return !current;
+          });
+          return;
+        }
+        onClick();
+      }}
     >
       {children}
-    </button>
+    </IconButton>
   );
 
   if (!menuOptions || menuOptions.length === 0) {
@@ -50,64 +56,60 @@ export function SnippetListToolbarButton<T extends string = string>({
   }
 
   return (
-    <span className="group/toolbar-menu relative inline-flex">
-      {button}
-      {/* pt-2 bridges the gap so hover stays active while moving to the menu */}
+    <Popover
+      open={menuOpen}
+      onOpenChange={setMenuOpen}
+      align="end"
+      menuLabel={menuTitle ?? label}
+      trigger={button}
+    >
       <div
-        role="menu"
-        aria-label={menuTitle ?? label}
         className={[
-          "absolute right-0 top-full z-50 pt-2",
-          "opacity-0 transition-opacity duration-150",
-          "pointer-events-none group-hover/toolbar-menu:pointer-events-auto",
-          "group-hover/toolbar-menu:opacity-100",
+          "min-w-[11rem] rounded-md border border-hairline-strong",
+          "bg-surface-elevated py-2 shadow-none",
         ].join(" ")}
       >
-        <div
-          className={[
-            "min-w-[11rem] rounded-md border border-hairline-strong",
-            "bg-surface-elevated py-2 shadow-none",
-          ].join(" ")}
-        >
-          {menuTitle && (
-            <p className="text-caption m-0 px-3 pb-1.5 font-medium text-ash">
-              {menuTitle}
-            </p>
-          )}
-          <ul className="m-0 list-none p-0">
-            {menuOptions.map((option) => {
-              const isActive = option.value === activeMenuValue;
-              return (
-                <li key={option.value} role="none">
-                  <button
-                    type="button"
-                    role="menuitemradio"
-                    aria-checked={isActive}
-                    disabled={disabled}
-                    onClick={() => onMenuSelect?.(option.value)}
+        {menuTitle && (
+          <p className="text-caption m-0 px-3 pb-1.5 font-medium text-ash">
+            {menuTitle}
+          </p>
+        )}
+        <ul className="m-0 list-none p-0">
+          {menuOptions.map((option) => {
+            const isActive = option.value === activeMenuValue;
+            return (
+              <li key={option.value} role="none">
+                <button
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={isActive}
+                  disabled={disabled}
+                  onClick={() => {
+                    onMenuSelect?.(option.value);
+                    setMenuOpen(false);
+                  }}
+                  className={[
+                    "flex w-full items-center gap-2 px-3 py-1.5 text-left",
+                    "text-caption transition-colors duration-150",
+                    "hover:bg-surface-card hover:text-ink",
+                    "disabled:cursor-not-allowed disabled:opacity-40",
+                    isActive ? "text-ink" : "text-charcoal",
+                  ].join(" ")}
+                >
+                  <span
                     className={[
-                      "flex w-full items-center gap-2 px-3 py-1.5 text-left",
-                      "text-caption transition-colors duration-150",
-                      "hover:bg-surface-card hover:text-ink",
-                      "disabled:cursor-not-allowed disabled:opacity-40",
-                      isActive ? "text-ink" : "text-charcoal",
+                      "inline-block size-1.5 shrink-0 rounded-full",
+                      isActive ? "bg-accent-blue" : "bg-transparent",
                     ].join(" ")}
-                  >
-                    <span
-                      className={[
-                        "inline-block size-1.5 shrink-0 rounded-full",
-                        isActive ? "bg-accent-blue" : "bg-transparent",
-                      ].join(" ")}
-                      aria-hidden
-                    />
-                    {option.label}
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
+                    aria-hidden
+                  />
+                  {option.label}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
       </div>
-    </span>
+    </Popover>
   );
 }

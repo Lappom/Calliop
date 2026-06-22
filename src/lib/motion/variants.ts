@@ -1,14 +1,14 @@
 import type { Variants } from "motion/react";
 import { MOTION_DURATION, MOTION_EASE, MOTION_STAGGER } from "./presets";
 
+/** Opacity-only — sidebar layoutId carries spatial continuity; no stacked vertical motion. */
 export const pageVariants: Variants = {
-  initial: { opacity: 0, y: 8 },
+  initial: { opacity: 0 },
   animate: {
     opacity: 1,
-    y: 0,
     transition: {
-      duration: MOTION_DURATION.base,
-      ease: MOTION_EASE.editorial,
+      duration: MOTION_DURATION.fast,
+      ease: MOTION_EASE.enter,
     },
   },
   exit: {

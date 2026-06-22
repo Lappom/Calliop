@@ -329,13 +329,40 @@ body {
     opacity var(--motion-base) var(--ease-enter);
 }
 
+.tooltip-bubble {
+  transform-origin: top center;
+  opacity: 0;
+  transform: scale(0.97) translateX(-50%);
+  transition:
+    opacity var(--motion-fast) var(--ease-enter),
+    transform var(--motion-fast) var(--ease-enter);
+}
+
+.tooltip-bubble-visible {
+  opacity: 1;
+  transform: scale(1) translateX(-50%);
+}
+
+.tooltip-bubble-instant {
+  transition-duration: 0ms;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
+  .animate-overlay-pill-in,
+  .overlay-breathe,
+  .overlay-shimmer .overlay-pill::after,
+  .glow-surface-pulse::before,
+  .glow-surface-pulse-slow::before,
+  .animate-onboarding-coach-shake {
+    animation: none !important;
+  }
+
+  .tooltip-bubble {
+    transition: opacity var(--motion-fast) var(--ease-enter);
+    transform: translateX(-50%);
+  }
+
+  .tooltip-bubble-visible {
+    transform: translateX(-50%);
   }
 }

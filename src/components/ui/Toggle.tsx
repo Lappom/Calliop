@@ -54,9 +54,9 @@ export function Toggle({
         aria-hidden
         className={[
           "relative inline-flex h-6 w-11 items-center rounded-full border p-0.5",
-          "transition-[background-color,border-color,box-shadow] duration-200 ease-out",
+          "transition-[background-color,border-color] duration-200 ease-out",
           isOn
-            ? "border-accent-blue bg-accent-blue shadow-[0_0_12px_var(--color-accent-blue-glow)]"
+            ? "border-accent-blue bg-accent-blue"
             : "border-hairline-strong bg-surface-elevated",
           "peer-focus-visible:outline peer-focus-visible:outline-1 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-ink",
         ].join(" ")}
@@ -64,7 +64,7 @@ export function Toggle({
         <span
           className={[
             "block size-5 shrink-0 rounded-full",
-            "transition-transform duration-200 ease-[cubic-bezier(0.34,1.3,0.64,1)]",
+            "transition-transform duration-[160ms] ease-[cubic-bezier(0.23,1,0.32,1)]",
             isOn
               ? "translate-x-5 bg-primary"
               : "translate-x-0 bg-charcoal",

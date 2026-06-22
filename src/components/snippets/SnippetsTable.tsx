@@ -1,9 +1,9 @@
-import type { ReactNode } from "react";
 import { ArrowRight, Pencil, Trash2 } from "lucide-react";
 import { useUiLocale } from "../../i18n/useUiLocale";
 import type { Snippet } from "../../hooks/useSnippets";
 import { AnimatedTableBody } from "../motion/AnimatedTableBody";
 import { BadgePill } from "../ui/BadgePill";
+import { IconButton } from "../ui/IconButton";
 import { containsSnippetVariables } from "./snippetVariables";
 
 interface SnippetsTableProps {
@@ -11,38 +11,6 @@ interface SnippetsTableProps {
   busy: boolean;
   onEdit: (snippet: Snippet) => void;
   onDelete: (id: number) => void;
-}
-
-function IconActionButton({
-  label,
-  disabled,
-  onClick,
-  children,
-  tone = "default",
-}: {
-  label: string;
-  disabled?: boolean;
-  onClick: () => void;
-  children: ReactNode;
-  tone?: "default" | "danger";
-}) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      disabled={disabled}
-      onClick={onClick}
-      className={[
-        "inline-flex size-8 items-center justify-center rounded-md border border-transparent",
-        "transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-40",
-        tone === "danger"
-          ? "text-charcoal hover:border-hairline-strong hover:bg-surface-elevated hover:text-accent-red"
-          : "text-charcoal hover:border-hairline-strong hover:bg-surface-elevated hover:text-ink",
-      ].join(" ")}
-    >
-      {children}
-    </button>
-  );
 }
 
 export function SnippetsTable({
@@ -86,7 +54,7 @@ export function SnippetsTable({
                 </td>
                 <td className="w-20 shrink-0 px-2 py-2 sm:w-24">
                   <div className="flex items-center justify-end gap-0.5 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
-                    <IconActionButton
+                    <IconButton
                       label={t("snippets.modal.editTrigger", {
                         trigger: entry.trigger,
                       })}
@@ -94,8 +62,8 @@ export function SnippetsTable({
                       onClick={() => onEdit(entry)}
                     >
                       <Pencil size={15} strokeWidth={1.75} />
-                    </IconActionButton>
-                    <IconActionButton
+                    </IconButton>
+                    <IconButton
                       label={t("snippets.modal.deleteTrigger", {
                         trigger: entry.trigger,
                       })}
@@ -104,7 +72,7 @@ export function SnippetsTable({
                       onClick={() => onDelete(entry.id)}
                     >
                       <Trash2 size={15} strokeWidth={1.75} />
-                    </IconActionButton>
+                    </IconButton>
                   </div>
                 </td>
               </>

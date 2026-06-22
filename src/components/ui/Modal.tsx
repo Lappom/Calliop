@@ -14,7 +14,7 @@ import {
 } from "../../lib/motion/variants";
 import { useReducedMotion } from "../../lib/motion/useReducedMotion";
 
-type ModalSize = "sm" | "md" | "lg";
+type ModalSize = "sm" | "md" | "lg" | "full";
 
 interface ModalProps {
   open: boolean;
@@ -23,12 +23,16 @@ interface ModalProps {
   description?: string;
   children: ReactNode;
   size?: ModalSize;
+  hideHeader?: boolean;
+  panelClassName?: string;
+  backdropClassName?: string;
 }
 
 const sizeClasses: Record<ModalSize, string> = {
   sm: "max-w-sm",
   md: "max-w-md",
   lg: "max-w-lg",
+  full: "w-[min(95vw,960px)] sm:w-[min(90vw,960px)]",
 };
 
 export function Modal({
@@ -38,6 +42,9 @@ export function Modal({
   description,
   children,
   size = "md",
+  hideHeader = false,
+  panelClassName = "",
+  backdropClassName = "",
 }: ModalProps) {
   const titleId = useId();
   const descriptionId = useId();
@@ -82,11 +89,19 @@ export function Modal({
     };
   }, [open, onClose]);
 
+  const defaultPanelClass =
+    size === "full"
+      ? "overflow-hidden rounded-lg border border-hairline-strong bg-surface-elevated"
+      : "w-[calc(100%-2rem)] rounded-lg border border-hairline-strong bg-surface-elevated p-6";
+
   return createPortal(
     <AnimatePresence>
       {open && (
         <motion.div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          className={[
+            "fixed inset-0 z-50 flex items-center justify-center p-4",
+            backdropClassName || "bg-black/70",
+          ].join(" ")}
           variants={backdropVariants}
           initial="initial"
           animate="animate"
@@ -104,22 +119,32 @@ export function Modal({
             initial="initial"
             animate="animate"
             exit="exit"
-            className={[
-              "w-[calc(100%-2rem)] rounded-lg border border-hairline-strong bg-surface-elevated p-6",
-              sizeClasses[size],
-            ].join(" ")}
+            className={[defaultPanelClass, sizeClasses[size], panelClassName]
+              .filter(Boolean)
+              .join(" ")}
             onClick={(event) => event.stopPropagation()}
           >
-            <header className="mb-6">
-              <h2 id={titleId} className="text-heading-sm m-0 text-ink">
+            {hideHeader ? (
+              <h2 id={titleId} className="sr-only">
                 {title}
               </h2>
-              {description && (
-                <p id={descriptionId} className="text-body-sm mt-2 text-charcoal">
-                  {description}
-                </p>
-              )}
-            </header>
+            ) : (
+              <header className="mb-6">
+                <h2 id={titleId} className="text-heading-sm m-0 text-ink">
+                  {title}
+                </h2>
+                {description && (
+                  <p id={descriptionId} className="text-body-sm mt-2 text-charcoal">
+                    {description}
+                  </p>
+                )}
+              </header>
+            )}
+            {hideHeader && description && (
+              <p id={descriptionId} className="sr-only">
+                {description}
+              </p>
+            )}
             {children}
           </motion.div>
         </motion.div>

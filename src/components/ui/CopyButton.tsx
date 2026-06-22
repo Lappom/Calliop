@@ -1,4 +1,5 @@
 import { Check, Copy } from "lucide-react";
+import { IconButton } from "./IconButton";
 
 interface CopyButtonProps {
   copied: boolean;
@@ -18,22 +19,11 @@ export function CopyButton({
   onClick,
 }: CopyButtonProps) {
   return (
-    <button
-      type="button"
-      aria-label={copied && copiedLabel ? copiedLabel : label}
+    <IconButton
+      label={copied && copiedLabel ? copiedLabel : label}
       disabled={disabled}
+      className={className}
       onClick={onClick}
-      className={[
-        "inline-flex size-8 shrink-0 items-center justify-center rounded-md border border-transparent",
-        "text-charcoal transition-[background-color,border-color,color]",
-        "duration-[var(--motion-fast)] ease-[var(--ease-enter)]",
-        "hover:border-hairline-strong hover:bg-surface-elevated hover:text-ink",
-        "active:bg-surface-elevated",
-        "disabled:cursor-not-allowed disabled:opacity-40",
-        className,
-      ]
-        .filter(Boolean)
-        .join(" ")}
     >
       <span className="copy-icon-swap" data-copied={copied ? "true" : "false"}>
         <span data-icon="copy" aria-hidden>
@@ -43,6 +33,6 @@ export function CopyButton({
           <Check size={15} strokeWidth={1.75} className="text-accent-green" />
         </span>
       </span>
-    </button>
+    </IconButton>
   );
 }

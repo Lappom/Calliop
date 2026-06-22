@@ -3,9 +3,11 @@ import {
   Children,
   Fragment,
   isValidElement,
+  useId,
   type ReactNode,
 } from "react";
 import { MOTION_STAGGER } from "../../lib/motion/presets";
+import { useViewReveal } from "../../lib/motion/useViewReveal";
 import {
   createStaggerContainerVariants,
   fadeUpVariants,
@@ -14,6 +16,7 @@ import {
   staggerFadeVariants,
 } from "../../lib/motion/variants";
 import { useReducedMotion } from "../../lib/motion/useReducedMotion";
+import { useViewRevealKey } from "./PageTransition";
 
 type StaggerItemMotion = "fadeUp" | "fade";
 
@@ -24,6 +27,8 @@ interface StaggerProps {
   itemMotion?: StaggerItemMotion;
   staggerDelay?: number;
   itemClassName?: string;
+  /** Override view key for first-visit reveal; defaults to PageTransition context */
+  viewKey?: string;
 }
 
 const itemVariantsByMotion: Record<StaggerItemMotion, typeof fadeUpVariants> = {
@@ -59,16 +64,27 @@ export function Stagger({
   itemMotion = "fadeUp",
   staggerDelay = MOTION_STAGGER.children,
   itemClassName = "",
+  viewKey: viewKeyProp,
 }: StaggerProps) {
+  const contextViewKey = useViewRevealKey();
+  const viewKey = viewKeyProp ?? contextViewKey;
+  const staggerInstanceId = useId();
+  const revealFromHook = useViewReveal(
+    viewKey || "__stagger__",
+    viewKey ? staggerInstanceId : undefined,
+  );
+  const revealOnFirstVisit = viewKey ? revealFromHook : true;
   const reducedMotion = useReducedMotion();
-  const containerVariants = reducedMotion
-    ? reducedMotionVariants
-    : staggerDelay === MOTION_STAGGER.children
+  const shouldAnimate = !reducedMotion && revealOnFirstVisit;
+
+  const containerVariants = shouldAnimate
+    ? staggerDelay === MOTION_STAGGER.children
       ? staggerContainerVariants
-      : createStaggerContainerVariants(staggerDelay);
-  const itemVariants = reducedMotion
-    ? reducedMotionVariants
-    : itemVariantsByMotion[itemMotion];
+      : createStaggerContainerVariants(staggerDelay)
+    : reducedMotionVariants;
+  const itemVariants = shouldAnimate
+    ? itemVariantsByMotion[itemMotion]
+    : reducedMotionVariants;
 
   const items = flattenStaggerChildren(children);
 
