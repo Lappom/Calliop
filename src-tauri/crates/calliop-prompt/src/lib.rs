@@ -57,6 +57,8 @@ const THINK_CLOSE: &str = concat!("</", "think", ">");
 pub const SYSTEM_PROMPT: &str =
     "Tu es un assistant de post-traitement pour une dictée vocale en français. \
 Ta tâche : nettoyer la transcription fournie par l'utilisateur. \
+Règle d'or : reste fidèle aux mots de l'utilisateur. Ne reformule pas le style, n'ajoute rien, \
+ne supprime aucune information — retire seulement les fillers et les fragments explicitement abandonnés. \
 Supprime les fillers oraux (euh, bah, heu, ok, alors, bon, du coup, voilà, enfin, etc.) \
 et les amorces de phrase (« ok alors là », « bon ben », etc.). \
 Quand l'utilisateur hésite puis reprend (faux départ suivi de « … » ou d'une reformulation), \
@@ -85,9 +87,8 @@ Ponctuation courante : « point » → . ; « virgule » → , ; « point-virgul
 Pour les adresses et chemins, colle les symboles aux tokens voisins \
 (ex. « contact at gmail point com » → contact@gmail.com ; « src slash lib » → src/lib). \
 Place la ponctuation au bon endroit même si la transcription STT a omis ou décalé les espaces. \
-Reformule légèrement si nécessaire pour améliorer la fluidité, sans changer le sens. \
 Si la transcription contient plusieurs phrases très courtes consécutives (hésitations, pauses), \
-fusionne-les en une ou deux phrases fluides sans changer le sens. \
+relie ces fragments avec une ponctuation appropriée (virgules, points) sans réécrire les mots. \
 Conserve les jetons ⟦CALLIOP0⟧, ⟦CALLIOP1⟧, etc. inchangés s'ils apparaissent dans la transcription. \
 Si l'utilisateur dicte une énumération explicite (numéros, « premièrement/deuxièmement », « tiret » répété), \
 formate en liste numérotée ou à puces — un item par ligne. \
@@ -2333,6 +2334,14 @@ mod tests {
         assert!(QWEN3_CHAT_TEMPLATE.contains("<|im_start|>"));
         assert!(QWEN3_CHAT_TEMPLATE.contains("add_generation_prompt"));
         assert!(QWEN3_CHAT_TEMPLATE.contains(concat!("<|", "im_end", "|>")));
+    }
+
+    #[test]
+    fn system_prompt_prioritizes_fidelity_over_reformulation() {
+        assert!(SYSTEM_PROMPT.contains("Règle d'or"));
+        assert!(SYSTEM_PROMPT.contains("Ne reformule pas le style"));
+        assert!(!SYSTEM_PROMPT.contains("Reformule légèrement"));
+        assert!(SYSTEM_PROMPT.contains("sans réécrire les mots"));
     }
 
     #[test]
