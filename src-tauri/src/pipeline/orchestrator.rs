@@ -9,8 +9,8 @@ use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize};
 use thiserror::Error;
 
 use calliop_prompt::{
-    find_latest_frozen_boundary, fits_llm_cleanup_budget, join_transcript_segments_with_pauses,
-    post_process_transcript, ToneProfile,
+    find_latest_frozen_boundary, fits_llm_cleanup_budget, join_transcript_segments_for_llm,
+    join_transcript_segments_with_pauses, post_process_transcript, ToneProfile,
 };
 
 use crate::app_context::{get_active_window, resolve_tone, ActiveWindow};
@@ -74,8 +74,10 @@ fn prepare_partial_transcript(
 }
 
 /// Maximum time to wait for LLM cleanup before inject or worker kill.
-const LLM_CLEANUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
+const LLM_CLEANUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 const LLM_CLEANUP_TIMEOUT_MAX: std::time::Duration = std::time::Duration::from_secs(120);
+/// Cold-start wait for the LLM sidecar on the first dictation after launch.
+const LLM_ENGINE_WAIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// Bounded channel capacities for streaming dictation workers.
 const AUDIO_CHUNK_CHANNEL_CAPACITY: usize = 64;
@@ -393,7 +395,7 @@ fn build_llm_ready_text(
     if segments.is_empty() {
         return None;
     }
-    let joined = join_transcript_segments_with_pauses(segments)
+    let joined = join_transcript_segments_for_llm(segments)
         .trim()
         .to_string();
     if joined.is_empty() {
@@ -406,6 +408,19 @@ fn build_llm_ready_text(
         return None;
     }
     Some((full_text, shields))
+}
+
+fn join_transcripts_for_display(
+    transcripts: &[SegmentTranscript],
+    auto_edit: bool,
+) -> String {
+    if auto_edit {
+        join_transcript_segments_for_llm(transcripts)
+    } else {
+        join_transcript_segments_with_pauses(transcripts)
+    }
+    .trim()
+    .to_string()
 }
 
 fn merge_cleaned_segments(prefix: &str, tail: &str) -> String {
@@ -601,6 +616,8 @@ fn run_llm_cleanup_for_segments(
         };
     }
 
+    let chunk_count = chunks.len();
+
     let mut merged = String::new();
     let mut llm_ms = 0_u64;
     let mut llm_status = LlmStatus::Applied;
@@ -639,6 +656,11 @@ fn run_llm_cleanup_for_segments(
         if matches!(chunk_status, LlmStatus::Applied) {
             merged = merge_cleaned_segments(&merged, &text);
         } else {
+            eprintln!(
+                "llm chunk cleanup skipped: status={chunk_status:?} reason={} chunk_len={} chunks_total={chunk_count}",
+                chunk_reason.as_deref().unwrap_or("unknown"),
+                chunk_text.len(),
+            );
             llm_status = chunk_status;
             llm_skip_reason = chunk_reason;
             merged = merge_cleaned_segments(&merged, &chunk_text);
@@ -1148,15 +1170,13 @@ impl PipelineOrchestrator {
         u64,
     ) {
         let rules = self.correction_rules.read().clone();
+        let auto_edit = self.auto_edit.load(Ordering::SeqCst);
         let raw = {
-            let joined = join_transcript_segments_with_pauses(transcripts)
-                .trim()
-                .to_string();
+            let joined = join_transcripts_for_display(transcripts, auto_edit);
             apply_corrections(&joined, &rules)
         };
 
         let (active_tone, _) = self.resolve_active_context();
-        let auto_edit = self.auto_edit.load(Ordering::SeqCst);
         let snippets = self.snippets.read().clone();
         let snippet_ctx = build_snippet_variable_context(self.history_store.as_deref());
         let snippet_fallback = prepare_display_transcript(&raw, &snippets, &snippet_ctx);
@@ -1175,7 +1195,11 @@ impl PipelineOrchestrator {
         };
 
         if !raw.is_empty() && auto_edit && self.llm.lock().is_none() && pipelined.is_none() {
-            wait_for_llm_engine(&self.llm, LLM_CLEANUP_TIMEOUT, &self.cancel_requested);
+            wait_for_llm_engine(
+                &self.llm,
+                LLM_ENGINE_WAIT_TIMEOUT,
+                &self.cancel_requested,
+            );
         }
 
         let mut llm_blocked_ms = 0_u64;
@@ -1227,7 +1251,14 @@ impl PipelineOrchestrator {
                                         &tail_result.text,
                                     )
                                 } else {
-                                    full_text
+                                    let tail_fallback = build_llm_ready_text(
+                                        &transcripts[tail_start..],
+                                        &rules,
+                                        &snippets,
+                                    )
+                                    .map(|(text, _)| text)
+                                    .unwrap_or_else(|| full_text.clone());
+                                    merge_cleaned_segments(&frozen.cleaned_prefix, &tail_fallback)
                                 };
                                 (
                                     merged,
@@ -1356,6 +1387,11 @@ impl PipelineOrchestrator {
         );
 
         if matches!(llm_status, LlmStatus::Skipped | LlmStatus::Failed) {
+            eprintln!(
+                "llm cleanup skipped: status={llm_status:?} reason={} text_len={} llm_blocked_ms={llm_blocked_ms}",
+                llm_skip_reason.as_deref().unwrap_or("unknown"),
+                text_to_inject.len(),
+            );
             let _ = app.emit(
                 "llm-skipped",
                 serde_json::json!({

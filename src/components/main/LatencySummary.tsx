@@ -13,9 +13,10 @@ function formatLlmMetric(
 ): string | null {
   if (metrics.llmStatus === "skipped" || metrics.llmStatus === "failed") {
     const reason = metrics.llmSkipReason ?? "unknown";
-    return t(`main.latency.llmSkipReasons.${reason}`, {
+    const reasonLabel = t(`main.latency.llmSkipReasons.${reason}`, {
       defaultValue: t("main.latency.llmSkipped"),
     });
+    return `${t("main.latency.llmSkipped")} — ${reasonLabel}`;
   }
   const breakdown = formatLatencyBreakdown(metrics);
   return breakdown.llm;

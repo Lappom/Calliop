@@ -86,6 +86,8 @@ Pour les adresses et chemins, colle les symboles aux tokens voisins \
 (ex. « contact at gmail point com » → contact@gmail.com ; « src slash lib » → src/lib). \
 Place la ponctuation au bon endroit même si la transcription STT a omis ou décalé les espaces. \
 Reformule légèrement si nécessaire pour améliorer la fluidité, sans changer le sens. \
+Si la transcription contient plusieurs phrases très courtes consécutives (hésitations, pauses), \
+fusionne-les en une ou deux phrases fluides sans changer le sens. \
 Conserve les jetons ⟦CALLIOP0⟧, ⟦CALLIOP1⟧, etc. inchangés s'ils apparaissent dans la transcription. \
 Si l'utilisateur dicte une énumération explicite (numéros, « premièrement/deuxièmement », « tiret » répété), \
 formate en liste numérotée ou à puces — un item par ligne. \
@@ -307,11 +309,14 @@ pub fn whisper_oral_vocabulary_word_count() -> usize {
     WHISPER_ORAL_VOCABULARY_HINT.split_whitespace().count()
 }
 
-/// Pause below this threshold inserts a comma between segments (when Whisper omitted punctuation).
-pub const PAUSE_COMMA_THRESHOLD_MS: u32 = 700;
+/// Minimum pause (ms) before inserting a comma between segments.
+pub const PAUSE_COMMA_MIN_MS: u32 = 400;
 
-/// Pause at or above this threshold inserts a period between segments.
-pub const PAUSE_PERIOD_THRESHOLD_MS: u32 = 700;
+/// Pause at or above this threshold inserts a period between segments (display / verbatim path).
+pub const PAUSE_PERIOD_THRESHOLD_MS: u32 = 1200;
+
+/// LLM input path: period only after longer pauses so the model can merge shorter runs.
+pub const LLM_PAUSE_PERIOD_THRESHOLD_MS: u32 = 1500;
 
 /// Pause before a segment that follows a sentence end — candidate for pipelined LLM freeze.
 pub const FROZEN_BOUNDARY_PAUSE_MS: u32 = 1500;
@@ -360,6 +365,27 @@ pub fn join_transcript_segments(segments: &[impl AsRef<str>]) -> String {
 
 /// Joins streaming segments using VAD pause duration when Whisper omitted punctuation.
 pub fn join_transcript_segments_with_pauses(segments: &[(impl AsRef<str>, u32)]) -> String {
+    join_transcript_segments_with_pause_thresholds(
+        segments,
+        PAUSE_COMMA_MIN_MS,
+        PAUSE_PERIOD_THRESHOLD_MS,
+    )
+}
+
+/// Softer pause thresholds for LLM cleanup input and auto-edit fallback.
+pub fn join_transcript_segments_for_llm(segments: &[(impl AsRef<str>, u32)]) -> String {
+    join_transcript_segments_with_pause_thresholds(
+        segments,
+        PAUSE_COMMA_MIN_MS,
+        LLM_PAUSE_PERIOD_THRESHOLD_MS,
+    )
+}
+
+fn join_transcript_segments_with_pause_thresholds(
+    segments: &[(impl AsRef<str>, u32)],
+    comma_min_ms: u32,
+    period_threshold_ms: u32,
+) -> String {
     let mut result = String::new();
     for (index, (segment, leading_silence_ms)) in segments.iter().enumerate() {
         let segment = segment.as_ref().trim();
@@ -372,9 +398,9 @@ pub fn join_transcript_segments_with_pauses(segments: &[(impl AsRef<str>, u32)])
         }
 
         if !segment_has_trailing_punctuation(&result) {
-            if *leading_silence_ms >= PAUSE_PERIOD_THRESHOLD_MS {
+            if *leading_silence_ms >= period_threshold_ms {
                 append_sentence_break(&mut result);
-            } else if *leading_silence_ms > 0 {
+            } else if *leading_silence_ms >= comma_min_ms {
                 append_comma_break(&mut result);
             } else if !result.ends_with(' ') {
                 result.push(' ');
@@ -2389,12 +2415,30 @@ mod tests {
     }
 
     #[test]
-    fn join_with_long_pause_inserts_period_and_capitalizes() {
+    fn join_with_medium_pause_inserts_comma_not_period() {
         let joined = join_transcript_segments_with_pauses(&[
             ("bonjour".to_string(), 0),
             ("comment allez-vous".to_string(), 900),
         ]);
+        assert_eq!(joined, "bonjour, comment allez-vous");
+    }
+
+    #[test]
+    fn join_with_long_pause_inserts_period_and_capitalizes() {
+        let joined = join_transcript_segments_with_pauses(&[
+            ("bonjour".to_string(), 0),
+            ("comment allez-vous".to_string(), 1300),
+        ]);
         assert_eq!(joined, "bonjour. Comment allez-vous");
+    }
+
+    #[test]
+    fn join_with_brief_pause_inserts_space_only() {
+        let joined = join_transcript_segments_with_pauses(&[
+            ("je vais".to_string(), 0),
+            ("au magasin".to_string(), 250),
+        ]);
+        assert_eq!(joined, "je vais au magasin");
     }
 
     #[test]
@@ -2404,6 +2448,24 @@ mod tests {
             ("Comment allez-vous".to_string(), 900),
         ]);
         assert_eq!(joined, "Bonjour. Comment allez-vous");
+    }
+
+    #[test]
+    fn join_for_llm_defers_period_until_longer_pause() {
+        let joined = join_transcript_segments_for_llm(&[
+            ("bonjour".to_string(), 0),
+            ("comment allez-vous".to_string(), 1300),
+        ]);
+        assert_eq!(joined, "bonjour, comment allez-vous");
+    }
+
+    #[test]
+    fn join_for_llm_inserts_period_after_1500ms() {
+        let joined = join_transcript_segments_for_llm(&[
+            ("bonjour".to_string(), 0),
+            ("comment allez-vous".to_string(), 1600),
+        ]);
+        assert_eq!(joined, "bonjour. Comment allez-vous");
     }
 
     #[test]
