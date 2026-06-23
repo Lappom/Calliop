@@ -44,7 +44,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 sys-locale = "0.3"
 
 [target.'cfg(windows)'.dependencies]
-uiautomation = "0.17"
+uiautomation = "0.25"
 windows = { version = "0.58", features = [
     "Win32_Foundation",
     "Win32_System_SystemInformation",
