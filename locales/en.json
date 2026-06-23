@@ -154,6 +154,32 @@
       "descriptionOn": "Cleans fillers, punctuation, and light rephrasing via a local model.",
       "descriptionOff": "Verbatim mode: raw transcription is injected without LLM post-processing."
     },
+    "autoEditMode": {
+      "label": "Cleanup level",
+      "options": {
+        "off": "Verbatim",
+        "light": "Light (no AI)",
+        "full": "Full (local AI)"
+      },
+      "description": {
+        "off": "Raw transcription with dictionary corrections only.",
+        "light": "Fillers, pause punctuation, and snippets — no LLM model.",
+        "full": "Local AI cleanup on top of deterministic processing."
+      }
+    },
+    "pausePreset": {
+      "label": "Pause punctuation",
+      "options": {
+        "fast": "Fast",
+        "natural": "Natural",
+        "formal": "Formal"
+      },
+      "description": {
+        "fast": "Commas and periods sooner — suited to fast speakers.",
+        "natural": "Default balance between flow and structure.",
+        "formal": "Longer pauses before periods — more structured text."
+      }
+    },
     "autoLearn": {
       "label": "Automatic correction learning",
       "descriptionOn": "Detects corrections in the target app and enriches the dictionary locally.",
@@ -790,8 +816,27 @@
     "unlockedOn": "Unlocked on {{date}}",
     "lockedSecretTitle": "???",
     "empty": "No achievements in this category.",
+    "hero": {
+      "collectionLabel": "Collection",
+      "unlockedDetail": "{{percent}}% of the collection unlocked",
+      "secretsLabel": "Secrets"
+    },
+    "status": {
+      "aria": "Filter by status",
+      "all": "All",
+      "unlocked": "Unlocked",
+      "locked": "Locked",
+      "new": "New"
+    },
+    "tabs": {
+      "aria": "Achievement categories"
+    },
+    "badge": {
+      "new": "New"
+    },
     "toast": {
-      "unlocked": "Achievement unlocked!"
+      "unlocked": "Achievement unlocked!",
+      "dismiss": "Dismiss notification"
     },
     "celebration": {
       "title": "Legendary achievement!",

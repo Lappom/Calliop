@@ -5,10 +5,7 @@ use crate::AppState;
 
 #[tauri::command]
 pub fn get_achievements(state: State<'_, AppState>) -> Result<AchievementsSummary, String> {
-    state
-        .achievements
-        .get_summary()
-        .map_err(|e| e.to_string())
+    state.achievements.get_summary().map_err(|e| e.to_string())
 }
 
 #[tauri::command]

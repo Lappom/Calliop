@@ -2,9 +2,7 @@ use tauri::{AppHandle, State};
 
 use crate::inject::TextInjector;
 use crate::pipeline::{expand_snippet_variables, SnippetVariableContext};
-use crate::store::{
-    is_valid_snippet_content, is_valid_trigger, normalize_trigger, SnippetImport,
-};
+use crate::store::{is_valid_snippet_content, is_valid_trigger, normalize_trigger, SnippetImport};
 use crate::user_error::{user_error_string, UserError};
 use crate::{
     emit_snippets_updated, refresh_whisper_prompt_state, snippet_to_payload, AppState,

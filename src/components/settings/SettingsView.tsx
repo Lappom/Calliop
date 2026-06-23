@@ -64,7 +64,8 @@ export function SettingsView({ activeSection }: SettingsViewProps) {
     modelsStatus,
     inferenceInfo,
     autostartEnabled,
-    setAutoEdit,
+    setAutoEditMode,
+    setPausePreset,
     setAutoLearn,
     setAutoUpdate,
     setSttLanguage,
@@ -310,19 +311,58 @@ export function SettingsView({ activeSection }: SettingsViewProps) {
               }}
             />
 
-            <SettingsToggleRow
-              label={t("settings.autoEdit.label")}
-              description={
-                settings.autoEdit
-                  ? t("settings.autoEdit.descriptionOn")
-                  : t("settings.autoEdit.descriptionOff")
-              }
-              checked={settings.autoEdit}
-              disabled={!loaded}
-              onCheckedChange={(checked) => {
-                void setAutoEdit(checked);
-              }}
-            />
+            <div className="flex flex-col gap-2">
+              <Select
+                label={t("settings.autoEditMode.label")}
+                value={settings.autoEditMode}
+                disabled={!loaded || saving}
+                options={[
+                  { value: "off", label: t("settings.autoEditMode.options.off") },
+                  {
+                    value: "light",
+                    label: t("settings.autoEditMode.options.light"),
+                  },
+                  {
+                    value: "full",
+                    label: t("settings.autoEditMode.options.full"),
+                  },
+                ]}
+                onChange={(value) => {
+                  void setAutoEditMode(value as "off" | "light" | "full");
+                }}
+              />
+              <p className="text-caption text-ash">
+                {t(`settings.autoEditMode.description.${settings.autoEditMode}`)}
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <Select
+                label={t("settings.pausePreset.label")}
+                value={settings.pausePreset}
+                disabled={!loaded || saving}
+                options={[
+                  {
+                    value: "fast",
+                    label: t("settings.pausePreset.options.fast"),
+                  },
+                  {
+                    value: "natural",
+                    label: t("settings.pausePreset.options.natural"),
+                  },
+                  {
+                    value: "formal",
+                    label: t("settings.pausePreset.options.formal"),
+                  },
+                ]}
+                onChange={(value) => {
+                  void setPausePreset(value as "fast" | "natural" | "formal");
+                }}
+              />
+              <p className="text-caption text-ash">
+                {t(`settings.pausePreset.description.${settings.pausePreset}`)}
+              </p>
+            </div>
 
             <SettingsToggleRow
               label={t("settings.autoLearn.label")}

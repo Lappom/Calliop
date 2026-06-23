@@ -1,18 +1,19 @@
+use calliop_prompt::PausePreset;
 use tauri::{AppHandle, Manager, State};
 
-use crate::{
-    apply_autostart, parse_stt_language, parse_ui_language, refresh_perf_config,
-    register_hotkey_binding, resume_global_hotkey, rollback_settings, settings_to_payload,
-    should_start_minimized, shutdown_llm_engine, suspend_global_hotkey, sync_tray_menus,
-    AppState, SettingsPayload, SettingsRollbackContext, WhisperSettingsChangeGuard,
-};
 use crate::hotkey;
 use crate::llm;
 use crate::pipeline::PipelineState;
-use crate::store::{AppSettings, InferenceBackend};
+use crate::store::{AppSettings, AutoEditMode, InferenceBackend};
 use crate::stt::WhisperModel;
 use crate::system;
 use crate::user_error::{user_error_string, UserError};
+use crate::{
+    apply_autostart, parse_stt_language, parse_ui_language, refresh_perf_config,
+    register_hotkey_binding, resume_global_hotkey, rollback_settings, settings_to_payload,
+    should_start_minimized, shutdown_llm_engine, suspend_global_hotkey, sync_tray_menus, AppState,
+    SettingsPayload, SettingsRollbackContext, WhisperSettingsChangeGuard,
+};
 use crate::{
     emit_model_unready_if_needed, ensure_llm_model_file, ensure_llm_model_inner,
     ensure_model_inner, ensure_whisper_model_file, invalidate_whisper_engine, llm_engine_is_live,
@@ -110,11 +111,16 @@ pub async fn set_settings(
     let llm_effective_changed = prev_effective_llm != next_effective_llm;
 
     let binding = hotkey::parse_hotkey_setting(&settings.hotkey).map_err(|e| e.to_string())?;
+    let auto_edit_mode = AutoEditMode::parse(&settings.auto_edit_mode)
+        .unwrap_or_else(|| AutoEditMode::from_legacy_bool(settings.auto_edit));
+    let pause_preset = PausePreset::parse(&settings.pause_preset).unwrap_or_default();
     let next_hotkey = hotkey::format_hotkey_setting(binding);
     let hotkey_changed = previous.hotkey != next_hotkey;
 
     let next_settings = AppSettings {
-        auto_edit: settings.auto_edit,
+        auto_edit: auto_edit_mode.uses_llm(),
+        auto_edit_mode,
+        pause_preset,
         auto_learn: settings.auto_learn,
         auto_update: settings.auto_update,
         stt_language: next_stt,
@@ -135,6 +141,8 @@ pub async fn set_settings(
     };
 
     state.pipeline.lock().set_auto_learn(settings.auto_learn);
+    state.pipeline.lock().set_auto_edit_mode(auto_edit_mode);
+    state.pipeline.lock().set_pause_preset(pause_preset);
     state.pipeline.lock().set_default_stt_language(stt_language);
     if input_device_changed {
         state
@@ -153,6 +161,14 @@ pub async fn set_settings(
             .lock()
             .set_default_stt_language(previous.stt_language_mode());
         state.pipeline.lock().set_auto_learn(previous.auto_learn);
+        state
+            .pipeline
+            .lock()
+            .set_auto_edit_mode(previous.auto_edit_mode);
+        state
+            .pipeline
+            .lock()
+            .set_pause_preset(previous.pause_preset);
         return Err(err);
     }
 
@@ -174,7 +190,7 @@ pub async fn set_settings(
         let _ = app.emit("llm-unready", ());
         state
             .deferred_llm_on_boot
-            .store(settings.auto_edit, Ordering::SeqCst);
+            .store(auto_edit_mode.uses_llm(), Ordering::SeqCst);
     }
 
     let need_whisper_file = whisper_changed
@@ -202,7 +218,7 @@ pub async fn set_settings(
         || llm_engine_out_of_sync;
     let llm_lazy_load = state.perf_config.lock().llm_lazy_load;
     let llm_model_preference_changed = llm_changed || llm_effective_changed;
-    let will_load_llm_engine = settings.auto_edit
+    let will_load_llm_engine = auto_edit_mode.uses_llm()
         && (!llm_lazy_load || llm_model_preference_changed)
         && (llm_reload_needed || !llm_engine_is_live(&state));
 
@@ -250,8 +266,8 @@ pub async fn set_settings(
         }
     }
 
-    if settings.auto_edit {
-        state.pipeline.lock().set_auto_edit(true);
+    if auto_edit_mode.uses_llm() {
+        state.pipeline.lock().set_auto_edit_mode(auto_edit_mode);
         if llm_reload_needed || !llm_engine_is_live(&state) {
             shutdown_llm_engine(&state);
             let _ = app.emit("llm-unready", ());
@@ -268,7 +284,7 @@ pub async fn set_settings(
             }
         }
     } else {
-        state.pipeline.lock().set_auto_edit(false);
+        state.pipeline.lock().set_auto_edit_mode(auto_edit_mode);
         shutdown_llm_engine(&state);
         let _ = app.emit("llm-unready", ());
     }

@@ -1,6 +1,8 @@
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
+use calliop_prompt::PausePreset;
+
 use super::db::{Store, StoreError};
 
 use crate::hotkey::DEFAULT_HOTKEY_SETTING;
@@ -8,6 +10,8 @@ use crate::llm::LlmModel;
 use crate::stt::{SttLanguage, WhisperModel, DEFAULT_STT_LANGUAGE};
 
 pub const KEY_AUTO_EDIT: &str = "auto_edit";
+pub const KEY_AUTO_EDIT_MODE: &str = "auto_edit_mode";
+pub const KEY_PAUSE_PRESET: &str = "pause_preset";
 pub const KEY_AUTO_LEARN: &str = "auto_learn";
 pub const KEY_STT_LANGUAGE: &str = "stt_language";
 pub const KEY_WHISPER_MODEL: &str = "whisper_model";
@@ -18,6 +22,59 @@ pub const KEY_ONBOARDING_DONE: &str = "onboarding_done";
 pub const KEY_AUTO_UPDATE: &str = "auto_update";
 pub const KEY_AUTOSTART: &str = "autostart";
 const KEY_AUTO_EDIT_DEFAULT_APPLIED: &str = "auto_edit_default_applied_v1";
+
+/// How aggressively dictation output is cleaned before injection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AutoEditMode {
+    /// Raw STT join + dictionary corrections only.
+    Off,
+    /// Deterministic cleanup (fillers, pause punctuation, snippets) without LLM.
+    Light,
+    /// Full pipeline including local LLM cleanup.
+    #[default]
+    Full,
+}
+
+impl AutoEditMode {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_lowercase().as_str() {
+            "off" => Some(Self::Off),
+            "light" => Some(Self::Light),
+            "full" => Some(Self::Full),
+            _ => None,
+        }
+    }
+
+    pub fn as_setting_value(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Light => "light",
+            Self::Full => "full",
+        }
+    }
+
+    pub fn uses_llm(self) -> bool {
+        matches!(self, Self::Full)
+    }
+
+    pub fn uses_deterministic_cleanup(self) -> bool {
+        matches!(self, Self::Light | Self::Full)
+    }
+
+    pub fn uses_pause_punctuation(self) -> bool {
+        matches!(self, Self::Light | Self::Full)
+    }
+
+    pub fn from_legacy_bool(enabled: bool) -> Self {
+        if enabled {
+            Self::Full
+        } else {
+            Self::Off
+        }
+    }
+}
+
 pub const KEY_LOW_POWER_MODE: &str = "low_power_mode";
 pub const KEY_ADAPTIVE_PERF: &str = "adaptive_perf";
 pub const KEY_UI_LANGUAGE: &str = "ui_language";
@@ -59,6 +116,8 @@ impl InferenceBackend {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AppSettings {
     pub auto_edit: bool,
+    pub auto_edit_mode: AutoEditMode,
+    pub pause_preset: PausePreset,
     pub auto_learn: bool,
     pub auto_update: bool,
     pub stt_language: String,
@@ -76,6 +135,8 @@ impl Default for AppSettings {
     fn default() -> Self {
         Self {
             auto_edit: true,
+            auto_edit_mode: AutoEditMode::Full,
+            pause_preset: PausePreset::default(),
             auto_learn: true,
             auto_update: true,
             stt_language: DEFAULT_STT_LANGUAGE.to_string(),
@@ -122,9 +183,29 @@ impl AppSettings {
 }
 
 impl Store {
+    fn load_auto_edit_mode(&self) -> Result<AutoEditMode, StoreError> {
+        if self.has_setting(KEY_AUTO_EDIT_MODE)? {
+            let raw = self.get_string(KEY_AUTO_EDIT_MODE, "")?;
+            if let Some(mode) = AutoEditMode::parse(&raw) {
+                return Ok(mode);
+            }
+        }
+        Ok(AutoEditMode::from_legacy_bool(
+            self.get_bool(KEY_AUTO_EDIT, true)?,
+        ))
+    }
+
+    fn load_pause_preset(&self) -> Result<PausePreset, StoreError> {
+        self.get_string(KEY_PAUSE_PRESET, PausePreset::default().as_setting_value())
+            .map(|value| PausePreset::parse(&value).unwrap_or_default())
+    }
+
     pub fn load_settings(&self) -> Result<AppSettings, StoreError> {
+        let auto_edit_mode = self.load_auto_edit_mode()?;
         Ok(AppSettings {
-            auto_edit: self.get_bool(KEY_AUTO_EDIT, true)?,
+            auto_edit: auto_edit_mode.uses_llm(),
+            auto_edit_mode,
+            pause_preset: self.load_pause_preset()?,
             auto_learn: self.get_bool(KEY_AUTO_LEARN, true)?,
             auto_update: self.get_bool(KEY_AUTO_UPDATE, true)?,
             stt_language: self
@@ -167,8 +248,25 @@ impl Store {
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             params![
                 KEY_AUTO_EDIT,
-                if settings.auto_edit { "true" } else { "false" }
+                if settings.auto_edit_mode.uses_llm() {
+                    "true"
+                } else {
+                    "false"
+                }
             ],
+        )?;
+        tx.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![
+                KEY_AUTO_EDIT_MODE,
+                settings.auto_edit_mode.as_setting_value()
+            ],
+        )?;
+        tx.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![KEY_PAUSE_PRESET, settings.pause_preset.as_setting_value()],
         )?;
         tx.execute(
             "INSERT INTO settings (key, value) VALUES (?1, ?2)
@@ -331,6 +429,8 @@ mod tests {
         store
             .save_settings(&AppSettings {
                 auto_edit: true,
+                auto_edit_mode: AutoEditMode::Full,
+                pause_preset: PausePreset::default(),
                 auto_learn: false,
                 auto_update: true,
                 stt_language: "en".into(),
@@ -346,6 +446,8 @@ mod tests {
             .expect("save");
         let loaded = store.load_settings().expect("load");
         assert!(loaded.auto_edit);
+        assert_eq!(loaded.auto_edit_mode, AutoEditMode::Full);
+        assert_eq!(loaded.pause_preset, PausePreset::default());
         assert!(!loaded.auto_learn);
         assert!(loaded.auto_update);
         assert_eq!(loaded.stt_language, "en");

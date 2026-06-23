@@ -207,9 +207,7 @@ impl Store {
                     unlocked: unlocked_flag,
                     unlocked_at: row.map(|r| r.unlocked_at.clone()),
                     seen: row.map(|r| r.seen).unwrap_or(false),
-                    progress: if unlocked_flag {
-                        None
-                    } else if def.secret {
+                    progress: if unlocked_flag || def.secret {
                         None
                     } else {
                         progress_fn(&def.condition)

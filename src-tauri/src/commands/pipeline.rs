@@ -48,7 +48,10 @@ pub fn get_stt_language(state: State<'_, AppState>) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn cycle_dictation_language(app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
+pub fn cycle_dictation_language(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
     let language = state
         .pipeline
         .lock()

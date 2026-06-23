@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Instant;
@@ -9,17 +9,20 @@ use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize};
 use thiserror::Error;
 
 use calliop_prompt::{
-    find_latest_frozen_boundary, fits_llm_cleanup_budget, join_transcript_segments_for_llm,
-    join_transcript_segments_with_pauses, post_process_transcript, ToneProfile,
+    find_latest_frozen_boundary_thresholds, fits_llm_cleanup_budget, join_transcript_segments,
+    join_transcript_segments_for_llm_thresholds, join_transcript_segments_with_pauses_thresholds,
+    post_process_transcript, PausePreset, PauseThresholds, ToneProfile,
 };
 
+use crate::achievements::{AchievementEngine, DictationEvent};
 use crate::app_context::{get_active_window, resolve_tone, ActiveWindow};
-use crate::audio::{AudioCapture, SpeechSegment, VadSegmenter, AUDIO_BAND_COUNT, TARGET_SAMPLE_RATE};
+use crate::audio::{
+    AudioCapture, SpeechSegment, VadSegmenter, AUDIO_BAND_COUNT, TARGET_SAMPLE_RATE,
+};
 use crate::inject::{InjectError, InjectOutcome, TextInjector};
 use crate::llm::LlamaEngine;
 use crate::observe::CorrectionHandler;
-use crate::store::{AppContextRule, NewDictation, Snippet, Store};
-use crate::achievements::{AchievementEngine, DictationEvent};
+use crate::store::{AppContextRule, AutoEditMode, NewDictation, Snippet, Store};
 use crate::stt::{SttError, SttLanguage, WhisperEngine};
 
 use super::corrections::{apply_corrections, CorrectionRule};
@@ -28,6 +31,35 @@ use super::snippets::{
     apply_snippets, finalize_llm_with_snippets, shield_snippet_triggers, unshield_snippets,
     ShieldedSnippet,
 };
+
+fn build_quality_fallback(raw: &str, snippets: &[Snippet], ctx: &SnippetVariableContext) -> String {
+    let display = prepare_display_transcript(raw, snippets, ctx);
+    apply_snippets(&display, snippets, ctx)
+}
+
+const AUTO_EDIT_OFF: u8 = 0;
+const AUTO_EDIT_LIGHT: u8 = 1;
+const AUTO_EDIT_FULL: u8 = 2;
+
+fn encode_auto_edit_mode(mode: AutoEditMode) -> u8 {
+    match mode {
+        AutoEditMode::Off => AUTO_EDIT_OFF,
+        AutoEditMode::Light => AUTO_EDIT_LIGHT,
+        AutoEditMode::Full => AUTO_EDIT_FULL,
+    }
+}
+
+fn decode_auto_edit_mode(value: u8) -> AutoEditMode {
+    match value {
+        AUTO_EDIT_LIGHT => AutoEditMode::Light,
+        AUTO_EDIT_FULL => AutoEditMode::Full,
+        _ => AutoEditMode::Off,
+    }
+}
+
+fn pause_thresholds_from_preset(preset: PausePreset) -> PauseThresholds {
+    preset.thresholds()
+}
 
 fn build_snippet_variable_context(store: Option<&Store>) -> SnippetVariableContext {
     let user_name = store
@@ -291,18 +323,19 @@ impl FrozenLlmCoordinator {
     fn maybe_start_background(
         &mut self,
         segments: &[SegmentTranscript],
-        auto_edit: bool,
+        edit_mode: AutoEditMode,
+        thresholds: &PauseThresholds,
         llm: &Arc<Mutex<Option<LlamaEngine>>>,
         llm_ready: &Arc<AtomicBool>,
-        auto_edit_flag: &Arc<AtomicBool>,
+        auto_edit_mode: &Arc<AtomicU8>,
         rules: &[CorrectionRule],
         snippets: &[Snippet],
         tone: ToneProfile,
     ) {
-        if !auto_edit || llm.lock().is_none() {
+        if !edit_mode.uses_llm() || llm.lock().is_none() {
             return;
         }
-        let Some(boundary) = find_latest_frozen_boundary(segments) else {
+        let Some(boundary) = find_latest_frozen_boundary_thresholds(segments, thresholds) else {
             return;
         };
         if self.frozen_up_to_index == Some(boundary) && self.job.is_some() {
@@ -330,7 +363,8 @@ impl FrozenLlmCoordinator {
         }
 
         let prefix_segments = &segments[..=target_boundary];
-        let Some((full_text, shields)) = build_llm_ready_text(prefix_segments, rules, snippets)
+        let Some((full_text, shields)) =
+            build_llm_ready_text(prefix_segments, rules, snippets, thresholds)
         else {
             return;
         };
@@ -345,7 +379,7 @@ impl FrozenLlmCoordinator {
         let job = start_llm_cleanup(
             Arc::clone(llm),
             Arc::clone(llm_ready),
-            Arc::clone(auto_edit_flag),
+            Arc::clone(auto_edit_mode),
             &full_text,
             tone,
         );
@@ -392,11 +426,12 @@ fn build_llm_ready_text(
     segments: &[SegmentTranscript],
     rules: &[CorrectionRule],
     snippets: &[Snippet],
+    thresholds: &PauseThresholds,
 ) -> Option<(String, Vec<ShieldedSnippet>)> {
     if segments.is_empty() {
         return None;
     }
-    let joined = join_transcript_segments_for_llm(segments)
+    let joined = join_transcript_segments_for_llm_thresholds(segments, thresholds)
         .trim()
         .to_string();
     if joined.is_empty() {
@@ -413,15 +448,18 @@ fn build_llm_ready_text(
 
 fn join_transcripts_for_display(
     transcripts: &[SegmentTranscript],
-    auto_edit: bool,
+    mode: AutoEditMode,
+    thresholds: &PauseThresholds,
 ) -> String {
-    if auto_edit {
-        join_transcript_segments_for_llm(transcripts)
+    let joined = if mode.uses_llm() {
+        join_transcript_segments_for_llm_thresholds(transcripts, thresholds)
+    } else if mode.uses_pause_punctuation() {
+        join_transcript_segments_with_pauses_thresholds(transcripts, thresholds)
     } else {
-        join_transcript_segments_with_pauses(transcripts)
-    }
-    .trim()
-    .to_string()
+        let text_only: Vec<&str> = transcripts.iter().map(|(text, _)| text.as_str()).collect();
+        join_transcript_segments(&text_only)
+    };
+    joined.trim().to_string()
 }
 
 fn merge_cleaned_segments(prefix: &str, tail: &str) -> String {
@@ -547,6 +585,7 @@ fn plan_llm_chunks_from_segments(
     segments: &[SegmentTranscript],
     rules: &[CorrectionRule],
     snippets: &[Snippet],
+    thresholds: &PauseThresholds,
 ) -> Vec<(String, Vec<ShieldedSnippet>)> {
     if segments.is_empty() {
         return Vec::new();
@@ -557,7 +596,8 @@ fn plan_llm_chunks_from_segments(
     while start < segments.len() {
         let mut best_end = start;
         for end in start..segments.len() {
-            let Some((text, _)) = build_llm_ready_text(&segments[start..=end], rules, snippets)
+            let Some((text, _)) =
+                build_llm_ready_text(&segments[start..=end], rules, snippets, thresholds)
             else {
                 continue;
             };
@@ -569,7 +609,8 @@ fn plan_llm_chunks_from_segments(
         }
 
         if best_end >= start {
-            if let Some(chunk) = build_llm_ready_text(&segments[start..=best_end], rules, snippets)
+            if let Some(chunk) =
+                build_llm_ready_text(&segments[start..=best_end], rules, snippets, thresholds)
             {
                 chunks.push(chunk);
             }
@@ -578,7 +619,7 @@ fn plan_llm_chunks_from_segments(
         }
 
         if let Some((text, shields)) =
-            build_llm_ready_text(&segments[start..=start], rules, snippets)
+            build_llm_ready_text(&segments[start..=start], rules, snippets, thresholds)
         {
             chunks.extend(split_oversized_llm_text(text, shields));
         }
@@ -599,14 +640,15 @@ struct LlmCleanupAggregate {
 fn run_llm_cleanup_for_segments(
     llm: Arc<Mutex<Option<LlamaEngine>>>,
     llm_ready: Arc<AtomicBool>,
-    auto_edit: Arc<AtomicBool>,
+    auto_edit_mode: Arc<AtomicU8>,
     segments: &[SegmentTranscript],
     rules: &[CorrectionRule],
     snippets: &[Snippet],
     tone: ToneProfile,
     cancel_requested: &Arc<AtomicBool>,
+    thresholds: &PauseThresholds,
 ) -> LlmCleanupAggregate {
-    let chunks = plan_llm_chunks_from_segments(segments, rules, snippets);
+    let chunks = plan_llm_chunks_from_segments(segments, rules, snippets, thresholds);
     if chunks.is_empty() {
         return LlmCleanupAggregate {
             text: String::new(),
@@ -639,7 +681,7 @@ fn run_llm_cleanup_for_segments(
         let job = start_llm_cleanup(
             Arc::clone(&llm),
             Arc::clone(&llm_ready),
-            Arc::clone(&auto_edit),
+            Arc::clone(&auto_edit_mode),
             &chunk_text,
             tone,
         );
@@ -669,7 +711,7 @@ fn run_llm_cleanup_for_segments(
     }
 
     if merged.is_empty() {
-        if let Some((fallback, _)) = build_llm_ready_text(segments, rules, snippets) {
+        if let Some((fallback, _)) = build_llm_ready_text(segments, rules, snippets, thresholds) {
             merged = fallback;
         }
     }
@@ -690,7 +732,8 @@ pub struct PipelineOrchestrator {
     whisper: Arc<Mutex<Option<WhisperEngine>>>,
     llm: Arc<Mutex<Option<LlamaEngine>>>,
     llm_ready: Arc<AtomicBool>,
-    auto_edit: Arc<AtomicBool>,
+    auto_edit_mode: Arc<AtomicU8>,
+    pause_preset: Arc<RwLock<PausePreset>>,
     streaming: Option<StreamingSession>,
     segment_transcripts: Arc<Mutex<Vec<SegmentTranscript>>>,
     failed_segments: Arc<Mutex<Vec<FailedSegment>>>,
@@ -725,7 +768,8 @@ impl PipelineOrchestrator {
             whisper: Arc::new(Mutex::new(None)),
             llm: Arc::new(Mutex::new(None)),
             llm_ready: Arc::new(AtomicBool::new(false)),
-            auto_edit: Arc::new(AtomicBool::new(false)),
+            auto_edit_mode: Arc::new(AtomicU8::new(encode_auto_edit_mode(AutoEditMode::Full))),
+            pause_preset: Arc::new(RwLock::new(PausePreset::default())),
             streaming: None,
             segment_transcripts: Arc::new(Mutex::new(Vec::new())),
             failed_segments: Arc::new(Mutex::new(Vec::new())),
@@ -885,11 +929,32 @@ impl PipelineOrchestrator {
     }
 
     pub fn set_auto_edit(&mut self, enabled: bool) {
-        self.auto_edit.store(enabled, Ordering::SeqCst);
+        self.set_auto_edit_mode(AutoEditMode::from_legacy_bool(enabled));
+    }
+
+    pub fn set_auto_edit_mode(&mut self, mode: AutoEditMode) {
+        self.auto_edit_mode
+            .store(encode_auto_edit_mode(mode), Ordering::SeqCst);
+    }
+
+    pub fn auto_edit_mode(&self) -> AutoEditMode {
+        decode_auto_edit_mode(self.auto_edit_mode.load(Ordering::SeqCst))
+    }
+
+    pub fn set_pause_preset(&mut self, preset: PausePreset) {
+        *self.pause_preset.write() = preset;
+    }
+
+    pub fn pause_preset(&self) -> PausePreset {
+        *self.pause_preset.read()
+    }
+
+    fn pause_thresholds(&self) -> PauseThresholds {
+        pause_thresholds_from_preset(self.pause_preset())
     }
 
     pub fn auto_edit_enabled(&self) -> bool {
-        self.auto_edit.load(Ordering::SeqCst)
+        self.auto_edit_mode().uses_llm()
     }
 
     pub fn set_auto_learn(&mut self, enabled: bool) {
@@ -1019,8 +1084,7 @@ impl PipelineOrchestrator {
 
         let (chunk_tx, chunk_rx) =
             std::sync::mpsc::sync_channel::<Vec<f32>>(AUDIO_CHUNK_CHANNEL_CAPACITY);
-        let (level_tx, level_rx) =
-            std::sync::mpsc::sync_channel(AUDIO_LEVEL_CHANNEL_CAPACITY);
+        let (level_tx, level_rx) = std::sync::mpsc::sync_channel(AUDIO_LEVEL_CHANNEL_CAPACITY);
         self.audio.start_with_streaming(
             Some(chunk_tx),
             Some(level_tx),
@@ -1045,7 +1109,8 @@ impl PipelineOrchestrator {
         let frozen_llm = Arc::clone(&self.frozen_llm);
         let llm = Arc::clone(&self.llm);
         let llm_ready = Arc::clone(&self.llm_ready);
-        let auto_edit = Arc::clone(&self.auto_edit);
+        let auto_edit_mode = Arc::clone(&self.auto_edit_mode);
+        let pause_preset = Arc::clone(&self.pause_preset);
         let correction_rules = Arc::clone(&self.correction_rules);
         let session_tone_arc = Arc::clone(&self.session_tone);
         let (segment_tx, segment_rx) =
@@ -1065,7 +1130,8 @@ impl PipelineOrchestrator {
             frozen_llm,
             llm,
             llm_ready,
-            auto_edit,
+            auto_edit_mode,
+            pause_preset,
             correction_rules,
             session_tone: session_tone_arc,
         };
@@ -1189,32 +1255,35 @@ impl PipelineOrchestrator {
         &mut self,
         app: &AppHandle,
         transcripts: &[SegmentTranscript],
-    ) -> (
-        String,
-        u64,
-        bool,
-        LlmStatus,
-        Option<String>,
-        u64,
-    ) {
+    ) -> (String, u64, bool, LlmStatus, Option<String>, u64) {
         let rules = self.correction_rules.read().clone();
-        let auto_edit = self.auto_edit.load(Ordering::SeqCst);
+        let edit_mode = self.auto_edit_mode();
+        let thresholds = self.pause_thresholds();
         let raw = {
-            let joined = join_transcripts_for_display(transcripts, auto_edit);
+            let joined = join_transcripts_for_display(transcripts, edit_mode, &thresholds);
             apply_corrections(&joined, &rules)
         };
 
         let (active_tone, _) = self.resolve_active_context();
         let snippets = self.snippets.read().clone();
         let snippet_ctx = build_snippet_variable_context(self.history_store.as_deref());
-        let snippet_fallback = prepare_display_transcript(&raw, &snippets, &snippet_ctx);
-        let llm_input = if !raw.is_empty() && auto_edit {
-            build_llm_ready_text(transcripts, &rules, &snippets)
+        let quality_fallback = if edit_mode.uses_deterministic_cleanup() {
+            build_quality_fallback(&raw, &snippets, &snippet_ctx)
+        } else {
+            apply_snippets(raw.trim(), &snippets, &snippet_ctx)
+        };
+        let snippet_fallback = if edit_mode.uses_deterministic_cleanup() {
+            prepare_display_transcript(&raw, &snippets, &snippet_ctx)
+        } else {
+            raw.trim().to_string()
+        };
+        let llm_input = if !raw.is_empty() && edit_mode.uses_llm() {
+            build_llm_ready_text(transcripts, &rules, &snippets, &thresholds)
         } else {
             None
         };
 
-        let pipelined = if auto_edit && !raw.is_empty() {
+        let pipelined = if edit_mode.uses_llm() && !raw.is_empty() {
             self.frozen_llm
                 .lock()
                 .finish_inflight_job(LLM_CLEANUP_TIMEOUT_MAX)
@@ -1222,25 +1291,20 @@ impl PipelineOrchestrator {
             None
         };
 
-        if !raw.is_empty() && auto_edit && self.llm.lock().is_none() && pipelined.is_none() {
-            wait_for_llm_engine(
-                &self.llm,
-                LLM_ENGINE_WAIT_TIMEOUT,
-                &self.cancel_requested,
-            );
+        if !raw.is_empty()
+            && edit_mode.uses_llm()
+            && self.llm.lock().is_none()
+            && pipelined.is_none()
+        {
+            wait_for_llm_engine(&self.llm, LLM_ENGINE_WAIT_TIMEOUT, &self.cancel_requested);
         }
 
         let mut llm_blocked_ms = 0_u64;
-        let (text_to_inject, llm_ms, llm_invalidated, llm_status, llm_skip_reason) =
+        let (mut text_to_inject, llm_ms, llm_invalidated, llm_status, llm_skip_reason) =
             if let Some((full_text, snippet_shields)) = llm_input {
                 if self.llm.lock().is_none() {
-                    let text = if snippet_shields.is_empty() {
-                        full_text
-                    } else {
-                        unshield_snippets(&full_text, &snippet_shields, &snippet_ctx)
-                    };
                     (
-                        text,
+                        quality_fallback.clone(),
                         0,
                         false,
                         LlmStatus::Skipped,
@@ -1265,12 +1329,13 @@ impl PipelineOrchestrator {
                                 let tail_result = run_llm_cleanup_for_segments(
                                     Arc::clone(&self.llm),
                                     Arc::clone(&self.llm_ready),
-                                    Arc::clone(&self.auto_edit),
+                                    Arc::clone(&self.auto_edit_mode),
                                     &transcripts[tail_start..],
                                     &rules,
                                     &snippets,
                                     active_tone,
                                     &self.cancel_requested,
+                                    &thresholds,
                                 );
                                 let merged = if matches!(tail_result.llm_status, LlmStatus::Applied)
                                 {
@@ -1283,6 +1348,7 @@ impl PipelineOrchestrator {
                                         &transcripts[tail_start..],
                                         &rules,
                                         &snippets,
+                                        &thresholds,
                                     )
                                     .map(|(text, _)| text)
                                     .unwrap_or_else(|| full_text.clone());
@@ -1300,12 +1366,13 @@ impl PipelineOrchestrator {
                             let result = run_llm_cleanup_for_segments(
                                 Arc::clone(&self.llm),
                                 Arc::clone(&self.llm_ready),
-                                Arc::clone(&self.auto_edit),
+                                Arc::clone(&self.auto_edit_mode),
                                 transcripts,
                                 &rules,
                                 &snippets,
                                 active_tone,
                                 &self.cancel_requested,
+                                &thresholds,
                             );
                             (
                                 result.text,
@@ -1317,7 +1384,7 @@ impl PipelineOrchestrator {
                         };
 
                     let snippets = self.snippets.read().clone();
-                    let text = if self.auto_edit.load(Ordering::SeqCst) {
+                    let text = if edit_mode.uses_llm() {
                         if snippets == snippets_snapshot {
                             finalize_llm_with_snippets(
                                 &merged_cleaned,
@@ -1332,11 +1399,11 @@ impl PipelineOrchestrator {
                             if from_cleaned != merged_cleaned {
                                 from_cleaned
                             } else {
-                                snippet_fallback.clone()
+                                quality_fallback.clone()
                             }
                         }
                     } else {
-                        snippet_fallback.clone()
+                        quality_fallback.clone()
                     };
                     llm_blocked_ms = llm_wait_start.elapsed().as_millis() as u64;
                     (text, llm_ms, llm_invalidated, llm_status, llm_skip_reason)
@@ -1344,10 +1411,18 @@ impl PipelineOrchestrator {
             } else if raw.is_empty() {
                 (String::new(), 0, false, LlmStatus::Disabled, None)
             } else {
-                (snippet_fallback, 0, false, LlmStatus::Disabled, None)
+                (quality_fallback, 0, false, LlmStatus::Disabled, None)
             };
 
-        if llm_invalidated && self.auto_edit.load(Ordering::SeqCst) {
+        if matches!(llm_status, LlmStatus::Skipped | LlmStatus::Failed) && edit_mode.uses_llm() {
+            text_to_inject = if edit_mode.uses_deterministic_cleanup() {
+                build_quality_fallback(&raw, &snippets, &snippet_ctx)
+            } else {
+                apply_snippets(raw.trim(), &snippets, &snippet_ctx)
+            };
+        }
+
+        if llm_invalidated && edit_mode.uses_llm() {
             let _ = app.emit("llm-unready", ());
             crate::spawn_llm_recovery_if_needed(app.clone());
         }
@@ -1362,6 +1437,7 @@ impl PipelineOrchestrator {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn inject_and_record(
         &mut self,
         app: &AppHandle,
@@ -1452,8 +1528,9 @@ impl PipelineOrchestrator {
                     let _ = app.emit("history-updated", ());
                     if let Some(engine) = &self.achievement_engine {
                         let word_count = crate::store::count_words(text_to_inject) as u64;
-                        let llm_skipped = matches!(llm_status, LlmStatus::Skipped | LlmStatus::Failed)
-                            && self.auto_edit.load(Ordering::SeqCst);
+                        let llm_skipped =
+                            matches!(llm_status, LlmStatus::Skipped | LlmStatus::Failed)
+                                && self.auto_edit_mode().uses_llm();
                         let event = DictationEvent {
                             text: text_to_inject.to_string(),
                             word_count,
@@ -1637,10 +1714,10 @@ fn invalidate_llm_engine_from_cleanup(
 
 fn restore_llm_engine(
     llm: &Arc<Mutex<Option<LlamaEngine>>>,
-    auto_edit: &Arc<AtomicBool>,
+    auto_edit_mode: &Arc<AtomicU8>,
     engine: LlamaEngine,
 ) {
-    if !auto_edit.load(Ordering::SeqCst) {
+    if !decode_auto_edit_mode(auto_edit_mode.load(Ordering::SeqCst)).uses_llm() {
         return;
     }
     let mut guard = llm.lock();
@@ -1666,7 +1743,7 @@ struct LlmCleanupJob {
     worker: thread::JoinHandle<()>,
     llm: Arc<Mutex<Option<LlamaEngine>>>,
     llm_ready: Arc<AtomicBool>,
-    auto_edit: Arc<AtomicBool>,
+    auto_edit_mode: Arc<AtomicU8>,
     raw: String,
     worker_pid: Option<u32>,
     start: Instant,
@@ -1697,12 +1774,14 @@ impl LlmCleanupJob {
     fn wait_for_inject(self, timeout: std::time::Duration) -> LlmCleanupWait {
         match self.rx.recv_timeout(timeout) {
             Ok(LlmCleanupOutcome::Success { cleaned, engine }) => {
-                restore_llm_engine(&self.llm, &self.auto_edit, engine);
+                restore_llm_engine(&self.llm, &self.auto_edit_mode, engine);
                 let _ = self.worker.join();
-                let text = if self.auto_edit.load(Ordering::SeqCst) {
+                let text = if decode_auto_edit_mode(self.auto_edit_mode.load(Ordering::SeqCst))
+                    .uses_llm()
+                {
                     cleaned
                 } else {
-                    self.raw
+                    self.raw.clone()
                 };
                 LlmCleanupWait::Completed {
                     text,
@@ -1713,7 +1792,7 @@ impl LlmCleanupJob {
                 }
             }
             Ok(LlmCleanupOutcome::ValidationFailed { engine }) => {
-                restore_llm_engine(&self.llm, &self.auto_edit, engine);
+                restore_llm_engine(&self.llm, &self.auto_edit_mode, engine);
                 let _ = self.worker.join();
                 LlmCleanupWait::Completed {
                     text: self.raw,
@@ -1785,7 +1864,7 @@ impl LlmCleanupJob {
 fn start_llm_cleanup(
     llm: Arc<Mutex<Option<LlamaEngine>>>,
     llm_ready: Arc<AtomicBool>,
-    auto_edit: Arc<AtomicBool>,
+    auto_edit_mode: Arc<AtomicU8>,
     raw: &str,
     tone: ToneProfile,
 ) -> LlmCleanupJob {
@@ -1823,7 +1902,7 @@ fn start_llm_cleanup(
         worker,
         llm,
         llm_ready,
-        auto_edit,
+        auto_edit_mode,
         raw,
         worker_pid,
         start,
@@ -1861,7 +1940,8 @@ struct StreamingSttContext {
     frozen_llm: Arc<Mutex<FrozenLlmCoordinator>>,
     llm: Arc<Mutex<Option<LlamaEngine>>>,
     llm_ready: Arc<AtomicBool>,
-    auto_edit: Arc<AtomicBool>,
+    auto_edit_mode: Arc<AtomicU8>,
+    pause_preset: Arc<RwLock<PausePreset>>,
     correction_rules: Arc<RwLock<Vec<CorrectionRule>>>,
     session_tone: Arc<RwLock<ToneProfile>>,
 }
@@ -1930,25 +2010,15 @@ fn streaming_worker(
     loop {
         if stop_flag.load(Ordering::SeqCst) {
             while let Ok(chunk) = chunk_rx.try_recv() {
-                process_chunk(
-                    chunk,
-                    &mut vad,
-                    &mut segment_index,
-                    &segment_tx,
-                    &stop_flag,
-                );
+                process_chunk(chunk, &mut vad, &mut segment_index, &segment_tx, &stop_flag);
             }
             break;
         }
 
         match chunk_rx.recv_timeout(POLL) {
-            Ok(chunk) => process_chunk(
-                chunk,
-                &mut vad,
-                &mut segment_index,
-                &segment_tx,
-                &stop_flag,
-            ),
+            Ok(chunk) => {
+                process_chunk(chunk, &mut vad, &mut segment_index, &segment_tx, &stop_flag)
+            }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
         }
@@ -2012,23 +2082,26 @@ fn transcribe_segment(
         return;
     }
 
+    let edit_mode = decode_auto_edit_mode(stt.auto_edit_mode.load(Ordering::SeqCst));
+    let thresholds = pause_thresholds_from_preset(*stt.pause_preset.read());
     let raw = {
         let mut transcripts = stt.transcripts.lock();
         transcripts.push((text.text.clone(), segment.leading_silence_ms));
-        join_transcript_segments_with_pauses(transcripts.as_slice())
+        join_transcripts_for_display(transcripts.as_slice(), edit_mode, &thresholds)
     };
 
-    if stt.auto_edit.load(Ordering::SeqCst) {
+    if edit_mode.uses_llm() {
         let segments_snapshot = stt.transcripts.lock().clone();
         let rules = stt.correction_rules.read().clone();
         let snippets = stt.snippets.read().clone();
         let tone = *stt.session_tone.read();
         stt.frozen_llm.lock().maybe_start_background(
             &segments_snapshot,
-            true,
+            edit_mode,
+            &thresholds,
             &stt.llm,
             &stt.llm_ready,
-            &stt.auto_edit,
+            &stt.auto_edit_mode,
             &rules,
             &snippets,
             tone,
@@ -2296,7 +2369,8 @@ mod tests {
     fn plan_llm_chunks_splits_long_transcript() {
         let long_segment = ("mot ".repeat(500)).trim().to_string();
         let segments = vec![(long_segment.clone(), 0), (long_segment, 700)];
-        let chunks = plan_llm_chunks_from_segments(&segments, &[], &[]);
+        let chunks =
+            plan_llm_chunks_from_segments(&segments, &[], &[], &PauseThresholds::default());
         assert!(chunks.len() > 1);
         for (text, _) in chunks {
             assert!(fits_llm_cleanup_budget(&text));

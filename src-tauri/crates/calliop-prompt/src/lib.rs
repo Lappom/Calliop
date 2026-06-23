@@ -163,7 +163,12 @@ pub enum PromptError {
     EmptyOutput,
     #[error("model output too long")]
     OutputTooLong,
+    #[error("model output too short relative to input")]
+    OutputTooShort,
 }
+
+/// Minimum non-whitespace output length as a fraction of input (LLM fidelity guard).
+pub const LLM_OUTPUT_MIN_LENGTH_RATIO: f64 = 0.70;
 
 pub fn build_cleanup_user_message(raw: &str) -> Result<String, PromptError> {
     let raw = raw.trim();
@@ -218,7 +223,19 @@ pub fn validate_cleanup_output(raw: &str, cleaned: &str) -> Result<String, Promp
         return Err(PromptError::OutputTooLong);
     }
 
+    let raw_significant = count_significant_chars(raw);
+    let cleaned_significant = count_significant_chars(&cleaned);
+    if raw_significant > 0
+        && (cleaned_significant as f64) < (raw_significant as f64) * LLM_OUTPUT_MIN_LENGTH_RATIO
+    {
+        return Err(PromptError::OutputTooShort);
+    }
+
     Ok(cleaned)
+}
+
+fn count_significant_chars(text: &str) -> usize {
+    text.chars().filter(|ch| !ch.is_whitespace()).count()
 }
 
 fn prefer_list_structure_over_comma_flattening(raw: &str, cleaned: &str) -> String {
@@ -322,6 +339,71 @@ pub const LLM_PAUSE_PERIOD_THRESHOLD_MS: u32 = 1500;
 /// Pause before a segment that follows a sentence end — candidate for pipelined LLM freeze.
 pub const FROZEN_BOUNDARY_PAUSE_MS: u32 = 1500;
 
+/// User-selectable pause punctuation presets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum PausePreset {
+    Fast,
+    #[default]
+    Natural,
+    Formal,
+}
+
+impl PausePreset {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_lowercase().as_str() {
+            "fast" => Some(Self::Fast),
+            "natural" => Some(Self::Natural),
+            "formal" => Some(Self::Formal),
+            _ => None,
+        }
+    }
+
+    pub fn as_setting_value(self) -> &'static str {
+        match self {
+            Self::Fast => "fast",
+            Self::Natural => "natural",
+            Self::Formal => "formal",
+        }
+    }
+
+    pub fn thresholds(self) -> PauseThresholds {
+        match self {
+            Self::Fast => PauseThresholds {
+                comma_min_ms: 300,
+                period_display_ms: 900,
+                period_llm_ms: 1200,
+                frozen_boundary_ms: 1200,
+            },
+            Self::Natural => PauseThresholds::default(),
+            Self::Formal => PauseThresholds {
+                comma_min_ms: 500,
+                period_display_ms: 1500,
+                period_llm_ms: 1800,
+                frozen_boundary_ms: 1800,
+            },
+        }
+    }
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PauseThresholds {
+    pub comma_min_ms: u32,
+    pub period_display_ms: u32,
+    pub period_llm_ms: u32,
+    pub frozen_boundary_ms: u32,
+}
+
+impl Default for PauseThresholds {
+    fn default() -> Self {
+        Self {
+            comma_min_ms: PAUSE_COMMA_MIN_MS,
+            period_display_ms: PAUSE_PERIOD_THRESHOLD_MS,
+            period_llm_ms: LLM_PAUSE_PERIOD_THRESHOLD_MS,
+            frozen_boundary_ms: FROZEN_BOUNDARY_PAUSE_MS,
+        }
+    }
+}
+
 /// Sidecar context window (`calliop-llm-worker`).
 pub const LLM_CLEANUP_CONTEXT_TOKENS: u32 = 2048;
 
@@ -366,19 +448,35 @@ pub fn join_transcript_segments(segments: &[impl AsRef<str>]) -> String {
 
 /// Joins streaming segments using VAD pause duration when Whisper omitted punctuation.
 pub fn join_transcript_segments_with_pauses(segments: &[(impl AsRef<str>, u32)]) -> String {
+    join_transcript_segments_with_pauses_thresholds(segments, &PauseThresholds::default())
+}
+
+/// Joins segments with explicit pause thresholds (display path).
+pub fn join_transcript_segments_with_pauses_thresholds(
+    segments: &[(impl AsRef<str>, u32)],
+    thresholds: &PauseThresholds,
+) -> String {
     join_transcript_segments_with_pause_thresholds(
         segments,
-        PAUSE_COMMA_MIN_MS,
-        PAUSE_PERIOD_THRESHOLD_MS,
+        thresholds.comma_min_ms,
+        thresholds.period_display_ms,
     )
 }
 
 /// Softer pause thresholds for LLM cleanup input and auto-edit fallback.
 pub fn join_transcript_segments_for_llm(segments: &[(impl AsRef<str>, u32)]) -> String {
+    join_transcript_segments_for_llm_thresholds(segments, &PauseThresholds::default())
+}
+
+/// LLM join path with explicit pause thresholds.
+pub fn join_transcript_segments_for_llm_thresholds(
+    segments: &[(impl AsRef<str>, u32)],
+    thresholds: &PauseThresholds,
+) -> String {
     join_transcript_segments_with_pause_thresholds(
         segments,
-        PAUSE_COMMA_MIN_MS,
-        LLM_PAUSE_PERIOD_THRESHOLD_MS,
+        thresholds.comma_min_ms,
+        thresholds.period_llm_ms,
     )
 }
 
@@ -430,19 +528,27 @@ fn join_transcript_segments_with_pause_thresholds(
 
 /// Index of the last segment included in the latest frozen prefix, if any.
 pub fn find_latest_frozen_boundary(segments: &[(impl AsRef<str>, u32)]) -> Option<usize> {
+    find_latest_frozen_boundary_thresholds(segments, &PauseThresholds::default())
+}
+
+/// Frozen boundary detection with explicit pause thresholds.
+pub fn find_latest_frozen_boundary_thresholds(
+    segments: &[(impl AsRef<str>, u32)],
+    thresholds: &PauseThresholds,
+) -> Option<usize> {
     if segments.len() < 2 {
         return None;
     }
     let mut latest = None;
     for index in 1..segments.len() {
-        if segments[index].1 < FROZEN_BOUNDARY_PAUSE_MS {
+        if segments[index].1 < thresholds.frozen_boundary_ms {
             continue;
         }
         let prefix: Vec<(String, u32)> = segments[..=index - 1]
             .iter()
             .map(|(text, pause)| (text.as_ref().to_string(), *pause))
             .collect();
-        let joined = join_transcript_segments_with_pauses(&prefix);
+        let joined = join_transcript_segments_with_pauses_thresholds(&prefix, thresholds);
         if ends_with_sentence_punctuation(&joined) {
             latest = Some(index - 1);
         }
@@ -2112,6 +2218,15 @@ mod tests {
     fn rejects_empty_output() {
         assert!(validate_cleanup_output("", "   ").is_err());
         assert!(validate_cleanup_output("   ", "   ").is_err());
+    }
+
+    #[test]
+    fn rejects_output_too_short_relative_to_input() {
+        let raw = "bonjour tout le monde comment allez-vous aujourd'hui";
+        assert!(matches!(
+            validate_cleanup_output(raw, "ok"),
+            Err(PromptError::OutputTooShort)
+        ));
     }
 
     #[test]

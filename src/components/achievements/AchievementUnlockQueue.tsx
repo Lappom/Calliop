@@ -1,40 +1,63 @@
 import { AnimatePresence, motion } from "motion/react";
+import { Sparkles, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { AchievementUnlockedPayload } from "../../hooks/useAchievements";
-import { pickVariants, toastVariants } from "../../lib/motion/variants";
+import {
+  useAchievements,
+  type AchievementUnlockedPayload,
+} from "../../hooks/useAchievements";
+import {
+  pickVariants,
+  successPopVariants,
+  toastVariants,
+} from "../../lib/motion/variants";
 import { useReducedMotion } from "../../lib/motion/useReducedMotion";
+import { glowSurfaceClasses } from "../layout/glowSurface";
 import { Modal } from "../ui/Modal";
 import { Button } from "../ui/Button";
+import { tierUnlockedBorderClass } from "./achievementTierStyles";
 
-const TOAST_DURATION_MS = 4_000;
-
-const tierBorderClass: Record<AchievementUnlockedPayload["tier"], string> = {
-  common: "border-hairline-strong",
-  rare: "border-accent-orange/60 shadow-[0_0_24px_rgba(255,128,31,0.18)]",
-  legendary: "border-accent-green/60 shadow-[0_0_28px_rgba(17,255,153,0.2)]",
+const TOAST_DURATION_MS: Record<"common" | "rare", number> = {
+  common: 4_000,
+  rare: 5_000,
 };
 
 export function AchievementUnlockQueue() {
   const { t } = useTranslation();
+  const { markSeen } = useAchievements();
   const reducedMotion = useReducedMotion();
   const variants = pickVariants(toastVariants, reducedMotion);
+  const successVariants = pickVariants(successPopVariants, reducedMotion);
   const queueRef = useRef<AchievementUnlockedPayload[]>([]);
   const [toast, setToast] = useState<AchievementUnlockedPayload | null>(null);
   const [legendary, setLegendary] = useState<AchievementUnlockedPayload | null>(
     null,
   );
   const processingRef = useRef(false);
+  const timeoutRef = useRef<number | null>(null);
 
-  const markSeen = useCallback(async (id: string) => {
-    try {
-      await invoke("mark_achievements_seen", { ids: [id] });
-    } catch {
-      // non-blocking
+  const clearToastTimeout = useCallback(() => {
+    if (timeoutRef.current != null) {
+      window.clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
     }
   }, []);
+
+  const finishToast = useCallback(
+    (payload: AchievementUnlockedPayload) => {
+      clearToastTimeout();
+      void markSeen([payload.id]);
+      setToast(null);
+      processingRef.current = false;
+      if (queueRef.current.length > 0) {
+        processQueueRef.current();
+      }
+    },
+    [clearToastTimeout, markSeen],
+  );
+
+  const processQueueRef = useRef<() => void>(() => {});
 
   const processQueue = useCallback(() => {
     if (processingRef.current) {
@@ -50,13 +73,14 @@ export function AchievementUnlockQueue() {
       return;
     }
     setToast(next);
-    window.setTimeout(() => {
-      void markSeen(next.id);
-      setToast(null);
-      processingRef.current = false;
-      processQueue();
-    }, TOAST_DURATION_MS);
-  }, [markSeen]);
+    const duration =
+      next.tier === "rare" ? TOAST_DURATION_MS.rare : TOAST_DURATION_MS.common;
+    timeoutRef.current = window.setTimeout(() => {
+      finishToast(next);
+    }, duration);
+  }, [finishToast]);
+
+  processQueueRef.current = processQueue;
 
   useEffect(() => {
     const unlisten = listen<AchievementUnlockedPayload>(
@@ -67,13 +91,20 @@ export function AchievementUnlockQueue() {
       },
     );
     return () => {
+      clearToastTimeout();
       void unlisten.then((drop) => drop());
     };
-  }, [processQueue]);
+  }, [processQueue, clearToastTimeout]);
+
+  const dismissToast = useCallback(() => {
+    if (toast) {
+      finishToast(toast);
+    }
+  }, [toast, finishToast]);
 
   const dismissLegendary = useCallback(() => {
     if (legendary) {
-      void markSeen(legendary.id);
+      void markSeen([legendary.id]);
     }
     setLegendary(null);
     processingRef.current = false;
@@ -85,6 +116,11 @@ export function AchievementUnlockQueue() {
     const description = t(`achievements.items.${payload.id}.description`);
     return { title, description };
   };
+
+  const toastBorderClass =
+    toast?.tier === "rare"
+      ? tierUnlockedBorderClass.rare
+      : tierUnlockedBorderClass.common;
 
   return (
     <>
@@ -102,12 +138,23 @@ export function AchievementUnlockQueue() {
               animate="animate"
               exit="exit"
               className={[
-                "pointer-events-auto rounded-lg border bg-surface-elevated p-4",
-                tierBorderClass[toast.tier],
+                "pointer-events-auto relative overflow-hidden rounded-lg border bg-surface-elevated p-4",
+                toast.tier === "rare"
+                  ? glowSurfaceClasses("orange", "normal")
+                  : "",
+                toastBorderClass,
               ].join(" ")}
               role="status"
             >
-              <p className="text-body-sm m-0 font-medium text-ink">
+              <button
+                type="button"
+                onClick={dismissToast}
+                className="absolute right-2 top-2 inline-flex size-7 items-center justify-center rounded-md text-charcoal transition-transform duration-150 ease-out hover:bg-surface-card hover:text-ink active:scale-[0.97]"
+                aria-label={t("achievements.toast.dismiss")}
+              >
+                <X size={14} strokeWidth={1.5} />
+              </button>
+              <p className="text-body-sm m-0 pr-8 font-medium text-ink">
                 {t("achievements.toast.unlocked")}
               </p>
               <p className="text-body-sm m-0 mt-1 text-ink">
@@ -128,8 +175,20 @@ export function AchievementUnlockQueue() {
           title={t("achievements.celebration.title")}
           description={t("achievements.celebration.subtitle")}
           size="sm"
+          panelClassName={[
+            glowSurfaceClasses("green", "slow"),
+            tierUnlockedBorderClass.legendary,
+          ].join(" ")}
         >
-          <div className="flex flex-col items-center gap-3 text-center">
+          <motion.div
+            variants={successVariants}
+            initial="initial"
+            animate="animate"
+            className="flex flex-col items-center gap-3 text-center"
+          >
+            <div className="flex size-12 items-center justify-center rounded-full border border-accent-green/40 bg-surface-elevated text-accent-green">
+              <Sparkles size={22} strokeWidth={1.5} />
+            </div>
             <p className="text-heading-sm m-0 font-medium text-accent-green">
               {renderAchievementText(legendary).title}
             </p>
@@ -139,7 +198,7 @@ export function AchievementUnlockQueue() {
             <Button type="button" onClick={dismissLegendary} className="mt-2">
               {t("achievements.celebration.dismiss")}
             </Button>
-          </div>
+          </motion.div>
         </Modal>
       )}
     </>

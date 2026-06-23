@@ -5,9 +5,7 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use tauri::AppHandle;
 
-use super::{
-    spawn_cancel, spawn_start, spawn_stop, spawn_toggle, PipelineOrchestrator,
-};
+use super::{spawn_cancel, spawn_start, spawn_stop, spawn_toggle, PipelineOrchestrator};
 
 /// High-level dictation action requested by hotkey, tray, or Tauri commands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

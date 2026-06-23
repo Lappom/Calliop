@@ -1,9 +1,7 @@
 use tauri::{AppHandle, State};
 
 use crate::dictionary_notify::DictionaryUpdatedPayload;
-use crate::store::{
-    is_valid_dictionary_word, normalize_word, DictionarySource,
-};
+use crate::store::{is_valid_dictionary_word, normalize_word, DictionarySource};
 use crate::user_error::{user_error_string, UserError};
 use crate::{
     apply_dictionary_additions, apply_learned_correction, dictionary_word_to_payload,
@@ -11,7 +9,9 @@ use crate::{
 };
 
 #[tauri::command]
-pub fn list_dictionary_words(state: State<'_, AppState>) -> Result<Vec<DictionaryWordPayload>, String> {
+pub fn list_dictionary_words(
+    state: State<'_, AppState>,
+) -> Result<Vec<DictionaryWordPayload>, String> {
     state
         .store
         .list_words()

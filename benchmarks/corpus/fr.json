@@ -1,5 +1,5 @@
 {
-  "version": "1",
+  "version": "2",
   "language": "fr",
   "model": "distil-fr-v0.2",
   "samples": [
@@ -27,6 +27,50 @@
       "id": "fr-05",
       "reference": "La transcription locale fonctionne sans connexion internet.",
       "wav": "fr-05.wav"
+    }
+  ],
+  "pipeline_cases": [
+    {
+      "id": "pq-01",
+      "mode": "light",
+      "preset": "natural",
+      "segments": [
+        ["bonjour euh le monde", 0],
+        ["comment allez-vous", 500]
+      ],
+      "reference": "Bonjour le monde, comment allez-vous"
+    },
+    {
+      "id": "pq-02",
+      "mode": "light",
+      "preset": "natural",
+      "segments": [
+        ["première phrase", 0],
+        ["deuxième phrase", 1300]
+      ],
+      "reference": "Première phrase. Deuxième phrase"
+    },
+    {
+      "id": "pq-03",
+      "mode": "light",
+      "preset": "fast",
+      "segments": [
+        ["aller au magasin", 0],
+        ["pour", 350],
+        ["1 pommes", 350],
+        ["2 bananes", 350]
+      ],
+      "reference": "aller au magasin pour\n1. pommes\n2. bananes"
+    },
+    {
+      "id": "pq-04",
+      "mode": "off",
+      "preset": "natural",
+      "segments": [
+        ["bonjour", 0],
+        ["tout le monde", 200]
+      ],
+      "reference": "bonjour tout le monde"
     }
   ]
 }

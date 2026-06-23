@@ -154,6 +154,32 @@
       "descriptionOn": "Nettoie fillers, ponctuation et reformulation légère via un modèle local.",
       "descriptionOff": "Mode verbatim : la transcription brute est injectée sans post-traitement LLM."
     },
+    "autoEditMode": {
+      "label": "Niveau de nettoyage",
+      "options": {
+        "off": "Verbatim",
+        "light": "Léger (sans IA)",
+        "full": "Complet (IA locale)"
+      },
+      "description": {
+        "off": "Transcription brute avec corrections du dictionnaire uniquement.",
+        "light": "Fillers, ponctuation par pauses et snippets — sans modèle LLM.",
+        "full": "Nettoyage IA local en plus du traitement déterministe."
+      }
+    },
+    "pausePreset": {
+      "label": "Ponctuation par pauses",
+      "options": {
+        "fast": "Rapide",
+        "natural": "Naturel",
+        "formal": "Formel"
+      },
+      "description": {
+        "fast": "Virgules et points plus tôt — adapté aux locuteurs rapides.",
+        "natural": "Équilibre par défaut entre fluidité et structure.",
+        "formal": "Pauses plus longues avant les points — texte plus structuré."
+      }
+    },
     "autoLearn": {
       "label": "Apprentissage automatique des corrections",
       "descriptionOn": "Détecte les corrections dans l'application cible et enrichit le dictionnaire localement.",
@@ -790,8 +816,27 @@
     "unlockedOn": "Débloqué le {{date}}",
     "lockedSecretTitle": "???",
     "empty": "Aucun succès dans cette catégorie.",
+    "hero": {
+      "collectionLabel": "Collection",
+      "unlockedDetail": "{{percent}} % de la collection débloquée",
+      "secretsLabel": "Secrets"
+    },
+    "status": {
+      "aria": "Filtrer par statut",
+      "all": "Tous",
+      "unlocked": "Débloqués",
+      "locked": "Verrouillés",
+      "new": "Nouveaux"
+    },
+    "tabs": {
+      "aria": "Catégories de succès"
+    },
+    "badge": {
+      "new": "Nouveau"
+    },
     "toast": {
-      "unlocked": "Succès débloqué !"
+      "unlocked": "Succès débloqué !",
+      "dismiss": "Fermer la notification"
     },
     "celebration": {
       "title": "Succès légendaire !",

@@ -187,6 +187,8 @@ mod tests {
     fn settings(whisper: &str, llm: &str, low_power: bool, adaptive: bool) -> AppSettings {
         AppSettings {
             auto_edit: true,
+            auto_edit_mode: crate::store::AutoEditMode::Full,
+            pause_preset: calliop_prompt::PausePreset::default(),
             auto_learn: true,
             auto_update: true,
             stt_language: "fr".into(),

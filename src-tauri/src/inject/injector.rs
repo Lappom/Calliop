@@ -84,10 +84,7 @@ struct OwnedImage {
 
 impl SavedClipboard {
     pub fn from_text(text: Option<String>) -> Self {
-        Self {
-            text,
-            image: None,
-        }
+        Self { text, image: None }
     }
 
     pub fn should_restore(&self) -> bool {
@@ -100,14 +97,11 @@ impl SavedClipboard {
 
     fn from_clipboard(clipboard: &mut Clipboard) -> Result<Self, InjectError> {
         let text = clipboard.get_text().ok();
-        let image = clipboard
-            .get_image()
-            .ok()
-            .map(|img| OwnedImage {
-                width: img.width,
-                height: img.height,
-                bytes: img.bytes.into_owned(),
-            });
+        let image = clipboard.get_image().ok().map(|img| OwnedImage {
+            width: img.width,
+            height: img.height,
+            bytes: img.bytes.into_owned(),
+        });
         Ok(Self { text, image })
     }
 
@@ -191,7 +185,9 @@ impl TextInjector {
                                     let _ = saved.restore(&mut Self::open_clipboard()?);
                                     return Ok(InjectOutcome::Typed);
                                 }
-                                Err(type_err) => eprintln!("direct typing fallback failed: {type_err}"),
+                                Err(type_err) => {
+                                    eprintln!("direct typing fallback failed: {type_err}")
+                                }
                             }
                         }
                         Self::copy_text_inner(text)?;

@@ -22,9 +22,10 @@ pub use history::{
     NewDictation, StreakInfo, DEFAULT_LIST_LIMIT, TYPING_SPEED_BASELINE_WPM,
 };
 pub use settings::{
-    detect_default_ui_language, AppSettings, InferenceBackend, KEY_AUTOSTART, KEY_AUTO_EDIT,
-    KEY_AUTO_LEARN, KEY_HOTKEY, KEY_INFERENCE_BACKEND, KEY_LLM_MODEL, KEY_ONBOARDING_DONE,
-    KEY_STT_LANGUAGE, KEY_UI_LANGUAGE, KEY_WHISPER_MODEL,
+    detect_default_ui_language, AppSettings, AutoEditMode, InferenceBackend, KEY_AUTOSTART,
+    KEY_AUTO_EDIT, KEY_AUTO_EDIT_MODE, KEY_AUTO_LEARN, KEY_HOTKEY, KEY_INFERENCE_BACKEND,
+    KEY_LLM_MODEL, KEY_ONBOARDING_DONE, KEY_PAUSE_PRESET, KEY_STT_LANGUAGE, KEY_UI_LANGUAGE,
+    KEY_WHISPER_MODEL,
 };
 pub use snippets::{
     is_valid_snippet_content, is_valid_trigger, normalize_trigger, Snippet, SnippetImport,

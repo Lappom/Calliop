@@ -1,6 +1,7 @@
 pub mod achievements;
 pub mod app_context;
 pub mod audio;
+mod commands;
 pub mod dictionary_notify;
 pub mod hotkey;
 pub mod inference;
@@ -16,7 +17,6 @@ pub mod system_notify;
 pub mod ui;
 pub mod update;
 pub mod user_error;
-mod commands;
 
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -26,15 +26,13 @@ use calliop_prompt::ToneProfile;
 use dictionary_notify::DictionaryNotifier;
 use parking_lot::Mutex;
 use pipeline::{
-    request_dictation, DictationIntent, CorrectionRule,
-    PipelineOrchestrator, PipelineState, PipelineStateEvent,
+    request_dictation, CorrectionRule, DictationIntent, PipelineOrchestrator, PipelineState,
+    PipelineStateEvent,
 };
 use serde::{Deserialize, Serialize};
 use store::{
-    extract_correction_words,
-    AppContextMatchType, AppContextRule, AppSettings, DictionarySource,
-    DictionaryWord, Snippet, Store,
-    KEY_AUTOSTART,
+    extract_correction_words, AppContextMatchType, AppContextRule, AppSettings, DictionarySource,
+    DictionaryWord, Snippet, Store, KEY_AUTOSTART,
 };
 use stt::{SttLanguage, WhisperModel, WhisperPromptCache, MAX_INITIAL_PROMPT_WORDS};
 use system::{resolve_perf_config, RuntimePerfConfig, SystemCapabilities};
@@ -164,7 +162,10 @@ fn is_dictation_blocked_by_settings(state: &AppState) -> bool {
     state.whisper_settings_change_depth.load(Ordering::SeqCst) > 0
 }
 
-pub(crate) fn is_dictation_start_blocked_by_settings(state: &AppState, pipeline_state: PipelineState) -> bool {
+pub(crate) fn is_dictation_start_blocked_by_settings(
+    state: &AppState,
+    pipeline_state: PipelineState,
+) -> bool {
     pipeline_state == PipelineState::Idle && is_dictation_blocked_by_settings(state)
 }
 
@@ -266,6 +267,8 @@ pub(crate) fn spawn_llm_recovery_if_needed(app: AppHandle) {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct SettingsPayload {
     auto_edit: bool,
+    auto_edit_mode: String,
+    pause_preset: String,
     auto_learn: bool,
     auto_update: bool,
     stt_language: String,
@@ -296,7 +299,9 @@ pub(crate) struct ModelsStatusPayload {
 
 pub(crate) fn settings_to_payload(settings: &AppSettings) -> SettingsPayload {
     SettingsPayload {
-        auto_edit: settings.auto_edit,
+        auto_edit: settings.auto_edit_mode.uses_llm(),
+        auto_edit_mode: settings.auto_edit_mode.as_setting_value().into(),
+        pause_preset: settings.pause_preset.as_setting_value().into(),
         auto_learn: settings.auto_learn,
         auto_update: settings.auto_update,
         stt_language: settings.stt_language.clone(),
@@ -434,7 +439,10 @@ pub(crate) fn llm_engine_stale(state: &AppState, expected: llm::LlmModel) -> boo
     }
 }
 
-pub(crate) async fn ensure_whisper_model_file(app: &AppHandle, model: WhisperModel) -> Result<(), String> {
+pub(crate) async fn ensure_whisper_model_file(
+    app: &AppHandle,
+    model: WhisperModel,
+) -> Result<(), String> {
     if !model.is_concrete() {
         return Ok(());
     }
@@ -448,7 +456,10 @@ pub(crate) async fn ensure_whisper_model_file(app: &AppHandle, model: WhisperMod
     Ok(())
 }
 
-pub(crate) async fn ensure_llm_model_file(app: &AppHandle, model: llm::LlmModel) -> Result<(), String> {
+pub(crate) async fn ensure_llm_model_file(
+    app: &AppHandle,
+    model: llm::LlmModel,
+) -> Result<(), String> {
     if !model.is_concrete() {
         return Ok(());
     }
@@ -490,7 +501,14 @@ pub(crate) async fn rollback_settings(
         .lock()
         .set_default_stt_language(previous.stt_language_mode());
     state.pipeline.lock().set_auto_learn(previous.auto_learn);
-    state.pipeline.lock().set_auto_edit(previous.auto_edit);
+    state
+        .pipeline
+        .lock()
+        .set_auto_edit_mode(previous.auto_edit_mode);
+    state
+        .pipeline
+        .lock()
+        .set_pause_preset(previous.pause_preset);
 
     if ctx.whisper_invalidated {
         let was_live = invalidate_whisper_engine(state, true);
@@ -498,7 +516,7 @@ pub(crate) async fn rollback_settings(
         ensure_model_inner(app, state).await?;
     }
 
-    if previous.auto_edit {
+    if previous.auto_edit_mode.uses_llm() {
         shutdown_llm_engine(state);
         ensure_llm_model_inner(app, state).await?;
     } else {
@@ -605,7 +623,10 @@ pub(crate) fn is_mic_probe_active(state: &AppState) -> bool {
     state.mic_probe.capture.lock().is_some()
 }
 
-pub(crate) fn register_hotkey_binding(app: &AppHandle, binding: hotkey::HotkeyBinding) -> Result<(), String> {
+pub(crate) fn register_hotkey_binding(
+    app: &AppHandle,
+    binding: hotkey::HotkeyBinding,
+) -> Result<(), String> {
     let state = app.state::<AppState>();
     unregister_current_hotkey(app, state.inner())?;
 
@@ -838,7 +859,10 @@ const MENU_AUTO_EDIT: &str = "auto_edit";
 const MENU_AUTOSTART: &str = "autostart";
 const MENU_QUIT: &str = "quit";
 
-pub(crate) async fn ensure_llm_model_inner(app: &AppHandle, state: &AppState) -> Result<(), String> {
+pub(crate) async fn ensure_llm_model_inner(
+    app: &AppHandle,
+    state: &AppState,
+) -> Result<(), String> {
     if !state.pipeline.lock().auto_edit_enabled() {
         return Ok(());
     }
@@ -922,33 +946,6 @@ pub(crate) async fn ensure_llm_model_inner(app: &AppHandle, state: &AppState) ->
     Ok(())
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 pub(crate) fn apply_autostart(app: &AppHandle, enabled: bool) -> Result<(), String> {
     let autolaunch = app.autolaunch();
     if enabled {
@@ -999,8 +996,6 @@ fn sync_autostart_from_settings(app: &AppHandle) {
     }
 }
 
-
-
 pub(crate) fn stop_mic_probe_inner(app: &AppHandle, state: &AppState) -> Result<(), String> {
     let mut capture_slot = state.mic_probe.capture.lock();
     let was_active = capture_slot.is_some();
@@ -1018,7 +1013,6 @@ pub(crate) fn stop_mic_probe_inner(app: &AppHandle, state: &AppState) -> Result<
     Ok(())
 }
 
-
 pub(crate) async fn wait_for_pipeline_idle_timeout(
     pipeline: &Arc<Mutex<PipelineOrchestrator>>,
     timeout: Duration,
@@ -1033,22 +1027,26 @@ pub(crate) async fn wait_for_pipeline_idle_timeout(
     pipeline.lock().state() == PipelineState::Idle
 }
 
-
-
 fn set_auto_edit_enabled(app: AppHandle, enabled: bool) -> Result<(), String> {
     let state = app.state::<AppState>();
     let mut settings = state.store.load_settings().map_err(|e| e.to_string())?;
-    if settings.auto_edit == enabled {
+    let next_mode = if enabled {
+        crate::store::AutoEditMode::Full
+    } else {
+        crate::store::AutoEditMode::Off
+    };
+    if settings.auto_edit_mode == next_mode {
         sync_tray_menus(&app);
         return Ok(());
     }
 
-    settings.auto_edit = enabled;
+    settings.auto_edit_mode = next_mode;
+    settings.auto_edit = next_mode.uses_llm();
     state
         .store
         .save_settings(&settings)
         .map_err(|e| e.to_string())?;
-    state.pipeline.lock().set_auto_edit(enabled);
+    state.pipeline.lock().set_auto_edit_mode(next_mode);
 
     if enabled {
         let app_clone = app.clone();
@@ -1177,7 +1175,6 @@ pub(crate) async fn ensure_model_inner(app: &AppHandle, state: &AppState) -> Res
     );
     Ok(())
 }
-
 
 fn spawn_deferred_llm_if_needed(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
@@ -1316,7 +1313,6 @@ fn handle_hotkey(app: &AppHandle, shortcut_state: ShortcutState) {
             match action {
                 hotkey::HotkeyAction::NotifyBlocked => {
                     notify_dictation_blocked_by_settings(app, &state);
-                    return;
                 }
                 hotkey::HotkeyAction::StartRecording => {
                     press.shortcut_down = true;
@@ -1358,71 +1354,62 @@ fn handle_hotkey(app: &AppHandle, shortcut_state: ShortcutState) {
                 _ => {}
             }
         }
-        hotkey::HotkeyEvent::Released => {
-            match action {
-                hotkey::HotkeyAction::ResetPressState => {
-                    press.shortcut_down = false;
-                    press.press_start = None;
-                    press.busy_cancel_on_release = false;
+        hotkey::HotkeyEvent::Released => match action {
+            hotkey::HotkeyAction::ResetPressState => {
+                press.shortcut_down = false;
+                press.press_start = None;
+                press.busy_cancel_on_release = false;
+            }
+            hotkey::HotkeyAction::Ignore => {
+                if !press.shortcut_down {
+                    return;
                 }
-                hotkey::HotkeyAction::Ignore => {
-                    if !press.shortcut_down {
-                        return;
-                    }
-                    let cancel_busy = press.busy_cancel_on_release;
-                    let had_start = press.press_start.take().is_some();
-                    press.shortcut_down = false;
-                    press.busy_cancel_on_release = false;
-                    if !had_start
-                        && cancel_busy
-                        && pipeline_state == PipelineState::Transcribing
-                    {
-                        let pipeline = state.pipeline.clone();
-                        drop(press);
-                        pipeline::request_dictation(
-                            app.clone(),
-                            pipeline,
-                            DictationIntent::Cancel,
-                        );
-                    }
-                }
-                hotkey::HotkeyAction::CaptureDeferredToggleIntent { duration } => {
-                    if !press.shortcut_down {
-                        return;
-                    }
-                    press.shortcut_down = false;
-                    press.busy_cancel_on_release = false;
-                    press.press_start.take();
-                    if press.deferred_start_pending {
-                        press.deferred_toggle_intent =
-                            hotkey::is_toggle_tap(press.was_idle_on_press, duration);
-                    }
-                }
-                hotkey::HotkeyAction::CancelTranscribing => {
-                    press.shortcut_down = false;
-                    press.busy_cancel_on_release = false;
-                    press.press_start.take();
+                let cancel_busy = press.busy_cancel_on_release;
+                let had_start = press.press_start.take().is_some();
+                press.shortcut_down = false;
+                press.busy_cancel_on_release = false;
+                if !had_start && cancel_busy && pipeline_state == PipelineState::Transcribing {
                     let pipeline = state.pipeline.clone();
                     drop(press);
                     pipeline::request_dictation(app.clone(), pipeline, DictationIntent::Cancel);
                 }
-                hotkey::HotkeyAction::StopRecording => {
+            }
+            hotkey::HotkeyAction::CaptureDeferredToggleIntent { duration } => {
+                if !press.shortcut_down {
+                    return;
+                }
+                press.shortcut_down = false;
+                press.busy_cancel_on_release = false;
+                press.press_start.take();
+                if press.deferred_start_pending {
+                    press.deferred_toggle_intent =
+                        hotkey::is_toggle_tap(press.was_idle_on_press, duration);
+                }
+            }
+            hotkey::HotkeyAction::CancelTranscribing => {
+                press.shortcut_down = false;
+                press.busy_cancel_on_release = false;
+                press.press_start.take();
+                let pipeline = state.pipeline.clone();
+                drop(press);
+                pipeline::request_dictation(app.clone(), pipeline, DictationIntent::Cancel);
+            }
+            hotkey::HotkeyAction::StopRecording => {
+                press.shortcut_down = false;
+                press.busy_cancel_on_release = false;
+                press.press_start.take();
+                let pipeline = state.pipeline.clone();
+                drop(press);
+                request_dictation(app.clone(), pipeline, DictationIntent::Stop);
+            }
+            _ => {
+                if press.shortcut_down {
                     press.shortcut_down = false;
                     press.busy_cancel_on_release = false;
                     press.press_start.take();
-                    let pipeline = state.pipeline.clone();
-                    drop(press);
-                    request_dictation(app.clone(), pipeline, DictationIntent::Stop);
-                }
-                _ => {
-                    if press.shortcut_down {
-                        press.shortcut_down = false;
-                        press.busy_cancel_on_release = false;
-                        press.press_start.take();
-                    }
                 }
             }
-        }
+        },
     }
 }
 
@@ -1761,18 +1748,11 @@ async fn download_and_store_update(
 
 pub(crate) async fn run_update_download(
     app: AppHandle,
-    store: Arc<Store>,
+    _store: Arc<Store>,
     update: tauri_plugin_updater::Update,
 ) {
-    let settings = match store.load_settings() {
-        Ok(settings) => settings,
-        Err(err) => {
-            eprintln!("auto-update: failed to load settings: {err}");
-            return;
-        }
-    };
-
-    wait_before_app_update_download(&app, &settings).await;
+    let pipeline = Arc::clone(&app.state::<AppState>().pipeline);
+    wait_for_pipeline_idle(&pipeline).await;
 
     let state = app.state::<AppState>();
     let pending_update = Arc::clone(&state.pending_update);
@@ -1826,33 +1806,6 @@ fn spawn_update_check_if_enabled(app: AppHandle, store: Arc<Store>) {
     });
 }
 
-
-async fn wait_before_app_update_download(app: &AppHandle, settings: &AppSettings) {
-    let preload_whisper = app.state::<AppState>().perf_config.lock().preload_whisper;
-    let preload_llm = settings.auto_edit && app.state::<AppState>().perf_config.lock().preload_llm;
-
-    loop {
-        let ready = {
-            let state = app.state::<AppState>();
-            let pipeline_idle = state.pipeline.lock().state() == PipelineState::Idle;
-
-            let whisper_busy = preload_whisper
-                && !state.model_ready.load(Ordering::SeqCst)
-                && state.whisper_engine.lock().is_none();
-            let llm_busy = preload_llm
-                && !state.llm_ready.load(Ordering::SeqCst)
-                && state.llm_engine.lock().is_none();
-
-            pipeline_idle && !whisper_busy && !llm_busy
-        };
-        if ready {
-            return;
-        }
-
-        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-    }
-}
-
 pub(crate) async fn wait_for_pipeline_idle(pipeline: &Arc<Mutex<PipelineOrchestrator>>) {
     loop {
         if pipeline.lock().state() == PipelineState::Idle {
@@ -1861,9 +1814,6 @@ pub(crate) async fn wait_for_pipeline_idle(pipeline: &Arc<Mutex<PipelineOrchestr
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
     }
 }
-
-
-
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -1939,11 +1889,21 @@ pub fn run() {
     }
 
     match store.apply_auto_edit_default() {
-        Ok(enabled) => initial_settings.auto_edit = enabled,
+        Ok(enabled) => {
+            initial_settings.auto_edit = enabled;
+            if enabled {
+                initial_settings.auto_edit_mode = crate::store::AutoEditMode::Full;
+            }
+        }
         Err(err) => eprintln!("failed to apply auto_edit default: {err}"),
     }
 
-    pipeline.lock().set_auto_edit(initial_settings.auto_edit);
+    pipeline
+        .lock()
+        .set_auto_edit_mode(initial_settings.auto_edit_mode);
+    pipeline
+        .lock()
+        .set_pause_preset(initial_settings.pause_preset);
     pipeline.lock().set_auto_learn(initial_settings.auto_learn);
     pipeline
         .lock()
@@ -2054,6 +2014,13 @@ pub fn run() {
         })
         .setup(move |app| {
             let _modules = registered_modules();
+
+            {
+                let app_for_update = app.handle().clone();
+                let state = app.state::<AppState>();
+                spawn_update_check_if_enabled(app_for_update, Arc::clone(&state.store));
+            }
+
             sync_autostart_from_settings(app.handle());
             build_tray(app.handle()).map_err(|e| e.to_string())?;
             sync_tray_menus(app.handle());
@@ -2130,12 +2097,6 @@ pub fn run() {
                         eprintln!("llm model initialization failed: {err}");
                     }
                 });
-            }
-
-            {
-                let app_for_update = app.handle().clone();
-                let state = app.state::<AppState>();
-                spawn_update_check_if_enabled(app_for_update, Arc::clone(&state.store));
             }
 
             Ok(())

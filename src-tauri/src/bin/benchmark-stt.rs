@@ -3,7 +3,12 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use calliop_lib::audio::TARGET_SAMPLE_RATE;
+use calliop_lib::store::AutoEditMode;
 use calliop_lib::stt::{ensure_model_blocking, word_error_rate, WhisperEngine, WhisperModel};
+use calliop_prompt::{
+    join_transcript_segments, join_transcript_segments_for_llm_thresholds,
+    join_transcript_segments_with_pauses_thresholds, post_process_transcript, PausePreset,
+};
 use hound::WavReader;
 use serde::{Deserialize, Serialize};
 
@@ -13,6 +18,8 @@ struct CorpusManifest {
     language: String,
     model: String,
     samples: Vec<CorpusSample>,
+    #[serde(default)]
+    pipeline_cases: Vec<PipelineCase>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -22,6 +29,15 @@ struct CorpusSample {
     wav: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct PipelineCase {
+    id: String,
+    mode: String,
+    preset: String,
+    segments: Vec<(String, u32)>,
+    reference: String,
+}
+
 #[derive(Debug, Serialize)]
 struct SampleResult {
     id: String,
@@ -29,6 +45,14 @@ struct SampleResult {
     hypothesis: String,
     wer: f64,
     latency_ms: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct PipelineResult {
+    id: String,
+    reference: String,
+    hypothesis: String,
+    match_score: f64,
 }
 
 #[derive(Debug, Serialize)]
@@ -45,13 +69,33 @@ struct BenchmarkReport {
     generated_at: String,
 }
 
+#[derive(Debug, Serialize)]
+struct PipelineBenchmarkReport {
+    version: String,
+    corpus_version: String,
+    language: String,
+    platform: String,
+    cases: Vec<PipelineResult>,
+    mean_match_score: f64,
+    generated_at: String,
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let manifest_path = std::env::args()
-        .nth(1)
+    let args: Vec<String> = std::env::args().collect();
+    let manifest_path = args
+        .get(1)
+        .filter(|arg| !arg.starts_with("--"))
+        .cloned()
         .unwrap_or_else(|| "benchmarks/corpus/fr.json".into());
-    let cpu_only = std::env::args().any(|arg| arg == "--cpu");
+    let pipeline_only = args.iter().any(|arg| arg == "--pipeline");
+    let cpu_only = args.iter().any(|arg| arg == "--cpu");
 
     let manifest = load_manifest(&manifest_path)?;
+
+    if pipeline_only {
+        return run_pipeline_benchmark(&manifest, &manifest_path);
+    }
+
     let corpus_dir = Path::new(&manifest_path)
         .parent()
         .ok_or("manifest path has no parent")?;
@@ -126,7 +170,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         mean_latency_ms
     );
 
-    let output = resolve_output_path(&manifest_path);
+    let output = resolve_output_path(&manifest_path, "stt");
     if let Some(parent) = output.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -137,12 +181,97 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn run_pipeline_benchmark(
+    manifest: &CorpusManifest,
+    manifest_path: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!(
+        "Benchmark pipeline quality — corpus {} ({})",
+        manifest.version, manifest.language
+    );
+
+    let mut results = Vec::new();
+    for case in &manifest.pipeline_cases {
+        let hypothesis = run_pipeline_case(case);
+        let match_score = 1.0 - word_error_rate(&case.reference, &hypothesis);
+        println!(
+            "[{}] match {:.1}% — expected {:?} — got {:?}",
+            case.id,
+            match_score * 100.0,
+            case.reference,
+            hypothesis
+        );
+        results.push(PipelineResult {
+            id: case.id.clone(),
+            reference: case.reference.clone(),
+            hypothesis,
+            match_score,
+        });
+    }
+
+    let mean_match_score = if results.is_empty() {
+        0.0
+    } else {
+        results.iter().map(|r| r.match_score).sum::<f64>() / results.len() as f64
+    };
+
+    let report = PipelineBenchmarkReport {
+        version: env!("CARGO_PKG_VERSION").into(),
+        corpus_version: manifest.version.clone(),
+        language: manifest.language.clone(),
+        platform: std::env::consts::OS.into(),
+        cases: results,
+        mean_match_score,
+        generated_at: chrono_lite_now(),
+    };
+
+    println!(
+        "\nSummary: mean match score {:.1}%",
+        mean_match_score * 100.0
+    );
+
+    let output = resolve_output_path(manifest_path, "pipeline");
+    if let Some(parent) = output.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let json = serde_json::to_string_pretty(&report)?;
+    std::fs::write(&output, &json)?;
+    println!("Wrote {}", output.display());
+
+    Ok(())
+}
+
+fn run_pipeline_case(case: &PipelineCase) -> String {
+    let mode = AutoEditMode::parse(&case.mode).unwrap_or(AutoEditMode::Light);
+    let preset = PausePreset::parse(&case.preset).unwrap_or_default();
+    let thresholds = preset.thresholds();
+
+    let joined = if mode.uses_llm() {
+        join_transcript_segments_for_llm_thresholds(&case.segments, &thresholds)
+    } else if mode.uses_pause_punctuation() {
+        join_transcript_segments_with_pauses_thresholds(&case.segments, &thresholds)
+    } else {
+        let text_only: Vec<&str> = case
+            .segments
+            .iter()
+            .map(|(text, _)| text.as_str())
+            .collect();
+        join_transcript_segments(&text_only)
+    };
+
+    if mode.uses_deterministic_cleanup() {
+        post_process_transcript(joined.trim())
+    } else {
+        joined.trim().to_string()
+    }
+}
+
 fn load_manifest(path: &str) -> Result<CorpusManifest, Box<dyn std::error::Error>> {
     let content = std::fs::read_to_string(path)?;
     Ok(serde_json::from_str(&content)?)
 }
 
-fn resolve_output_path(manifest_path: &str) -> PathBuf {
+fn resolve_output_path(manifest_path: &str, kind: &str) -> PathBuf {
     let version = env!("CARGO_PKG_VERSION");
     if let Ok(custom) = std::env::var("BENCHMARK_OUTPUT") {
         return PathBuf::from(custom);
@@ -151,7 +280,7 @@ fn resolve_output_path(manifest_path: &str) -> PathBuf {
     repo_root
         .join("benchmarks")
         .join("results")
-        .join(format!("v{version}.json"))
+        .join(format!("v{version}-{kind}.json"))
 }
 
 fn find_repo_root(manifest_path: &str) -> PathBuf {

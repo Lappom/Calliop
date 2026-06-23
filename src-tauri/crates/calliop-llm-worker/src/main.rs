@@ -240,6 +240,7 @@ impl InferenceEngine {
 
         let reuse_system_kv = tone_cache.tone == Some(tone)
             && tone_cache.system_token_len > 0
+            && tone_cache.system_token_len < full_tokens.len()
             && tone_cache.system_token_len == system_tokens.len()
             && system_prefix_matches;
 
@@ -257,6 +258,23 @@ impl InferenceEngine {
             } else {
                 0
             };
+        }
+
+        if batch.n_tokens() == 0 {
+            ctx.clear_kv_cache();
+            tone_cache.tone = None;
+            tone_cache.system_token_len = 0;
+            self.decode_prompt_tokens(ctx, batch, &full_tokens, 0)?;
+            tone_cache.tone = Some(tone);
+            tone_cache.system_token_len = if system_prefix_matches {
+                system_tokens.len()
+            } else {
+                0
+            };
+        }
+
+        if batch.n_tokens() == 0 {
+            return Err("prompt decode produced empty batch".into());
         }
 
         let max_tokens = (full_tokens.len() as i32 + CLEANUP_MAX_OUTPUT_TOKENS)
@@ -415,10 +433,15 @@ fn serve(model_path: PathBuf, n_gpu_layers: u32) -> Result<(), String> {
                 text: Some(cleaned),
                 error: None,
             }),
-            Err(err) => write_response(&WorkerResponse {
-                text: None,
-                error: Some(err),
-            }),
+            Err(err) => {
+                tone_cache = ToneKvCache::default();
+                let _ = ctx.clear_kv_cache();
+                batch.clear();
+                write_response(&WorkerResponse {
+                    text: None,
+                    error: Some(err),
+                });
+            }
         }
     }
 

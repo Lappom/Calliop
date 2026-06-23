@@ -8,8 +8,8 @@ use thiserror::Error;
 
 pub const TARGET_SAMPLE_RATE: u32 = 16_000;
 pub const AUDIO_BAND_COUNT: usize = 14;
-/// Max spooled 16 kHz samples while the chunk channel is backlogged (~10 s).
-const CHUNK_SPOOL_MAX_SAMPLES: usize = TARGET_SAMPLE_RATE as usize * 10;
+/// Max spooled 16 kHz samples while the chunk channel is backlogged (~30 s).
+const CHUNK_SPOOL_MAX_SAMPLES: usize = TARGET_SAMPLE_RATE as usize * 30;
 
 pub type AudioChunkSender = std::sync::mpsc::SyncSender<Vec<f32>>;
 pub type AudioLevelSender = std::sync::mpsc::SyncSender<AudioLevelSample>;
@@ -99,6 +99,7 @@ fn trim_chunk_spool(spool: &mut Vec<f32>) {
         return;
     }
     let excess = spool.len() - CHUNK_SPOOL_MAX_SAMPLES;
+    eprintln!("audio chunk spool overflow: dropping {excess} oldest samples (backpressure)");
     spool.drain(..excess);
 }
 
@@ -176,10 +177,10 @@ impl StreamingSidecar {
 
         if let Some(level_tx) = &self.level_tx {
             let mut last = self.last_level_emit.lock().expect("level lock");
-            if last.elapsed() >= Duration::from_millis(50) {
-                if level_tx.try_send(compute_audio_level(&delta)).is_ok() {
-                    *last = Instant::now();
-                }
+            if last.elapsed() >= Duration::from_millis(50)
+                && level_tx.try_send(compute_audio_level(&delta)).is_ok()
+            {
+                *last = Instant::now();
             }
         }
 

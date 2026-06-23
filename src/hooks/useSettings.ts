@@ -15,8 +15,13 @@ export type WhisperModelId =
 export type LlmModelId = "auto" | "qwen3.5-0.8b" | "qwen3.5-2b" | "qwen3.5-4b";
 export type InferenceBackendId = "auto" | "cpu";
 
+export type AutoEditModeId = "off" | "light" | "full";
+export type PausePresetId = "fast" | "natural" | "formal";
+
 export interface AppSettings {
   autoEdit: boolean;
+  autoEditMode: AutoEditModeId;
+  pausePreset: PausePresetId;
   autoLearn: boolean;
   autoUpdate: boolean;
   sttLanguage: SttLanguageCode;
@@ -58,6 +63,8 @@ export interface InferenceInfo {
 
 interface SettingsPayload {
   auto_edit: boolean;
+  auto_edit_mode: string;
+  pause_preset: string;
   auto_learn: boolean;
   auto_update: boolean;
   stt_language: string;
@@ -132,9 +139,25 @@ function parseInferenceBackend(value: string): InferenceBackendId {
   return value === "cpu" ? "cpu" : "auto";
 }
 
+function parseAutoEditMode(value: string): AutoEditModeId {
+  if (value === "off" || value === "light" || value === "full") {
+    return value;
+  }
+  return "full";
+}
+
+function parsePausePreset(value: string): PausePresetId {
+  if (value === "fast" || value === "natural" || value === "formal") {
+    return value;
+  }
+  return "natural";
+}
+
 function toPayload(settings: AppSettings): SettingsPayload {
   return {
-    auto_edit: settings.autoEdit,
+    auto_edit: settings.autoEditMode === "full",
+    auto_edit_mode: settings.autoEditMode,
+    pause_preset: settings.pausePreset,
     auto_learn: settings.autoLearn,
     auto_update: settings.autoUpdate,
     stt_language: settings.sttLanguage,
@@ -155,7 +178,11 @@ function fromPayload(payload: SettingsPayload): AppSettings {
       ? payload.stt_language
       : "fr";
   return {
-    autoEdit: payload.auto_edit,
+    autoEdit: payload.auto_edit_mode === "full",
+    autoEditMode: parseAutoEditMode(
+      payload.auto_edit_mode ?? (payload.auto_edit ? "full" : "off"),
+    ),
+    pausePreset: parsePausePreset(payload.pause_preset ?? "natural"),
     autoLearn: payload.auto_learn,
     autoUpdate: payload.auto_update,
     sttLanguage,
@@ -172,6 +199,8 @@ function fromPayload(payload: SettingsPayload): AppSettings {
 
 export const DEFAULT_SETTINGS: AppSettings = {
   autoEdit: true,
+  autoEditMode: "full",
+  pausePreset: "natural",
   autoLearn: true,
   autoUpdate: true,
   sttLanguage: "fr",
@@ -354,9 +383,10 @@ export function useSettings() {
       setSettings(next);
 
       try {
-        const autoEditChanged = next.autoEdit !== previousSettings.autoEdit;
+        const autoEditChanged =
+          next.autoEditMode !== previousSettings.autoEditMode;
 
-        if (autoEditChanged && !next.autoEdit) {
+        if (autoEditChanged && next.autoEditMode !== "full") {
           llmReadyRef.current = false;
           llmProgressRef.current = null;
           setLlmReady(false);
@@ -432,7 +462,29 @@ export function useSettings() {
 
   const setAutoEdit = useCallback(
     async (enabled: boolean) => {
-      await saveSettings({ ...settingsRef.current, autoEdit: enabled });
+      await saveSettings({
+        ...settingsRef.current,
+        autoEdit: enabled,
+        autoEditMode: enabled ? "full" : "off",
+      });
+    },
+    [saveSettings],
+  );
+
+  const setAutoEditMode = useCallback(
+    async (mode: AutoEditModeId) => {
+      await saveSettings({
+        ...settingsRef.current,
+        autoEditMode: mode,
+        autoEdit: mode === "full",
+      });
+    },
+    [saveSettings],
+  );
+
+  const setPausePreset = useCallback(
+    async (preset: PausePresetId) => {
+      await saveSettings({ ...settingsRef.current, pausePreset: preset });
     },
     [saveSettings],
   );
@@ -595,6 +647,8 @@ export function useSettings() {
     autostartEnabled,
     formatBytes,
     setAutoEdit,
+    setAutoEditMode,
+    setPausePreset,
     setAutoLearn,
     setAutoUpdate,
     setSttLanguage,

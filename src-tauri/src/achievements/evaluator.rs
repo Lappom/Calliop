@@ -4,9 +4,7 @@ use chrono::{Datelike, Local, Timelike, Weekday};
 use rusqlite::params;
 use tauri::{AppHandle, Emitter};
 
-use crate::store::{
-    dictation_wpm, estimate_time_saved_minutes, Store, StoreError,
-};
+use crate::store::{dictation_wpm, estimate_time_saved_minutes, Store, StoreError};
 
 use super::conditions::Condition;
 use super::definitions::{achievement_by_id, ALL_ACHIEVEMENTS};
@@ -112,10 +110,8 @@ impl AchievementEngine {
     pub fn on_cancel(&self, app: &AppHandle) -> Result<(), StoreError> {
         let streak = self.store.increment_cancel_streak()?;
         let mut newly = self.evaluate_all(false)?;
-        if streak >= 3 {
-            if self.store.unlock_achievement("triple_no", false)? {
-                newly.push("triple_no".to_string());
-            }
+        if streak >= 3 && self.store.unlock_achievement("triple_no", false)? {
+            newly.push("triple_no".to_string());
         }
         self.emit_unlocks(app, newly);
         Ok(())
@@ -149,9 +145,8 @@ impl AchievementEngine {
 
     pub fn get_summary(&self) -> Result<AchievementsSummary, StoreError> {
         let stats = self.load_stats()?;
-        self.store.build_achievements_summary(|condition| {
-            progress_for_condition(condition, &stats, None)
-        })
+        self.store
+            .build_achievements_summary(|condition| progress_for_condition(condition, &stats, None))
     }
 
     fn evaluate_all(&self, silent: bool) -> Result<Vec<String>, StoreError> {
@@ -169,10 +164,10 @@ impl AchievementEngine {
             if self.store.is_achievement_unlocked(def.id)? {
                 continue;
             }
-            if condition_met(&def.condition, &stats, event) {
-                if self.store.unlock_achievement(def.id, silent)? {
-                    newly_unlocked.push(def.id.to_string());
-                }
+            if condition_met(&def.condition, &stats, event)
+                && self.store.unlock_achievement(def.id, silent)?
+            {
+                newly_unlocked.push(def.id.to_string());
             }
         }
         Ok(newly_unlocked)
@@ -208,7 +203,11 @@ impl AchievementEngine {
         let llm_skipped_event = self.store.has_llm_skipped_event()?;
         let polyglot_today = self.store.has_polyglot_today()?;
 
-        let conn = self.store.connection().lock().expect("store mutex poisoned");
+        let conn = self
+            .store
+            .connection()
+            .lock()
+            .expect("store mutex poisoned");
 
         let manual_dictionary_words: i64 = conn
             .query_row(
@@ -224,9 +223,11 @@ impl AchievementEngine {
             .query_row("SELECT COUNT(*) FROM app_context_rules", [], |r| r.get(0))
             .unwrap_or(0);
         let max_single_word_count: i64 = conn
-            .query_row("SELECT COALESCE(MAX(word_count), 0) FROM dictations", [], |r| {
-                r.get(0)
-            })
+            .query_row(
+                "SELECT COALESCE(MAX(word_count), 0) FROM dictations",
+                [],
+                |r| r.get(0),
+            )
             .unwrap_or(0);
         let min_total_ms: Option<i64> = conn
             .query_row(
@@ -355,14 +356,12 @@ fn hour_range_exists(
     start_hour: u8,
     end_hour: u8,
 ) -> Result<bool, StoreError> {
-    let sql = format!(
-        "SELECT 1 FROM dictations
+    let sql = "SELECT 1 FROM dictations
          WHERE CAST(strftime('%H', created_at, 'localtime') AS INTEGER) >= ?1
            AND CAST(strftime('%H', created_at, 'localtime') AS INTEGER) < ?2
-         LIMIT 1"
-    );
+         LIMIT 1";
     Ok(conn
-        .query_row(&sql, params![start_hour, end_hour], |_| Ok(()))
+        .query_row(sql, params![start_hour, end_hour], |_| Ok(()))
         .is_ok())
 }
 
@@ -377,11 +376,17 @@ fn count_total_active_days(conn: &rusqlite::Connection) -> Result<i64, StoreErro
 
 fn exe_matches_list(exe: &str, apps: &[&str]) -> bool {
     let lower = exe.to_ascii_lowercase();
-    apps.iter()
-        .any(|app| lower == app.to_ascii_lowercase() || lower.ends_with(&format!("\\{}", app.to_ascii_lowercase())))
+    apps.iter().any(|app| {
+        lower == app.to_ascii_lowercase()
+            || lower.ends_with(&format!("\\{}", app.to_ascii_lowercase()))
+    })
 }
 
-fn condition_met(condition: &Condition, stats: &AggregateStats, event: Option<&DictationEvent>) -> bool {
+fn condition_met(
+    condition: &Condition,
+    stats: &AggregateStats,
+    event: Option<&DictationEvent>,
+) -> bool {
     match condition {
         Condition::TotalDictations(threshold) => stats.total_dictations >= *threshold as i64,
         Condition::TotalWords(threshold) => stats.total_words >= *threshold as i64,
@@ -401,10 +406,7 @@ fn condition_met(condition: &Condition, stats: &AggregateStats, event: Option<&D
                     return exe_matches_list(exe, apps);
                 }
             }
-            stats
-                .app_exes
-                .iter()
-                .any(|exe| exe_matches_list(exe, apps))
+            stats.app_exes.iter().any(|exe| exe_matches_list(exe, apps))
         }
         Condition::DictationHourRange(start, end) => {
             if let Some(event) = event {
@@ -436,12 +438,18 @@ fn condition_met(condition: &Condition, stats: &AggregateStats, event: Option<&D
         Condition::TimeSavedMinutes(threshold) => stats.time_saved_minutes >= *threshold as i64,
         Condition::DictationsInSameApp(threshold) => stats.max_app_dictations >= *threshold as i64,
         Condition::DistinctApps(threshold) => stats.distinct_apps >= *threshold as i64,
-        Condition::TextContains(needle) => stats.has_calliop_text
-            || event.is_some_and(|e| e.text.to_ascii_lowercase().contains(&needle.to_ascii_lowercase())),
-        Condition::WeekendDictation => stats.has_weekend
-            || event.is_some_and(|e| {
-                matches!(e.local_weekday(), Weekday::Sat | Weekday::Sun)
-            }),
+        Condition::TextContains(needle) => {
+            stats.has_calliop_text
+                || event.is_some_and(|e| {
+                    e.text
+                        .to_ascii_lowercase()
+                        .contains(&needle.to_ascii_lowercase())
+                })
+        }
+        Condition::WeekendDictation => {
+            stats.has_weekend
+                || event.is_some_and(|e| matches!(e.local_weekday(), Weekday::Sat | Weekday::Sun))
+        }
         Condition::AudioDurationMsMin(threshold) => {
             stats.has_long_audio || event.is_some_and(|e| e.audio_duration_ms >= *threshold)
         }
@@ -450,7 +458,7 @@ fn condition_met(condition: &Condition, stats: &AggregateStats, event: Option<&D
         Condition::PolyglotSameDay => stats.polyglot_today,
         Condition::LlmSkippedDictation => stats.llm_skipped_event,
         Condition::DictationsToday(threshold) => stats.dictations_today >= *threshold as i64,
-        Condition::WordsToday(_threshold) => false,
+        Condition::WordsToday(threshold) => stats.words_today >= *threshold as i64,
     }
 }
 
@@ -498,11 +506,7 @@ mod tests {
             total_dictations: 3,
             ..AggregateStats::default()
         };
-        assert!(condition_met(
-            &Condition::TotalDictations(1),
-            &stats,
-            None
-        ));
+        assert!(condition_met(&Condition::TotalDictations(1), &stats, None));
         assert!(!condition_met(
             &Condition::TotalDictations(10),
             &stats,

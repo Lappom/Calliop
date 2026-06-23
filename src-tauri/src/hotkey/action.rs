@@ -39,10 +39,14 @@ pub enum HotkeyAction {
     StartRecording,
     StopRecording,
     CancelTranscribing,
-    EmitBusy { cancelable: bool },
+    EmitBusy {
+        cancelable: bool,
+    },
     NotifyBlocked,
     /// Capture toggle intent during deferred model load (release only).
-    CaptureDeferredToggleIntent { duration: Duration },
+    CaptureDeferredToggleIntent {
+        duration: Duration,
+    },
 }
 
 /// Pure decision function for dictation hotkey handling.
@@ -67,13 +71,7 @@ pub fn decide_action(
                 return HotkeyAction::NotifyBlocked;
             }
             match ctx.pipeline_state {
-                PipelineState::Idle => {
-                    if ctx.whisper_live {
-                        HotkeyAction::StartRecording
-                    } else {
-                        HotkeyAction::StartRecording
-                    }
-                }
+                PipelineState::Idle => HotkeyAction::StartRecording,
                 PipelineState::Recording => HotkeyAction::StopRecording,
                 PipelineState::Transcribing => HotkeyAction::EmitBusy { cancelable: true },
                 PipelineState::Injecting => HotkeyAction::EmitBusy { cancelable: false },
@@ -94,8 +92,7 @@ pub fn decide_action(
                 .map(|start| start.elapsed())
                 .unwrap_or_default();
 
-            if press.busy_cancel_on_release && ctx.pipeline_state == PipelineState::Transcribing
-            {
+            if press.busy_cancel_on_release && ctx.pipeline_state == PipelineState::Transcribing {
                 return HotkeyAction::CancelTranscribing;
             }
 
