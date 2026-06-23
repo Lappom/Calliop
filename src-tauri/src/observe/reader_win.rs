@@ -10,7 +10,7 @@ thread_local! {
 }
 
 fn focused_in_own_process(element: &UIElement) -> bool {
-    let own_pid = std::process::id() as i32;
+    let own_pid = std::process::id();
     let mut current = element.clone();
     for _ in 0..8 {
         if current.get_process_id().ok() == Some(own_pid) {

@@ -90,18 +90,18 @@ fn emit_on_main_thread(app: &AppHandle, event: &'static str, payload: Option<Str
 unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     let hook = match current_hook() {
         Some(hook) => hook,
-        None => return CallNextHookEx(HHOOK::default(), code, wparam, lparam),
+        None => return CallNextHookEx(None, code, wparam, lparam),
     };
 
     if code < 0 {
-        return CallNextHookEx(hook, code, wparam, lparam);
+        return CallNextHookEx(Some(hook), code, wparam, lparam);
     }
 
     let msg = wparam.0 as u32;
     let is_key_down = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
     let is_key_up = msg == WM_KEYUP || msg == WM_SYSKEYUP;
     if !is_key_down && !is_key_up {
-        return CallNextHookEx(hook, code, wparam, lparam);
+        return CallNextHookEx(Some(hook), code, wparam, lparam);
     }
 
     let kb = *(lparam.0 as *const KBDLLHOOKSTRUCT);
@@ -123,16 +123,16 @@ unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARA
             }
             MODIFIERS.set_vk(vk, false);
         }
-        return CallNextHookEx(hook, code, wparam, lparam);
+        return CallNextHookEx(Some(hook), code, wparam, lparam);
     }
 
     if kb.flags.contains(LLKHF_UP) || kb.flags.0 & PREVIOUS_KEY_DOWN != 0 {
-        return CallNextHookEx(hook, code, wparam, lparam);
+        return CallNextHookEx(Some(hook), code, wparam, lparam);
     }
 
     if is_modifier_vk(vk) {
         MODIFIERS.set_vk(vk, true);
-        return CallNextHookEx(hook, code, wparam, lparam);
+        return CallNextHookEx(Some(hook), code, wparam, lparam);
     }
 
     let Some(app) = CAPTURE
@@ -140,12 +140,12 @@ unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARA
         .ok()
         .and_then(|guard| guard.as_ref().map(|session| session.app.clone()))
     else {
-        return CallNextHookEx(hook, code, wparam, lparam);
+        return CallNextHookEx(Some(hook), code, wparam, lparam);
     };
 
     if vk == VK_ESCAPE {
         emit_on_main_thread(&app, "hotkey-capture-cancelled", None);
-        return CallNextHookEx(hook, code, wparam, lparam);
+        return CallNextHookEx(Some(hook), code, wparam, lparam);
     }
 
     if let Some(hotkey) = compose_hotkey_from_vk(vk) {
@@ -156,7 +156,7 @@ unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARA
         }
     }
 
-    CallNextHookEx(hook, code, wparam, lparam)
+    CallNextHookEx(Some(hook), code, wparam, lparam)
 }
 
 fn compose_hotkey_from_vk(vk: VIRTUAL_KEY) -> Option<String> {
