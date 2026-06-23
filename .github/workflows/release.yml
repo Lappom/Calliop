@@ -24,11 +24,11 @@ jobs:
     env:
       CMAKE_OBJECT_PATH_MAX: "1024"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: pnpm
@@ -37,7 +37,7 @@ jobs:
 
       - name: Cache Vulkan SDK (Windows)
         if: matrix.platform == 'windows-latest'
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         id: vulkan_sdk
         with:
           path: C:\VulkanSDK
