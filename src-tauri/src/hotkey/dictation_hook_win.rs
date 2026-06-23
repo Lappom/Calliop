@@ -99,34 +99,34 @@ fn hook_app() -> Option<AppHandle> {
 unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     let hook = match current_hook() {
         Some(hook) => hook,
-        None => return CallNextHookEx(HHOOK::default(), code, wparam, lparam),
+        None => return CallNextHookEx(None, code, wparam, lparam),
     };
 
     if code < 0 {
-        return CallNextHookEx(hook, code, wparam, lparam);
+        return CallNextHookEx(Some(hook), code, wparam, lparam);
     }
 
     let msg = wparam.0 as u32;
     let is_key_down = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
     let is_key_up = msg == WM_KEYUP || msg == WM_SYSKEYUP;
     if !is_key_down && !is_key_up {
-        return CallNextHookEx(hook, code, wparam, lparam);
+        return CallNextHookEx(Some(hook), code, wparam, lparam);
     }
 
     let kb = *(lparam.0 as *const KBDLLHOOKSTRUCT);
     if is_key_down && (kb.flags.contains(LLKHF_UP) || kb.flags.0 & PREVIOUS_KEY_DOWN != 0) {
-        return CallNextHookEx(hook, code, wparam, lparam);
+        return CallNextHookEx(Some(hook), code, wparam, lparam);
     }
 
     let vk = VIRTUAL_KEY(kb.vkCode as u16);
     let Some(required) = required_modifiers() else {
-        return CallNextHookEx(hook, code, wparam, lparam);
+        return CallNextHookEx(Some(hook), code, wparam, lparam);
     };
 
     if is_modifier_vk(vk) {
         MODIFIERS.set_vk(vk, is_key_down);
     } else if is_key_down {
-        return CallNextHookEx(hook, code, wparam, lparam);
+        return CallNextHookEx(Some(hook), code, wparam, lparam);
     }
 
     let satisfied = MODIFIERS.required_modifiers_satisfied(required);
@@ -144,5 +144,5 @@ unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARA
         }
     }
 
-    CallNextHookEx(hook, code, wparam, lparam)
+    CallNextHookEx(Some(hook), code, wparam, lparam)
 }
