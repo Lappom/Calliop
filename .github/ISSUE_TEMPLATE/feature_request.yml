@@ -1,0 +1,40 @@
+name: Feature request
+description: Proposer une amélioration ou une nouvelle fonctionnalité
+title: "[feat] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Consultez [PLAN.md](https://github.com/Lappom/Calliop/blob/main/PLAN.md) pour la roadmap. Les features déjà planifiées n'ont pas besoin d'une issue séparée sauf pour préciser un cas d'usage.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problème ou besoin
+      description: Quel cas d'usage cette feature résout-elle ?
+      placeholder: "En tant qu'utilisateur, je voudrais..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Solution proposée
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives envisagées
+
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: Contraintes Calliop
+      options:
+        - label: La feature doit rester 100 % locale (pas de cloud obligatoire)
+          required: true
+        - label: J'ai lu CONTRIBUTING.md et je peux proposer une PR
+          required: false

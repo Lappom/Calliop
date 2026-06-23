@@ -1,0 +1,70 @@
+name: Bug report
+description: Signaler un comportement incorrect
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Merci de vérifier les [releases](https://github.com/Lappom/Calliop/releases) et les issues ouvertes avant de créer un doublon.
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Plateforme
+      options:
+        - Windows 10
+        - Windows 11
+        - macOS (expérimental)
+        - Linux (expérimental)
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version Calliop
+      description: "Ex. v0.1.8 — visible dans Paramètres ou la release GitHub"
+      placeholder: v0.1.8
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Étapes pour reproduire
+      placeholder: |
+        1. Lancer Calliop
+        2. Appuyer sur Alt+Space
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Comportement attendu
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Comportement observé
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / contexte
+      description: Sortie console, `%APPDATA%\com.calliop.app\logs` si pertinent
+      render: shell
+
+  - type: checkboxes
+    id: offline
+    attributes:
+      label: Contexte
+      options:
+        - label: Le bug survient hors ligne (sans réseau)
+          required: false

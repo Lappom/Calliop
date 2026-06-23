@@ -1,0 +1,40 @@
+---
+description: Git branch strategy and PR conventions for Calliop
+alwaysApply: false
+---
+
+# Git workflow
+
+## Branches
+
+- **Base branch:** `main` only — no `develop`
+- **Naming:** `feature/`, `fix/`, `chore/`, `docs/` + short kebab-case slug
+- **One branch = one PR** with a clear scope
+
+## Before opening a PR
+
+```powershell
+git fetch origin
+git rebase origin/main   # or merge origin/main
+pnpm typecheck; pnpm lint
+cd src-tauri; cargo fmt --check; cargo clippy --all-targets -- -D warnings; cargo test
+```
+
+## Commits
+
+- Imperative subject, optional scope: `feat(dictation): add pause presets`
+- Types: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`, `ci`
+- Do not commit secrets (`.tauri/calliop.key`, `.env`)
+
+## Releases
+
+- Tag on `main`: `v0.1.x` triggers release workflow
+- Version bumps in `package.json`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`, `releases/v{x}.md`
+
+## Protected `main`
+
+- Merge via PR (admin bypass allowed for maintainers)
+- Required CI: `frontend`, `rust`
+- No force-push or branch deletion on `main`
+
+Full details: `docs/branch-strategy.md`

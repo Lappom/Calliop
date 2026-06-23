@@ -27,7 +27,9 @@
   <a href="https://github.com/Lappom/Calliop/releases">Download</a> ·
   <a href="docs/user-guide.md">User guide</a> ·
   <a href="docs/installation.md">Installation</a> ·
-  <a href="CONTRIBUTING.md">Contributing</a>
+  <a href="CONTRIBUTING.md">Contributing</a> ·
+  <a href="CODE_OF_CONDUCT.md">Code of conduct</a> ·
+  <a href="SECURITY.md">Security</a>
 </p>
 
 ---

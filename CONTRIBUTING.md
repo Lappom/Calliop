@@ -4,10 +4,13 @@ Merci de votre intérêt pour Calliop. Ce projet vise une dictée vocale **100 %
 
 ## Workflow
 
-1. Créer une branche depuis `main` : `feature/nom-court`
-2. Une feature = une branche = une session de dev
+1. Créer une branche depuis `main` : `feature/nom-court`, `fix/…`, `chore/…` ou `docs/…` (voir [docs/branch-strategy.md](docs/branch-strategy.md))
+2. Une feature = une branche = une PR
 3. Surligner une section dans [PLAN.md](PLAN.md) (ex. `### Phase 1 — …`) puis lancer **`/implement`** dans Cursor
-4. Ouvrir une pull request avec une description claire et un plan de test
+4. Ouvrir une pull request — le template GitHub guide le plan de test
+5. Supprimer la branche après merge
+
+`main` est protégée : merge via PR avec CI verte (`frontend`, `rust`).
 
 ## Environnement de dev
 

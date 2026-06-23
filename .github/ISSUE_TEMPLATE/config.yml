@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Guide utilisateur
+    url: https://github.com/Lappom/Calliop/blob/main/docs/user-guide.md
+    about: Documentation d'utilisation de Calliop
+  - name: Contribuer
+    url: https://github.com/Lappom/Calliop/blob/main/CONTRIBUTING.md
+    about: Workflow de développement et conventions
