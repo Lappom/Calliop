@@ -19,7 +19,6 @@ use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::model::params::LlamaModelParams;
 use llama_cpp_2::model::{AddBos, LlamaChatMessage, LlamaChatTemplate, LlamaModel};
-use llama_cpp_2::openai::OpenAIChatTemplateParams;
 use llama_cpp_2::sampling::LlamaSampler;
 use llama_cpp_2::token::LlamaToken;
 use serde::{Deserialize, Serialize};
@@ -132,40 +131,6 @@ impl InferenceEngine {
         messages: &[(&str, &str)],
         add_generation_prompt: bool,
     ) -> Result<String, String> {
-        let payload: Vec<serde_json::Value> = messages
-            .iter()
-            .map(|(role, content)| {
-                serde_json::json!({
-                    "role": role,
-                    "content": content,
-                })
-            })
-            .collect();
-        let messages_json = serde_json::to_string(&payload).map_err(|err| err.to_string())?;
-        let params = OpenAIChatTemplateParams {
-            messages_json: &messages_json,
-            tools_json: None,
-            tool_choice: None,
-            json_schema: None,
-            grammar: None,
-            reasoning_format: None,
-            chat_template_kwargs: Some(r#"{"enable_thinking":false}"#),
-            add_generation_prompt,
-            use_jinja: true,
-            parallel_tool_calls: false,
-            enable_thinking: false,
-            add_bos: false,
-            add_eos: false,
-            parse_tool_calls: false,
-        };
-
-        if let Ok(result) = self
-            .model
-            .apply_chat_template_oaicompat(&self.chat_template, &params)
-        {
-            return Ok(result.prompt);
-        }
-
         let chat_messages: Vec<LlamaChatMessage> = messages
             .iter()
             .map(|(role, content)| {
